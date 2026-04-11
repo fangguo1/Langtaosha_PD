@@ -1,0 +1,172 @@
+{
+  "work_id": "W019b73d5-6d7d-7279-a7ef-362259b88735",
+  "default_info": {
+    "title": "Activity of lavandino essential oil against non-tubercular opportunistic rapid grown mycobacteria.",
+    "abstract": "Four samples of lavandino essential oil were investigated for their antimycobacterial activity, and were found to be very effective against some strains of non-tubercolar Mycobacteria (NTM). The mechanism of this effect is discussed.",
+    "authors": [
+      {
+        "sequence": 1,
+        "name": "G Gabbrielli",
+        "author_id": null,
+        "affiliation": "Pharmaco-biological Department, University of Messina."
+      },
+      {
+        "sequence": 2,
+        "name": "F Loggini",
+        "author_id": null,
+        "affiliation": null
+      },
+      {
+        "sequence": 3,
+        "name": "P L Cioni",
+        "author_id": null,
+        "affiliation": null
+      },
+      {
+        "sequence": 4,
+        "name": "B Giannaccini",
+        "author_id": null,
+        "affiliation": null
+      },
+      {
+        "sequence": 5,
+        "name": "E Mancuso",
+        "author_id": null,
+        "affiliation": null
+      }
+    ],
+    "identifiers": {
+      "arxiv": null,
+      "doi": "10.1016/s0031-6989(88)80836-1",
+      "semantic_scholar": null,
+      "pubmed": "3247349"
+    },
+    "primary_category": null,
+    "categories": [],
+    "year": 1988,
+    "submitted_date": null,
+    "updated_date": "2019-09-19",
+    "is_preprint": false,
+    "is_published": true,
+    "pub_info": {
+      "venue_name": "Pharmacological research communications",
+      "venue_type": "journal",
+      "publish_time": "1988-12",
+      "presentation_type": null
+    },
+    "pdf_url": null,
+    "source_url": "https://pubmed.ncbi.nlm.nih.gov/3247349/"
+  },
+  "additional_info": {
+    "medline_citation": {
+      "status": "MEDLINE",
+      "indexing_method": "Manual",
+      "owner": "NLM"
+    },
+    "pub_model": "Print",
+    "date_completed": "1989-06-14",
+    "date_revised": "2019-09-19",
+    "journal_details": {
+      "issn_print": "0031-6989",
+      "iso_abbreviation": "Pharmacol Res Commun",
+      "medline_ta": "Pharmacol Res Commun",
+      "nlm_unique_id": "0236354",
+      "country": "United States",
+      "issn_linking": "0031-6989",
+      "volume": "20 Suppl 5",
+      "issue": null,
+      "cited_medium": "Print",
+      "pub_date_raw": {
+        "year": 1988,
+        "month": 12,
+        "day": null,
+        "medline_date": null
+      }
+    },
+    "pagination": "37-40",
+    "language": [
+      "eng"
+    ],
+    "publication_types": [
+      {
+        "ui": "D016428",
+        "name": "Journal Article"
+      }
+    ],
+    "chemical_list": [
+      {
+        "registry_number": "0",
+        "name": "Oils, Volatile",
+        "ui": "D009822"
+      }
+    ],
+    "mesh_headings": [
+      {
+        "descriptor_name": "Drug Evaluation, Preclinical",
+        "descriptor_ui": "D004353",
+        "descriptor_major_topic": "N",
+        "qualifiers": []
+      },
+      {
+        "descriptor_name": "Mycobacterium",
+        "descriptor_ui": "D009161",
+        "descriptor_major_topic": "N",
+        "qualifiers": [
+          {
+            "name": "drug effects",
+            "ui": "Q000187",
+            "major_topic": "Y"
+          }
+        ]
+      },
+      {
+        "descriptor_name": "Oils, Volatile",
+        "descriptor_ui": "D009822",
+        "descriptor_major_topic": "N",
+        "qualifiers": [
+          {
+            "name": "pharmacology",
+            "ui": "Q000494",
+            "major_topic": "Y"
+          }
+        ]
+      },
+      {
+        "descriptor_name": "Plants, Medicinal",
+        "descriptor_ui": "D010946",
+        "descriptor_major_topic": "Y",
+        "qualifiers": []
+      }
+    ],
+    "citation_subset": "IM",
+    "article_ids": [
+      {
+        "type": "pubmed",
+        "id": "3247349"
+      },
+      {
+        "type": "doi",
+        "id": "10.1016/s0031-6989(88)80836-1"
+      }
+    ],
+    "history": [
+      {
+        "status": "pubmed",
+        "date": "1988-12-01",
+        "time": null
+      },
+      {
+        "status": "medline",
+        "date": "1988-12-01",
+        "time": "00:01"
+      },
+      {
+        "status": "entrez",
+        "date": "1988-12-01",
+        "time": "00:00"
+      }
+    ],
+    "publication_status": "ppublish",
+    "author_list_complete": "Y"
+  }
+}

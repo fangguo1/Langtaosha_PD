@@ -1,0 +1,40 @@
+# PD_TEST 项目配置文件示例
+# 复制此文件为 config.yaml 并填入实际的配置值
+# 注意：config.yaml 包含敏感信息，不应提交到版本控制系统
+
+# 数据库配置
+# 注意：在存储服务器上运行时，使用 localhost 而不是 IP 地址
+# 这样可以避免 pg_hba.conf 的访问控制问题
+metadata_db:
+  host: localhost  # 在服务器本身上运行时使用 localhost
+  name: pubmed_database_test
+  user: wangyuanshi
+  port: 5432
+  password: "123456"
+
+
+# 向量数据库配置（可选）
+# 注意：这些键会被自动映射为相应的环境变量
+vector_db:
+  db: /home/wangyuanshi/pubmed_database/pubmed_vector_db_test_mini_multi_shard  # 映射为 VECTOR_DB_PATH
+  gritlm_model: GritLM/GritLM-7B # 映射为 GRITLM_MODEL_PATH，本地模型路径，例如：/path/to/GritLM-7B，null 表示使用默认缓存路径
+  gritlm_model_name: GritLM/GritLM-7B  # 映射为 GRITLM_MODEL_NAME
+  hf_home: null  # 映射为 HF_HOME，HuggingFace 缓存目录，null 表示使用默认路径
+
+
+# 存储路径配置
+# 注意：这些键会被自动映射为 JSON_STORAGE_PATH, PDF_STORAGE_PATH 等环境变量
+storage:
+  json: /home/wangyuanshi/pd_test_gf_10.0.1.226/data/json      # 映射为 JSON_STORAGE_PATH
+  pdf: /home/wangyuanshi/pd_test_gf_10.0.1.226/data/pdf        # 映射为 PDF_STORAGE_PATH
+  html: /home/wangyuanshi/pd_test_gf_10.0.1.226/data/html      # 映射为 HTML_STORAGE_PATH
+  images: /home/wangyuanshi/pd_test_gf_10.0.1.226/images  # 映射为 IMAGE_STORAGE_PATH
+
+
+
+# SSH 配置（用于文件传输）
+ssh:
+  user: wangyuanshi
+  host: 10.0.4.7
+  port: 22
+

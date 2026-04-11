@@ -1,0 +1,164 @@
+{
+  "work_id": "W019b73d5-effe-7d89-9270-7166541a3753",
+  "default_info": {
+    "title": "Effects of sample preparation on cyclosporin G (NVA2-cyclosporin) concentration.",
+    "abstract": null,
+    "authors": [
+      {
+        "sequence": 1,
+        "name": "R W Yatscoff",
+        "author_id": null,
+        "affiliation": null
+      },
+      {
+        "sequence": 2,
+        "name": "J R Jeffrey",
+        "author_id": null,
+        "affiliation": null
+      }
+    ],
+    "identifiers": {
+      "arxiv": null,
+      "doi": null,
+      "semantic_scholar": null,
+      "pubmed": "3297425"
+    },
+    "primary_category": null,
+    "categories": [],
+    "year": 1987,
+    "submitted_date": null,
+    "updated_date": "2019-07-22",
+    "is_preprint": false,
+    "is_published": true,
+    "pub_info": {
+      "venue_name": "Clinical chemistry",
+      "venue_type": "journal",
+      "publish_time": "1987-07",
+      "presentation_type": null
+    },
+    "pdf_url": null,
+    "source_url": "https://pubmed.ncbi.nlm.nih.gov/3297425/"
+  },
+  "additional_info": {
+    "medline_citation": {
+      "status": "MEDLINE",
+      "indexing_method": "Manual",
+      "owner": "NLM"
+    },
+    "pub_model": "Print",
+    "date_completed": "1987-08-17",
+    "date_revised": "2019-07-22",
+    "journal_details": {
+      "issn_print": "0009-9147",
+      "iso_abbreviation": "Clin Chem",
+      "medline_ta": "Clin Chem",
+      "nlm_unique_id": "9421549",
+      "country": "England",
+      "issn_linking": "0009-9147",
+      "volume": "33",
+      "issue": "7",
+      "cited_medium": "Print",
+      "pub_date_raw": {
+        "year": 1987,
+        "month": 7,
+        "day": null,
+        "medline_date": null
+      }
+    },
+    "pagination": "1257",
+    "language": [
+      "eng"
+    ],
+    "publication_types": [
+      {
+        "ui": "D003160",
+        "name": "Comparative Study"
+      },
+      {
+        "ui": "D016428",
+        "name": "Journal Article"
+      }
+    ],
+    "chemical_list": [
+      {
+        "registry_number": "0",
+        "name": "Cyclosporins",
+        "ui": "D003524"
+      },
+      {
+        "registry_number": "74436-00-3",
+        "name": "cyclosporin G",
+        "ui": "C045571"
+      },
+      {
+        "registry_number": "83HN0GTJ6D",
+        "name": "Cyclosporine",
+        "ui": "D016572"
+      }
+    ],
+    "mesh_headings": [
+      {
+        "descriptor_name": "Cyclosporine",
+        "descriptor_ui": "D016572",
+        "descriptor_major_topic": "Y",
+        "qualifiers": []
+      },
+      {
+        "descriptor_name": "Cyclosporins",
+        "descriptor_ui": "D003524",
+        "descriptor_major_topic": "N",
+        "qualifiers": [
+          {
+            "name": "blood",
+            "ui": "Q000097",
+            "major_topic": "Y"
+          }
+        ]
+      },
+      {
+        "descriptor_name": "Humans",
+        "descriptor_ui": "D006801",
+        "descriptor_major_topic": "N",
+        "qualifiers": []
+      },
+      {
+        "descriptor_name": "Kidney Transplantation",
+        "descriptor_ui": "D016030",
+        "descriptor_major_topic": "N",
+        "qualifiers": []
+      },
+      {
+        "descriptor_name": "Kinetics",
+        "descriptor_ui": "D007700",
+        "descriptor_major_topic": "N",
+        "qualifiers": []
+      }
+    ],
+    "citation_subset": "IM",
+    "article_ids": [
+      {
+        "type": "pubmed",
+        "id": "3297425"
+      }
+    ],
+    "history": [
+      {
+        "status": "pubmed",
+        "date": "1987-07-01",
+        "time": null
+      },
+      {
+        "status": "medline",
+        "date": "1987-07-01",
+        "time": "00:01"
+      },
+      {
+        "status": "entrez",
+        "date": "1987-07-01",
+        "time": "00:00"
+      }
+    ],
+    "publication_status": "ppublish",
+    "author_list_complete": "Y"
+  }
+}

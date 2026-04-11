@@ -1,0 +1,263 @@
+{
+  "work_id": "W019b73d5-6d85-7bf4-a4e0-58c22124e23d",
+  "default_info": {
+    "title": "Functional recovery from neuroendocrine deficits: studies with the hypogonadal mutant mouse.",
+    "abstract": null,
+    "authors": [
+      {
+        "sequence": 1,
+        "name": "M J Gibson",
+        "author_id": null,
+        "affiliation": null
+      },
+      {
+        "sequence": 2,
+        "name": "G J Kokoris",
+        "author_id": null,
+        "affiliation": null
+      },
+      {
+        "sequence": 3,
+        "name": "A J Silverman",
+        "author_id": null,
+        "affiliation": null
+      }
+    ],
+    "identifiers": {
+      "arxiv": null,
+      "doi": "10.1016/s0079-6123(08)60274-5",
+      "semantic_scholar": null,
+      "pubmed": "3247417"
+    },
+    "primary_category": null,
+    "categories": [],
+    "year": 1988,
+    "submitted_date": null,
+    "updated_date": "2019-09-03",
+    "is_preprint": false,
+    "is_published": true,
+    "pub_info": {
+      "venue_name": "Progress in brain research",
+      "venue_type": "journal",
+      "publish_time": "1988",
+      "presentation_type": null
+    },
+    "pdf_url": null,
+    "source_url": "https://pubmed.ncbi.nlm.nih.gov/3247417/"
+  },
+  "additional_info": {
+    "medline_citation": {
+      "status": "MEDLINE",
+      "indexing_method": "Manual",
+      "owner": "NLM"
+    },
+    "pub_model": "Print",
+    "date_completed": "1989-06-15",
+    "date_revised": "2019-09-03",
+    "journal_details": {
+      "issn_print": "0079-6123",
+      "iso_abbreviation": "Prog Brain Res",
+      "medline_ta": "Prog Brain Res",
+      "nlm_unique_id": "0376441",
+      "country": "Netherlands",
+      "issn_linking": "0079-6123",
+      "volume": "78",
+      "issue": null,
+      "cited_medium": "Print",
+      "pub_date_raw": {
+        "year": 1988,
+        "month": null,
+        "day": null,
+        "medline_date": null
+      }
+    },
+    "pagination": "117-24",
+    "language": [
+      "eng"
+    ],
+    "grant_list": [
+      {
+        "grant_id": "HD19077",
+        "acronym": "HD",
+        "agency": "NICHD NIH HHS",
+        "country": "United States"
+      },
+      {
+        "grant_id": "NS20335",
+        "acronym": "NS",
+        "agency": "NINDS NIH HHS",
+        "country": "United States"
+      }
+    ],
+    "publication_types": [
+      {
+        "ui": "D016428",
+        "name": "Journal Article"
+      },
+      {
+        "ui": "D013487",
+        "name": "Research Support, U.S. Gov't, P.H.S."
+      }
+    ],
+    "chemical_list": [
+      {
+        "registry_number": "9002-67-9",
+        "name": "Luteinizing Hormone",
+        "ui": "D007986"
+      }
+    ],
+    "mesh_headings": [
+      {
+        "descriptor_name": "Animals",
+        "descriptor_ui": "D000818",
+        "descriptor_major_topic": "N",
+        "qualifiers": []
+      },
+      {
+        "descriptor_name": "Cerebral Ventricles",
+        "descriptor_ui": "D002552",
+        "descriptor_major_topic": "N",
+        "qualifiers": [
+          {
+            "name": "physiopathology",
+            "ui": "Q000503",
+            "major_topic": "N"
+          }
+        ]
+      },
+      {
+        "descriptor_name": "Female",
+        "descriptor_ui": "D005260",
+        "descriptor_major_topic": "N",
+        "qualifiers": []
+      },
+      {
+        "descriptor_name": "Hypogonadism",
+        "descriptor_ui": "D007006",
+        "descriptor_major_topic": "N",
+        "qualifiers": [
+          {
+            "name": "genetics",
+            "ui": "Q000235",
+            "major_topic": "N"
+          },
+          {
+            "name": "physiopathology",
+            "ui": "Q000503",
+            "major_topic": "N"
+          },
+          {
+            "name": "therapy",
+            "ui": "Q000628",
+            "major_topic": "Y"
+          }
+        ]
+      },
+      {
+        "descriptor_name": "Luteinizing Hormone",
+        "descriptor_ui": "D007986",
+        "descriptor_major_topic": "N",
+        "qualifiers": [
+          {
+            "name": "metabolism",
+            "ui": "Q000378",
+            "major_topic": "N"
+          }
+        ]
+      },
+      {
+        "descriptor_name": "Male",
+        "descriptor_ui": "D008297",
+        "descriptor_major_topic": "N",
+        "qualifiers": []
+      },
+      {
+        "descriptor_name": "Mice",
+        "descriptor_ui": "D051379",
+        "descriptor_major_topic": "N",
+        "qualifiers": []
+      },
+      {
+        "descriptor_name": "Mice, Mutant Strains",
+        "descriptor_ui": "D008817",
+        "descriptor_major_topic": "N",
+        "qualifiers": []
+      },
+      {
+        "descriptor_name": "Neurosecretory Systems",
+        "descriptor_ui": "D009490",
+        "descriptor_major_topic": "N",
+        "qualifiers": [
+          {
+            "name": "physiopathology",
+            "ui": "Q000503",
+            "major_topic": "N"
+          }
+        ]
+      },
+      {
+        "descriptor_name": "Olfactory Bulb",
+        "descriptor_ui": "D009830",
+        "descriptor_major_topic": "N",
+        "qualifiers": [
+          {
+            "name": "transplantation",
+            "ui": "Q000637",
+            "major_topic": "Y"
+          }
+        ]
+      },
+      {
+        "descriptor_name": "Preoptic Area",
+        "descriptor_ui": "D011301",
+        "descriptor_major_topic": "N",
+        "qualifiers": [
+          {
+            "name": "physiopathology",
+            "ui": "Q000503",
+            "major_topic": "N"
+          },
+          {
+            "name": "transplantation",
+            "ui": "Q000637",
+            "major_topic": "Y"
+          }
+        ]
+      }
+    ],
+    "citation_subset": "IM",
+    "article_ids": [
+      {
+        "type": "pubmed",
+        "id": "3247417"
+      },
+      {
+        "type": "pii",
+        "id": "S0079-6123(08)60274-5"
+      },
+      {
+        "type": "doi",
+        "id": "10.1016/s0079-6123(08)60274-5"
+      }
+    ],
+    "history": [
+      {
+        "status": "pubmed",
+        "date": "1988-01-01",
+        "time": null
+      },
+      {
+        "status": "medline",
+        "date": "1988-01-01",
+        "time": "00:01"
+      },
+      {
+        "status": "entrez",
+        "date": "1988-01-01",
+        "time": "00:00"
+      }
+    ],
+    "publication_status": "ppublish",
+    "author_list_complete": "Y"
+  }
+}

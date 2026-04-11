@@ -1,0 +1,81 @@
+# PD_TEST 项目配置文件
+# 统一元数据库：meta_database 用于存放来自 arxiv 和 pubmed 两个数据源的论文数据
+
+# 统一元数据库配置（主要数据库）
+# 用于存放来自 arxiv 和 pubmed 两个数据源的论文数据
+# papers 表的 source 字段用于区分数据源：'arxiv' 或 'pubmed'
+metadata_db:
+  host: 10.0.4.7
+  name: meta_database
+  user: qiqinglin
+  port: 5432
+  password: "12345"
+
+vector_db:
+  #db: /data3/guofang/remote_storage_home_10.0.4.7/pubmed_database/pubmed_vector_db_test_mini_multi_shard
+  db: /data3/guofang/AIgnite-Solutions/PD_TEST_Langtaosha/tests/fixtures/vector_db_test
+    
+  # 模型配置
+  gritlm_model: GritLM/GritLM-7B
+  gritlm_model_name: GritLM/GritLM-7B
+  hf_home: null
+  
+  # Corpora 配置：定义多个语料库及其 shard 信息
+  corpora:
+    - corpus: pubmed
+      source: pubmed
+      shard_glob: "pubmed/shard_???"     # 或 "shard_0??" 取决于你的目录命名
+      shard_ids: [0,1,2,3,4,5,6,7,8,9]   # 可选：用于路由/统计
+      writable: false
+      readonly: true
+
+    - corpus: user_private_langtaosha
+      source: user_langtaosha
+      shard_glob: "user/shard_???"
+      shard_ids: [99]
+      writable: true
+      readonly: false
+
+    - corpus: arxiv_cs
+      domain: cs
+      source: arxiv
+      shard_glob: "arxiv_cs/shard_???"
+      shard_ids: [101,102]
+      writable: false
+      readonly: true
+
+    - corpus: user_private_cs
+      source: user_cs
+      shard_glob: "user_private_cs/shard_???"
+      shard_ids: [199]
+      writable: true
+      readonly: false
+
+    
+  
+  # 路由配置：定义如何根据查询条件选择 corpus
+  routing:
+    default_corpora: [pubmed, arxiv_cs, user_private_langtaosha, user_private_cs]
+    by_domain:
+      life_sci: [pubmed, user_private_langtaosha]
+      cs: [arxiv_cs, user_private_cs]
+    by_source:
+      pubmed: [pubmed]
+      arxiv: [arxiv_cs]
+      user: [user_private_langtaosha, user_private_cs]
+  
+  # 合并策略配置：定义如何合并多个 corpus 的搜索结果
+  merge:
+    method: rrf
+    rrf_k: 60
+
+storage:
+  json: /data3/guofang/remote_storage_home_10.0.4.7/pubmed_json
+  pdf: /data3/guofang/remote_storage_home_10.0.4.7/pd_test_storage/pdf
+  html: /data3/guofang/remote_storage_home_10.0.4.7/pd_test_storage/html
+  images: /data3/guofang/remote_storage_home_10.0.4.7/pd_test_storage/images
+
+ssh:
+  user: wangyuanshi
+  host: 10.0.4.7
+  port: 22

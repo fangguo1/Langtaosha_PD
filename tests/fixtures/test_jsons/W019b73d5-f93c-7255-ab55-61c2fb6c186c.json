@@ -1,0 +1,143 @@
+{
+  "work_id": "W019b73d5-f93c-7255-ab55-61c2fb6c186c",
+  "default_info": {
+    "title": "L-forms: evolution or revolution?",
+    "abstract": null,
+    "authors": [
+      {
+        "sequence": 1,
+        "name": "A M Paton",
+        "author_id": null,
+        "affiliation": "Division of Agricultural Bacteriology, University of Aberdeen, UK."
+      }
+    ],
+    "identifiers": {
+      "arxiv": null,
+      "doi": "10.1111/j.1365-2672.1987.tb04856.x",
+      "semantic_scholar": null,
+      "pubmed": "3326864"
+    },
+    "primary_category": null,
+    "categories": [],
+    "year": 1987,
+    "submitted_date": null,
+    "updated_date": "2019-09-03",
+    "is_preprint": false,
+    "is_published": true,
+    "pub_info": {
+      "venue_name": "The Journal of applied bacteriology",
+      "venue_type": "journal",
+      "publish_time": "1987-11",
+      "presentation_type": null
+    },
+    "pdf_url": null,
+    "source_url": "https://pubmed.ncbi.nlm.nih.gov/3326864/"
+  },
+  "additional_info": {
+    "medline_citation": {
+      "status": "MEDLINE",
+      "indexing_method": "Manual",
+      "owner": "NLM"
+    },
+    "pub_model": "Print",
+    "date_completed": "1988-04-18",
+    "date_revised": "2019-09-03",
+    "journal_details": {
+      "issn_print": "0021-8847",
+      "iso_abbreviation": "J Appl Bacteriol",
+      "medline_ta": "J Appl Bacteriol",
+      "nlm_unique_id": "7503050",
+      "country": "England",
+      "issn_linking": "0021-8847",
+      "volume": "63",
+      "issue": "5",
+      "cited_medium": "Print",
+      "pub_date_raw": {
+        "year": 1987,
+        "month": 11,
+        "day": null,
+        "medline_date": null
+      }
+    },
+    "pagination": "365-71",
+    "language": [
+      "eng"
+    ],
+    "publication_types": [
+      {
+        "ui": "D016428",
+        "name": "Journal Article"
+      },
+      {
+        "ui": "D013485",
+        "name": "Research Support, Non-U.S. Gov't"
+      },
+      {
+        "ui": "D016454",
+        "name": "Review"
+      }
+    ],
+    "mesh_headings": [
+      {
+        "descriptor_name": "Animals",
+        "descriptor_ui": "D000818",
+        "descriptor_major_topic": "N",
+        "qualifiers": []
+      },
+      {
+        "descriptor_name": "L Forms",
+        "descriptor_ui": "D007740",
+        "descriptor_major_topic": "N",
+        "qualifiers": [
+          {
+            "name": "physiology",
+            "ui": "Q000502",
+            "major_topic": "Y"
+          }
+        ]
+      },
+      {
+        "descriptor_name": "Plants",
+        "descriptor_ui": "D010944",
+        "descriptor_major_topic": "N",
+        "qualifiers": [
+          {
+            "name": "microbiology",
+            "ui": "Q000382",
+            "major_topic": "Y"
+          }
+        ]
+      }
+    ],
+    "citation_subset": "IM",
+    "article_ids": [
+      {
+        "type": "pubmed",
+        "id": "3326864"
+      },
+      {
+        "type": "doi",
+        "id": "10.1111/j.1365-2672.1987.tb04856.x"
+      }
+    ],
+    "history": [
+      {
+        "status": "pubmed",
+        "date": "1987-11-01",
+        "time": null
+      },
+      {
+        "status": "medline",
+        "date": "1987-11-01",
+        "time": "00:01"
+      },
+      {
+        "status": "entrez",
+        "date": "1987-11-01",
+        "time": "00:00"
+      }
+    ],
+    "publication_status": "ppublish",
+    "author_list_complete": "Y"
+  }
+}
