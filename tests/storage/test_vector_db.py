@@ -301,6 +301,32 @@ class TestVectorDBClientUnit:
         mock_post.assert_called_once()
 
     @patch('requests.Session.post')
+    def test_list_databases(self, mock_post):
+        """测试查询数据库列表使用 POST /database/list"""
+        mock_response = Mock()
+        mock_response.raise_for_status = Mock()
+        mock_response.json.return_value = {
+            'code': 0,
+            'msg': 'success',
+            'databases': ['test_db', 'other_db']
+        }
+        mock_post.return_value = mock_response
+
+        client = VectorDBClient(
+            url="http://test.example.com",
+            account="test_account",
+            api_key="test_key"
+        )
+
+        result = client.list_databases()
+
+        assert result == ['test_db', 'other_db']
+        mock_post.assert_called_once_with(
+            'http://test.example.com/database/list',
+            json={},
+        )
+
+    @patch('requests.Session.post')
     def test_create_collection(self, mock_post):
         """测试创建 collection"""
         mock_response = Mock()

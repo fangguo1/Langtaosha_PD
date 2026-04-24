@@ -162,7 +162,7 @@ class VectorDBClient:
         Returns:
             List[str]: 数据库名称列表
         """
-        result = self._request('GET', '/database/list')
+        result = self._request('POST', '/database/list', {})
         databases = result.get('databases', [])
         logging.info(f"数据库列表: {databases}")
         return databases
