@@ -5,17 +5,17 @@
 运行方式:
 
 方式1 - 通过 pytest（使用默认配置）：
-    pytest tests/db/test_vector_db.py -v
+    pytest tests/storage/test_vector_db.py -v
 
 方式2 - 通过 pytest（实时输出日志）：
-    pytest tests/db/test_vector_db.py -v -s --log-cli-level=INFO
+    pytest tests/storage/test_vector_db.py -v -s --log-cli-level=INFO
 
 方式3 - 直接运行（使用 argparse 参数）：
-    python tests/db/test_vector_db.py --config-path=src/config/config_tecent_backend_server_test.yaml
+    python tests/storage/test_vector_db.py --config-path=src/config/config_tecent_backend_server_test.yaml
 
 方式4 - 通过环境变量：
     export VECTOR_DB_CONFIG=src/config/config_tecent_backend_server_test.yaml
-    pytest tests/db/test_vector_db.py -v
+    pytest tests/storage/test_vector_db.py -v
 
 默认配置文件：src/config/config_tecent_backend_server_test.yaml
 
@@ -116,7 +116,7 @@ def get_config_path_from_args() -> Path:
         raise ValueError(
             f"❌ 配置文件不存在: {config_path}\n"
             f"请通过以下方式之一指定配置文件：\n"
-            f"  1. 命令行参数: python tests/test_vector_db.py --config-path=src/config/config_tecent_backend_server_test.yaml\n"
+            f"  1. 命令行参数: python tests/storage/test_vector_db.py --config-path=src/config/config_tecent_backend_server_test.yaml\n"
             f"  2. 环境变量: export VECTOR_DB_CONFIG=src/config/config_tecent_backend_server_test.yaml\n"
             f"  3. 默认路径: src/config/config_tecent_backend_server_test.yaml"
         )
