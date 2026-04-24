@@ -1,0 +1,26 @@
+# Python cache and build artifacts
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.coverage
+.coverage.*
+.ipynb_checkpoints/
+*.egg-info/
+build/
+dist/
+
+# Local environments
+.env
+.venv/
+venv/
+
+# Local runtime data and logs
+import_mimic.log
+local_data/
+mimic_data/
+
+# Private machine-specific config files
+src/config/config_tecent_backend_server_*.yaml
+!src/config/config_tecent_backend_server_example.yaml
+

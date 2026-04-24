@@ -1,16 +1,24 @@
-sqlalchemy>=2.0.0
+# Core runtime
+Flask>=2.3.0
+packaging>=24.0
 psycopg2-binary>=2.9.0
 python-dotenv>=1.0.0
 PyYAML>=6.0.0
-flask>=2.3.0
+requests>=2.31.0
+SQLAlchemy>=2.0.0
+tqdm>=4.65.0
 
-# 向量数据库相关依赖
-gritlm>=1.0.0
-faiss-cpu>=1.7.4  # 或 faiss-gpu（如果有GPU）
-langchain-community>=0.0.20
-langchain-core>=0.1.0
-numpy>=1.24.0
-torch>=2.0.0
-transformers>=4.30.0
-huggingface-hub>=0.16.0  # 用于下载模型
-tqdm>=4.65.0  # 用于显示下载进度
+# Utilities used by scripts and connectivity checks
+paramiko>=3.4.0
+
+# Test dependencies
+pytest>=8.0.0
+
+# Optional local-vector / legacy tooling dependencies
+# faiss-cpu>=1.7.4
+# langchain-community>=0.0.20
+# langchain-core>=0.1.0
+# numpy>=1.24.0
+# torch>=2.0.0
+# transformers>=4.30.0
+# huggingface-hub>=0.16.0

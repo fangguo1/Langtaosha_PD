@@ -1,0 +1,38 @@
+# Example Tencent backend configuration for local development and tests.
+# Copy this file to a private config file and replace the placeholder values.
+
+default_sources:
+  - langtaosha
+  - biorxiv_history
+  - biorxiv_daily
+
+cvm_server:
+  public_host: example-cvm-host
+  private_host: 172.21.0.16
+  ssh_port: 22
+  user: example_user
+  password: example_password
+
+gpu_server:
+  public_host: example-gpu-host
+  private_host: 172.21.16.16
+  ssh_port: 22
+  user: example_user
+  password: example_password
+
+vector_db:
+  url: http://example-vector-db:80
+  account: example_account
+  api_key: example_api_key
+  embedding_source: tecent_made
+  embedding_model: BAAI/bge-m3
+  database: langtaosha_test
+  collection_prefix: "lt_"
+
+metadata_db:
+  host: example-metadata-db
+  port: 5432
+  user: example_db_user
+  password: example_db_password
+  name: langtaosha_test
+

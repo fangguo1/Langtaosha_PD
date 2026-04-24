@@ -1,6 +1,13 @@
 """统一配置加载器：从 config.yaml 文件加载配置并设置环境变量
 
 这是项目的唯一配置入口，提供所有配置访问接口。
+
+支持的功能：
+- 数据库配置（PostgreSQL）
+- 向量数据库配置（本地文件或远程服务）
+- 存储路径配置（JSON、PDF、HTML、图片）
+- 服务器配置（CVM、GPU 服务器）
+- 环境变量自动设置
 """
 import os
 import yaml
@@ -10,6 +17,7 @@ import psycopg2
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from urllib.parse import quote_plus
+from copy import deepcopy
 from dotenv import load_dotenv
 from sqlalchemy.engine import Engine
 from sqlalchemy import create_engine
@@ -56,22 +64,28 @@ def load_config_from_yaml(config_path: Path) -> Dict[str, Any]:
 def flatten_config(config: Dict[str, Any], parent_key: str = '', sep: str = '_') -> Dict[str, str]:
     """
     将嵌套的配置字典展平为扁平字典，用于设置环境变量
-    
+
     例如:
         {'metadata_db': {'host': '10.0.4.7', 'port': 5432}}
         -> {'DB_HOST': '10.0.4.7', 'DB_PORT': '5432'}
-        
+
         {'storage': {'json': '/path/to/json'}}
         -> {'STORAGE_JSON': '/path/to/json'}
-        
+
         {'vector_db': {'db': '/path/to/db'}}
         -> {'VECTOR_DB_PATH': '/path/to/db'}
-    
+
+        {'cvm_server': {'public_host': '1.2.3.4', 'ssh_port': 22}}
+        -> {'CVM_SERVER_PUBLIC_HOST': '1.2.3.4', 'CVM_SERVER_SSH_PORT': '22'}
+
+        {'gpu_server': {'user': 'wnlab', 'password': 'pass'}}
+        -> {'GPU_SERVER_USER': 'wnlab', 'GPU_SERVER_PASSWORD': 'pass'}
+
     Args:
         config: 嵌套的配置字典
         parent_key: 父级键名（用于递归）
         sep: 分隔符，默认使用下划线
-        
+
     Returns:
         扁平化的字典，键名转为大写
     """
@@ -83,6 +97,22 @@ def flatten_config(config: Dict[str, Any], parent_key: str = '', sep: str = '_')
         'STORAGE_IMAGES': 'IMAGE_STORAGE_PATH',
         'VECTOR_DB_DB': 'VECTOR_DB_PATH',
         'VECTOR_DB_GRITLM_MODEL': 'GRITLM_MODEL_PATH',
+        # 腾讯云向量数据库相关映射
+        'VECTOR_DB_URL': 'VECTOR_DB_URL',
+        'VECTOR_DB_ACCOUNT': 'VECTOR_DB_ACCOUNT',
+        'VECTOR_DB_API_KEY': 'VECTOR_DB_API_KEY',
+        # CVM 服务器相关映射
+        'CVM_SERVER_PUBLIC_HOST': 'CVM_SERVER_PUBLIC_HOST',
+        'CVM_SERVER_PRIVATE_HOST': 'CVM_SERVER_PRIVATE_HOST',
+        'CVM_SERVER_SSH_PORT': 'CVM_SERVER_SSH_PORT',
+        'CVM_SERVER_USER': 'CVM_SERVER_USER',
+        'CVM_SERVER_PASSWORD': 'CVM_SERVER_PASSWORD',
+        # GPU 服务器相关映射
+        'GPU_SERVER_PUBLIC_HOST': 'GPU_SERVER_PUBLIC_HOST',
+        'GPU_SERVER_PRIVATE_HOST': 'GPU_SERVER_PRIVATE_HOST',
+        'GPU_SERVER_SSH_PORT': 'GPU_SERVER_SSH_PORT',
+        'GPU_SERVER_USER': 'GPU_SERVER_USER',
+        'GPU_SERVER_PASSWORD': 'GPU_SERVER_PASSWORD',
     }
     
     items = []
@@ -138,31 +168,44 @@ def set_env_from_config(override: bool = True, config_path: Optional[Path] = Non
                     os.environ[key] = value
 
 
-def init_config(config_path: Path, override: bool = True) -> None:
+def init_config(config_path: Path, override: bool = True, force_reload: bool = False) -> None:
     """初始化配置（统一入口）
-    
+
     从 config.yaml 或 .env 文件加载配置并设置环境变量。
     此函数应该在实际使用配置之前调用一次（通常在应用启动时）。
-    
+
     Args:
         config_path: config.yaml 文件的路径（必需）
         override: 是否覆盖已存在的环境变量
-    
+        force_reload: 是否强制重新加载配置（主要用于测试）
+
     Note:
-        多次调用是安全的，但只有第一次调用会实际加载配置。
+        多次调用是安全的，但只有第一次调用会实际加载配置，
+        除非 force_reload=True。
     """
     global _config_cache, _initialized
-    
+
     with _init_lock:
-        if _initialized:
+        if _initialized and not force_reload:
             return
-        
+
         # 加载配置到环境变量
         set_env_from_config(override=override, config_path=config_path)
-        
+
         # 加载配置到缓存
         _config_cache = load_config_from_yaml(config_path)
         _initialized = True
+
+
+def _reset_config() -> None:
+    """重置配置缓存（仅用于测试）
+
+    WARNING: 此函数仅用于测试环境，不应在生产代码中调用。
+    """
+    global _config_cache, _initialized
+    with _init_lock:
+        _config_cache = None
+        _initialized = False
 
 
 def get_db_config(db_key: str = 'metadata_db') -> Dict[str, Any]:
@@ -363,12 +406,18 @@ def get_all_db_configs() -> Dict[str, Dict[str, Any]]:
     return db_configs
 
 
-def get_metadata_db_engine_from_config(config: Dict[str, Any], db_key: str = 'metadata_db') -> Engine:
+def get_metadata_db_engine_from_config(
+    config: Dict[str, Any],
+    db_key: str = 'metadata_db',
+    connect_timeout: Optional[int] = None,
+) -> Engine:
     """从配置字典中创建并返回 metadata_db 的 SQLAlchemy Engine
     
     Args:
         config: 配置字典，必须包含指定的数据库配置
         db_key: 数据库配置键名，默认为 'metadata_db'
+        connect_timeout: libpq 连接超时（秒）。传入正整数时，错误地址/网络不可达时更快失败；
+            为 None 时不设置，使用驱动默认行为。
         
     Returns:
         Engine: SQLAlchemy 引擎对象
@@ -396,33 +445,93 @@ def get_metadata_db_engine_from_config(config: Dict[str, Any], db_key: str = 'me
     
     connection_string = f"postgresql://{encoded_user}:{encoded_password}@{host}:{port}/{database}"
     
-    return create_engine(
-        connection_string,
-        pool_size=10,
-        max_overflow=20,
-        pool_recycle=3600,
-        pool_pre_ping=True,
-        pool_timeout=30,
-        echo=False
-    )
+    engine_kwargs: Dict[str, Any] = {
+        "pool_size": 10,
+        "max_overflow": 20,
+        "pool_recycle": 3600,
+        "pool_pre_ping": True,
+        "pool_timeout": 30,
+        "echo": False,
+    }
+    if connect_timeout is not None and connect_timeout > 0:
+        engine_kwargs["connect_args"] = {"connect_timeout": connect_timeout}
+    
+    return create_engine(connection_string, **engine_kwargs)
 
 
 def get_vector_db_config() -> Dict[str, Any]:
-    """获取向量数据库配置
-    
+    """获取向量数据库配置（支持本地和远程配置）
+
+    自动从 default_sources 注入 allowed_sources，实现统一的 source 配置管理。
+
     Returns:
-        Dict: 向量数据库配置字典，包含 db, corpora, routing, merge 等
-        
+        Dict: 向量数据库配置字典，包含：
+            - allowed_sources: 从 default_sources 自动注入
+            - 其他 vector_db 原始配置字段
+
     Raises:
         ValueError: 如果配置未初始化或缺少 vector_db 配置
     """
     if not _initialized or not _config_cache:
         raise ValueError("配置未初始化，请先调用 init_config(config_path)")
-    
+
     if 'vector_db' not in _config_cache:
         raise ValueError("配置文件中未找到 vector_db 配置")
-    
-    return _config_cache['vector_db'].copy()
+
+    # 获取 vector_db 配置的深拷贝
+    config = deepcopy(_config_cache['vector_db'])
+
+    # 自动注入 allowed_sources（始终从 default_sources 获取）
+    if 'allowed_sources' not in config:
+        config['allowed_sources'] = get_default_sources()
+
+    return config
+
+
+def get_default_sources() -> List[str]:
+    """获取系统默认启用的 source 列表
+
+    从顶层配置的 default_sources 读取系统默认的 source 列表。
+    这是系统 source 配置的唯一真相来源。
+
+    Returns:
+        List[str]: 默认 source 列表的深拷贝
+
+    Raises:
+        ValueError: 在以下情况下抛出：
+            - 配置未初始化
+            - default_sources 不存在
+            - default_sources 不是列表
+            - default_sources 为空列表
+            - 包含空字符串或非字符串元素
+    """
+    # 1. 检查配置是否已初始化
+    if not _initialized or not _config_cache:
+        raise ValueError("配置未初始化，请先调用 init_config(config_path)")
+
+    # 2. 检查 default_sources 是否存在
+    if 'default_sources' not in _config_cache:
+        raise ValueError("配置文件中未找到 default_sources 配置")
+
+    default_sources = _config_cache['default_sources']
+
+    # 3. 检查是否为列表
+    if not isinstance(default_sources, list):
+        raise ValueError(f"default_sources 必须是列表类型，当前类型: {type(default_sources)}")
+
+    # 4. 检查列表是否为空
+    if len(default_sources) == 0:
+        raise ValueError("default_sources 不能为空列表")
+
+    # 5. 检查列表元素
+    for i, source in enumerate(default_sources):
+        if not isinstance(source, str):
+            raise ValueError(f"default_sources[{i}] 必须是字符串类型，当前类型: {type(source)}")
+        if not source or not source.strip():
+            raise ValueError(f"default_sources[{i}] 不能为空字符串")
+
+    # 6. 返回深拷贝，避免调用方原地修改
+    return deepcopy(default_sources)
 
 
 def build_routing_to_shard_ids_map() -> Dict[str, Dict[str, List[int]]]:
@@ -558,3 +667,62 @@ def get_shard_ids_by_routing(
         'writable_shard_ids': [],
         'readonly_shard_ids': []
     }
+
+
+def is_remote_vector_db() -> bool:
+    """检查是否使用远程向量数据库
+
+    Returns:
+        bool: 如果配置包含 url 字段则返回 True（远程模式），否则返回 False（本地模式）
+    """
+    try:
+        vector_db_config = get_vector_db_config()
+        return 'url' in vector_db_config
+    except ValueError:
+        return False
+
+
+def get_cvm_server_config() -> Dict[str, Any]:
+    """获取 CVM 服务器配置
+
+    Returns:
+        Dict: CVM 服务器配置字典，包含：
+            - public_host: 公网主机地址
+            - private_host: 私网主机地址
+            - ssh_port: SSH 端口
+            - user: 用户名
+            - password: 密码
+
+    Raises:
+        ValueError: 如果配置未初始化或缺少 cvm_server 配置
+    """
+    if not _initialized or not _config_cache:
+        raise ValueError("配置未初始化，请先调用 init_config(config_path)")
+
+    if 'cvm_server' not in _config_cache:
+        raise ValueError("配置文件中未找到 cvm_server 配置")
+
+    return _config_cache['cvm_server'].copy()
+
+
+def get_gpu_server_config() -> Dict[str, Any]:
+    """获取 GPU 服务器配置
+
+    Returns:
+        Dict: GPU 服务器配置字典，包含：
+            - public_host: 公网主机地址
+            - private_host: 私网主机地址
+            - ssh_port: SSH 端口
+            - user: 用户名
+            - password: 密码
+
+    Raises:
+        ValueError: 如果配置未初始化或缺少 gpu_server 配置
+    """
+    if not _initialized or not _config_cache:
+        raise ValueError("配置未初始化，请先调用 init_config(config_path)")
+
+    if 'gpu_server' not in _config_cache:
+        raise ValueError("配置文件中未找到 gpu_server 配置")
+
+    return _config_cache['gpu_server'].copy()
