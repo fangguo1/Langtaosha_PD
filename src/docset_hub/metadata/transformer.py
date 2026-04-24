@@ -1,397 +1,457 @@
-"""数据转换器：将DocSet格式转换为数据库格式"""
-from typing import Dict, Any, List, Optional
-from datetime import datetime
-import re
-from .extractor import MetadataExtractor
+"""元数据转换器 - 完整流水线封装
+
+提供一键式转换功能，将输入文件转换为数据库写入 payload。
+封装完整的流水线流程：input_adapter -> router -> source_adapter -> normalizer -> db_mapper
+
+使用示例：
+    from docset_hub.metadata.transformer import MetadataTransformer
+
+    # 基本使用
+    transformer = MetadataTransformer()
+    result = transformer.transform_file(
+        input_path="/path/to/langtaosha.json",
+        source_name="langtaosha"
+    )
+
+    # 批量处理
+    results = transformer.transform_batch([
+        {"input_path": "/path/to/paper1.json", "source_name": "langtaosha"},
+        {"input_path": "/path/to/paper2.json", "source_name": "biorxiv"},
+    ])
+
+    # 自定义配置
+    transformer = MetadataTransformer(
+        parser_version="1.0.0",
+        source_schema_version="2025-04-13",
+        default_language="en"
+    )
+    result = transformer.transform_file(input_path, source_name)
+"""
+
+from pathlib import Path
+from typing import Dict, Any, List, Optional, Union
+from dataclasses import dataclass, field
+
+from .input_adapters import BaseInputAdapter, JSONInputAdapter, JSONLInputAdapter
+from .router import MetadataRouter, RoutingError
+from .source_adapters import (
+    BaseSourceAdapter,
+    LangtaoshaSourceAdapter,
+    BiorxivSourceAdapter,
+)
+from .normalizer import MetadataNormalizer, NormalizerError
+from .db_mapper import MetadataDBMapper, DBMapperError
+from .contracts import NormalizedRecord
+
+
+class TransformerError(Exception):
+    """转换器异常"""
+    pass
+
+
+@dataclass
+class TransformResult:
+    """转换结果
+
+    Attributes:
+        success: 是否成功
+        input_path: 输入文件路径
+        source_name: 来源名称
+        db_payload: 数据库 payload（成功时）
+        upsert_key: upsert 键（成功时）
+        work_id: 论文全局唯一标识符（由 MetadataDB 写入阶段分配，转换阶段可能为 None）
+        error: 错误信息（失败时）
+        execution_time: 执行时间（秒）
+    """
+    success: bool
+    input_path: str
+    source_name: str
+    db_payload: Optional[Dict[str, Any]] = None
+    upsert_key: Optional[Dict[str, str]] = None
+    work_id: Optional[str] = None  # 由 MetadataDB 分配；transform 阶段可能为空
+    error: Optional[str] = None
+    execution_time: float = 0.0
+
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典格式"""
+        return {
+            "success": self.success,
+            "input_path": self.input_path,
+            "source_name": self.source_name,
+            "db_payload": self.db_payload,
+            "upsert_key": self.upsert_key,
+            "work_id": self.work_id,  # ← 新增
+            "error": self.error,
+            "execution_time": self.execution_time,
+        }
+
+
+@dataclass
+class TransformStats:
+    """转换统计信息
+
+    Attributes:
+        total: 总数
+        successful: 成功数
+        failed: 失败数
+        success_rate: 成功率
+    """
+    total: int = 0
+    successful: int = 0
+    failed: int = 0
+
+    @property
+    def success_rate(self) -> float:
+        """成功率"""
+        if self.total == 0:
+            return 0.0
+        return (self.successful / self.total) * 100
+
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典格式"""
+        return {
+            "total": self.total,
+            "successful": self.successful,
+            "failed": self.failed,
+            "success_rate": f"{self.success_rate:.2f}%",
+        }
 
 
 class MetadataTransformer:
-    """数据转换器
-    
-    将DocSet格式的JSON数据转换为数据库表结构所需的格式
-    """
-    
-    def __init__(self):
-        self.extractor = MetadataExtractor()
-    
-    def parse_date(self, date_str: Optional[str]) -> Optional[datetime]:
-        """解析日期字符串
-        
-        Args:
-            date_str: 日期字符串（格式: YYYY-MM-DD）
-            
-        Returns:
-            datetime对象或None
-        """
-        if not date_str:
-            return None
-        
-        try:
-            return datetime.strptime(date_str, '%Y-%m-%d')
-        except ValueError:
-            return None
-    
-    def parse_category(self, category: str) -> tuple[str, str]:
-        """解析分类
-        
-        Args:
-            category: 分类字符串（如 'cs.CC'）
-            
-        Returns:
-            tuple: (domain, subdomain)
-        """
-        if '.' in category:
-            domain = category.split('.')[0]
-            subdomain = category
-        else:
-            domain = category
-            subdomain = category
-        
-        return domain, subdomain
-    
-    def extract_version_num(self, version_str: str) -> Optional[int]:
-        """从版本字符串中提取版本号
-        
-        Args:
-            version_str: 版本字符串（如 'v1', 'v2'）
-            
-        Returns:
-            int: 版本号，如果无法解析则返回None
-        """
-        if not version_str:
-            return None
-        
-        # 移除'v'前缀并提取数字
-        try:
-            num_str = version_str.lstrip('vV')
-            return int(num_str)
-        except ValueError:
-            return None
-    
-    def normalize_doi(self, doi: Optional[str]) -> Optional[str]:
-        """规范化 DOI
-        
-        规则：
-        - 去除 https://doi.org/ 等前缀
-        - 转小写
-        - 去除空格
-        
-        Args:
-            doi: 原始 DOI 字符串
-            
-        Returns:
-            str: 规范化后的 DOI，如果输入为 None 或空则返回 None
-            
-        示例:
-            'HTTPS://doi.org/10.1145/XXX' -> '10.1145/xxx'
-            '10.1145/XXX' -> '10.1145/xxx'
-            ' 10.1145/XXX ' -> '10.1145/xxx'
-        """
-        if not doi:
-            return None
-        
-        # 去除前后空格
-        doi = doi.strip()
-        if not doi:
-            return None
-        
-        # 去除 DOI URL 前缀（支持多种格式）
-        # https://doi.org/10.xxx
-        # http://doi.org/10.xxx
-        # doi.org/10.xxx
-        # doi:10.xxx
-        doi = re.sub(r'^https?://(dx\.)?doi\.org/', '', doi, flags=re.IGNORECASE)
-        doi = re.sub(r'^doi\.org/', '', doi, flags=re.IGNORECASE)
-        doi = re.sub(r'^doi:', '', doi, flags=re.IGNORECASE)
-        
-        # 转小写并去除所有空格
-        doi = doi.lower().replace(' ', '')
-        
-        return doi if doi else None
-    
-    def normalize_arxiv_id(self, arxiv_id: Optional[str]) -> Optional[str]:
-        """规范化 arXiv ID
-        
-        规则：
-        - 去掉版本号（如 v1, v2, v3），只保留 base ID
-        - 去除前后空格
-        
-        Args:
-            arxiv_id: 原始 arXiv ID 字符串
-            
-        Returns:
-            str: 规范化后的 base arXiv ID，如果输入为 None 或空则返回 None
-            
-        示例:
-            '2301.12345v1' -> '2301.12345'
-            '2301.12345v2' -> '2301.12345'
-            'cs/2301012v3' -> 'cs/2301012'
-            '2301.12345' -> '2301.12345'
-        """
-        if not arxiv_id:
-            return None
-        
-        # 去除前后空格
-        arxiv_id = arxiv_id.strip()
-        if not arxiv_id:
-            return None
-        
-        # 去掉版本号（v1, v2, v3, V1, V2, V3 等）
-        # 匹配模式：v 或 V 后跟数字，在字符串末尾
-        arxiv_id = re.sub(r'[vV]\d+$', '', arxiv_id)
-        
-        return arxiv_id if arxiv_id else None
-    
-    def normalize_pubmed_id(self, pubmed_id: Optional[str]) -> Optional[str]:
-        """规范化 PubMed ID (PMID)
-        
-        规则：
-        - 保留纯数字字符串
-        - 去除前导空格和后导空格
-        
-        Args:
-            pubmed_id: 原始 PubMed ID 字符串
-            
-        Returns:
-            str: 规范化后的 PubMed ID，如果输入为 None 或空则返回 None
-            
-        示例:
-            ' 12345678 ' -> '12345678'
-            '12345678' -> '12345678'
-        """
-        if not pubmed_id:
-            return None
-        
-        # 去除前后空格
-        pubmed_id = pubmed_id.strip()
-        if not pubmed_id:
-            return None
-        
-        # 确保是纯数字（PMID 应该是纯数字）
-        if not pubmed_id.isdigit():
-            # 如果不是纯数字，尝试提取数字部分
-            match = re.search(r'\d+', pubmed_id)
-            if match:
-                pubmed_id = match.group()
-            else:
-                return None
-        
-        return pubmed_id
-    
-    def normalize_semantic_scholar_id(self, semantic_scholar_id: Optional[str]) -> Optional[str]:
-        """规范化 Semantic Scholar ID
-        
-        规则：
-        - 转小写
-        - 去除前后空格
-        
-        Args:
-            semantic_scholar_id: 原始 Semantic Scholar ID 字符串
-            
-        Returns:
-            str: 规范化后的 Semantic Scholar ID，如果输入为 None 或空则返回 None
-            
-        示例:
-            ' ABC123 ' -> 'abc123'
-            'AbC123' -> 'abc123'
-        """
-        if not semantic_scholar_id:
-            return None
-        
-        # 去除前后空格并转小写
-        semantic_scholar_id = semantic_scholar_id.strip().lower()
-        
-        return semantic_scholar_id if semantic_scholar_id else None
-    
-    def get_normalized_external_ids(self, data: Dict[str, Any]) -> Dict[str, Optional[str]]:
-        """获取规范化后的 external IDs 字典
-        
-        用于 check_paper_existence 等函数查询时使用
-        
-        Args:
-            data: DocSet格式的数据字典
-            
-        Returns:
-            Dict: 规范化后的 external IDs 字典
-                {
-                    'arxiv_id': '2301.12345',  # base ID，无版本号
-                    'doi': '10.1145/xxx',
-                    'pubmed_id': '12345678',
-                    'semantic_scholar_id': 'abc123'
-                }
-        """
-        identifiers = self.extractor.extract_identifiers(data)
-        
-        return {
-            'arxiv_id': self.normalize_arxiv_id(identifiers.get('arxiv_id')),
-            'doi': self.normalize_doi(identifiers.get('doi')),
-            'pubmed_id': self.normalize_pubmed_id(identifiers.get('pubmed_id')),
-            'semantic_scholar_id': self.normalize_semantic_scholar_id(identifiers.get('semantic_scholar_id')),
-        }
-    
-    def transform_to_db_format(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """将DocSet格式转换为数据库格式
-        
-        Args:
-            data: DocSet格式的数据字典
-            
-        Returns:
-            Dict: 数据库格式的数据字典，包含各个表的数据
-        """
-        default_info = data.get('default_info', {})
-        additional_info = data.get('additional_info', {})
-        
-        # 提取基本信息
-        work_id = self.extractor.extract_work_id(data)
-        basic_info = self.extractor.extract_basic_info(data)
-        identifiers = self.extractor.extract_identifiers(data)
-        authors = self.extractor.extract_authors(data)
-        pub_info = self.extractor.extract_publication_info(data)
-        additional = self.extractor.extract_additional_info(data)
-        
-        # 规范化 external IDs（按照 ingest 流程 Step 2 的规范化规则）
-        normalized_arxiv_id = self.normalize_arxiv_id(identifiers.get('arxiv_id'))
-        normalized_doi = self.normalize_doi(identifiers.get('doi'))
-        normalized_pubmed_id = self.normalize_pubmed_id(identifiers.get('pubmed_id'))
-        normalized_semantic_scholar_id = self.normalize_semantic_scholar_id(identifiers.get('semantic_scholar_id'))
-        
-        # 根据 identifiers 判断数据源
-        # 如果有 arxiv_id，则 source='arxiv'；如果有 pubmed_id，则 source='pubmed'
-        if normalized_arxiv_id:
-            source = 'arxiv'
-            platform = 'arxiv'
-        elif normalized_pubmed_id:
-            source = 'pubmed'
-            platform = 'pubmed'
-        else:
-            # 如果都没有，尝试从 additional_info 或其他字段推断
-            # 默认使用 'arxiv'（向后兼容）
-            source = 'arxiv'
-            platform = 'arxiv'
-        
-        # 构建papers表数据（使用规范化后的 external IDs）
-        papers_data = {
-            'work_id': work_id,
-            'arxiv_id': normalized_arxiv_id,  # 使用规范化后的 base arXiv ID（无版本号）
-            'title': basic_info.get('title', ''),
-            'abstract': basic_info.get('abstract'),
-            'keywords': ', '.join(additional.get('keywords') or []) if additional.get('keywords') else None,
-            'pdf_url': basic_info.get('pdf_url'),
-            'source_url': basic_info.get('source_url'),
-            'year': basic_info.get('year'),
-            'is_preprint': basic_info.get('is_preprint', False),
-            'is_published': basic_info.get('is_published', False),
-            'source': source,  # 根据数据源自动判断：'arxiv' 或 'pubmed'
-            'platform': platform,  # 根据数据源自动判断：'arxiv' 或 'pubmed'
-            'primary_category': basic_info.get('primary_category'),
-            'doi': normalized_doi,  # 使用规范化后的 DOI
-            'semantic_scholar_id': normalized_semantic_scholar_id,  # 使用规范化后的 Semantic Scholar ID
-            'pubmed_id': normalized_pubmed_id,  # 使用规范化后的 PubMed ID
-            'comments': additional.get('comments'),
-            'contribution_types': additional.get('contribution_types') or [],
-            'created_at': self.parse_date(default_info.get('submitted_date')),
-            'updated_at': self.parse_date(default_info.get('updated_date')),
-            'paper_type': additional.get('paper_type'),
-            'primary_field': additional.get('primary_field'),
-            'target_application_domain': additional.get('target_application_domain'),
-            'is_llm_era': additional.get('is_llm_era', False),
-            'short_reasoning': additional.get('short_reasoning'),
-        }
-        
-        # 构建authors数据（JSONB格式）
-        authors_data = {
-            'authors': authors
-        }
-        
-        # 构建categories数据
-        categories_data = []
-        categories = basic_info.get('categories') or []
-        primary_category = basic_info.get('primary_category')
-        
-        for category in categories:
-            domain, subdomain = self.parse_category(category)
-            is_primary = (subdomain == primary_category) if primary_category else False
-            categories_data.append({
-                'domain': domain,
-                'subdomain': subdomain,
-                'is_primary': is_primary,
-            })
-        
-        # 构建publication数据
-        publication_data = None
-        if pub_info:
-            publication_data = {
-                'venue_name': pub_info.get('venue_name'),
-                'venue_type': pub_info.get('venue_type'),
-                'publish_time': self.parse_date(pub_info.get('publish_time')),
-                'presentation_type': pub_info.get('presentation_type'),
-            }
-        
-        # 构建versions数据
-        versions_data = []
-        versions = additional.get('versions') or []
-        for version in versions:
-            version_str = version.get('version', '')
-            version_num = self.extract_version_num(version_str)
-            if version_num is not None:
-                versions_data.append({
-                    'version_num': version_num,
-                    'version': version_str,
-                    'version_date': self.parse_date(version.get('version_date')),
-                })
-        
-        # 构建citations数据
-        citations_data = None
-        citations = additional.get('citations') or {}
-        if citations:
-            citations_data = {
-                'cited_by_count': citations.get('cited_by_count', 0),
-                'update_time': self.parse_date(citations.get('update_time')),
-            }
-        
-        # 构建fields数据
-        fields_data = []
-        fields = additional.get('fields') or []
-        for field in fields:
-            fields_data.append({
-                'field_name': field.get('field_name'),
-                'field_name_en': field.get('field_name_en'),
-                'confidence': field.get('confidence', 1.0),
-                'source': field.get('source', 'manual'),
-            })
-        
-        # 构建keywords数据（结构化关键词）
-        keywords_data = []
-        keywords = additional.get('keywords') or []
-        # 如果keywords是列表，检查是否是结构化格式
-        if isinstance(keywords, list):
-            for keyword in keywords:
-                if isinstance(keyword, dict):
-                    # 结构化关键词格式：{'keyword_type': 'method', 'keyword': 'transformer', 'weight': 0.9, 'source': 'ai_extract'}
-                    keywords_data.append({
-                        'keyword_type': keyword.get('keyword_type'),
-                        'keyword': keyword.get('keyword'),
-                        'weight': keyword.get('weight', 1.0),
-                        'source': keyword.get('source'),
-                    })
-                elif isinstance(keyword, str):
-                    # 简单字符串格式，默认作为method类型
-                    keywords_data.append({
-                        'keyword_type': 'concept',  # 默认类型
-                        'keyword': keyword,
-                        'weight': 1.0,
-                        'source': 'paper_metadata',
-                    })
-        
-        return {
-            'papers': papers_data,
-            'authors': authors_data,
-            'categories': categories_data,
-            'publication': publication_data,
-            'versions': versions_data,
-            'citations': citations_data,
-            'fields': fields_data,
-            'keywords': keywords_data,
-            'additional_info': additional_info,  # 保留原始 additional_info 用于存储到 pubmed_additional_info 表
-        }
+    """元数据转换器
 
+    封装完整的元数据处理流水线，提供一键式转换功能。
+
+    流水线流程：
+        1. input_adapter: 解析输入文件（JSON/JSONL等）
+        2. router: 验证来源名称
+        3. source_adapter: 字段映射到统一契约
+        4. normalizer: 值格式归一化
+        5. db_mapper: 映射到数据库 payload
+
+    支持的输入格式：
+        - JSON: .json 文件
+        - JSONL: .jsonl 文件（每行一个 JSON 对象）
+
+    支持的来源：
+        - langtaosha: 龙淘沙预印本平台
+        - biorxiv: bioRxiv 预印本平台
+        - arxiv: arXiv 预印本平台（未来）
+        - pubmed: PubMed 数据库（未来）
+    """
+
+    # Input adapter 映射（根据文件扩展名自动选择）
+    INPUT_ADAPTERS = {
+        ".json": JSONInputAdapter,
+        ".jsonl": JSONLInputAdapter,
+    }
+
+    # Source adapter 映射（根据来源名称自动选择）
+    SOURCE_ADAPTERS = {
+        "langtaosha": LangtaoshaSourceAdapter,
+        "biorxiv_history": BiorxivSourceAdapter,
+        "biorxiv_daily": BiorxivSourceAdapter,
+    }
+
+    def __init__(
+        self,
+        parser_version: str = "1.0.0",
+        source_schema_version: str = "2025-04-13",
+        default_language: str = "en",
+    ):
+        """初始化转换器
+
+        Args:
+            parser_version: 解析器版本号
+            source_schema_version: 来源 schema 版本
+            default_language: 默认语言代码
+        """
+        self.parser_version = parser_version
+        self.source_schema_version = source_schema_version
+        self.default_language = default_language
+
+        # 初始化各个模块
+        self._router = MetadataRouter()
+        self._normalizer = MetadataNormalizer(default_language=default_language)
+        self._db_mapper = MetadataDBMapper(
+            parser_version=parser_version,
+            source_schema_version=source_schema_version
+        )
+
+    def transform_file(
+        self,
+        input_path: Union[str, Path],
+        source_name: str,
+        input_adapter: Optional[BaseInputAdapter] = None,
+        source_adapter: Optional[BaseSourceAdapter] = None,
+    ) -> TransformResult:
+        """转换单个文件
+
+        Args:
+            input_path: 输入文件路径
+            source_name: 来源名称（langtaosha, biorxiv 等）
+            input_adapter: 可选的 input_adapter（如果不提供则自动选择）
+            source_adapter: 可选的 source_adapter（如果不提供则自动选择）
+
+        Returns:
+            TransformResult: 转换结果
+
+        Raises:
+            TransformerError: 转换过程中的任何错误
+        """
+        import time
+        start_time = time.time()
+
+        input_path = str(input_path)
+
+        try:
+            # Step 1: Input Adapter - 解析输入文件
+            if input_adapter is None:
+                input_adapter = self._get_input_adapter(input_path)
+
+            raw_payload = input_adapter.parse(input_path)
+
+            # Step 2: Router - 验证来源名称
+            route_result = self._router.route(raw_payload, source_name=source_name)
+
+            # Step 3: Source Adapter - 字段映射
+            if source_adapter is None:
+                source_adapter = self._get_source_adapter(route_result.source_adapter)
+
+            record = source_adapter.transform(raw_payload)
+
+            # Step 4: Normalizer - 值格式归一化
+            normalized_record = self._normalizer.normalize(record)
+
+            # Step 5: DB Mapper - 映射到数据库 payload
+            db_payload = self._db_mapper.map_to_db_payload(normalized_record)
+            upsert_key = self._db_mapper.get_upsert_key(normalized_record)
+
+            # 转换为字典格式
+            payload_dict = {
+                "papers": db_payload.papers.to_dict() if db_payload.papers else None,
+                "paper_sources": db_payload.paper_sources.to_dict() if db_payload.paper_sources else None,
+                "paper_source_metadata": db_payload.paper_source_metadata.to_dict() if db_payload.paper_source_metadata else None,
+                "paper_author_affiliation": db_payload.paper_author_affiliation.to_dict() if db_payload.paper_author_affiliation else None,
+                "paper_keywords": db_payload.paper_keywords.to_list() if db_payload.paper_keywords else [],
+                "paper_references": db_payload.paper_references.to_list() if db_payload.paper_references else [],
+            }
+
+            execution_time = time.time() - start_time
+
+            # 提取 work_id
+            work_id = None
+            if db_payload.papers:
+                work_id = db_payload.papers.work_id
+
+            return TransformResult(
+                success=True,
+                input_path=input_path,
+                source_name=source_name,
+                db_payload=payload_dict,
+                upsert_key=upsert_key,
+                work_id=work_id,  # ← 新增：全局唯一标识符
+                execution_time=execution_time,
+            )
+
+        except (FileNotFoundError, ValueError, RoutingError, NormalizerError, DBMapperError) as e:
+            execution_time = time.time() - start_time
+            return TransformResult(
+                success=False,
+                input_path=input_path,
+                source_name=source_name,
+                error=str(e),
+                execution_time=execution_time,
+            )
+        except Exception as e:
+            execution_time = time.time() - start_time
+            return TransformResult(
+                success=False,
+                input_path=input_path,
+                source_name=source_name,
+                error=f"Unexpected error: {str(e)}",
+                execution_time=execution_time,
+            )
+
+    def transform_batch(
+        self,
+        batch: List[Dict[str, Any]],
+        continue_on_error: bool = True,
+    ) -> tuple[List[TransformResult], TransformStats]:
+        """批量转换多个文件
+
+        Args:
+            batch: 批量任务列表，每个任务是一个字典：
+                {"input_path": str, "source_name": str}
+                或
+                {"input_path": str, "source_name": str, "input_adapter": BaseInputAdapter, "source_adapter": BaseSourceAdapter}
+            continue_on_error: 遇到错误是否继续处理
+
+        Returns:
+            (List[TransformResult], TransformStats): 转换结果列表和统计信息
+        """
+        results = []
+        stats = TransformStats(total=len(batch))
+
+        for task in batch:
+            input_path = task.get("input_path")
+            source_name = task.get("source_name")
+            input_adapter = task.get("input_adapter")
+            source_adapter = task.get("source_adapter")
+
+            if not input_path or not source_name:
+                results.append(TransformResult(
+                    success=False,
+                    input_path=input_path or "unknown",
+                    source_name=source_name or "unknown",
+                    error="Missing required field: input_path or source_name",
+                ))
+                stats.failed += 1
+                continue
+
+            result = self.transform_file(
+                input_path=input_path,
+                source_name=source_name,
+                input_adapter=input_adapter,
+                source_adapter=source_adapter,
+            )
+
+            results.append(result)
+
+            if result.success:
+                stats.successful += 1
+            else:
+                stats.failed += 1
+                if not continue_on_error:
+                    break
+
+        return results, stats
+
+    def transform_dict(
+        self,
+        raw_payload: Dict[str, Any],
+        source_name: str,
+        source_adapter: Optional[BaseSourceAdapter] = None,
+    ) -> TransformResult:
+        """转换原始字典（跳过 input_adapter）
+
+        适用于已经解析好的字典数据，或从 API 直接获取的响应。
+
+        Args:
+            raw_payload: 原始元数据字典
+            source_name: 来源名称
+            source_adapter: 可选的 source_adapter（如果不提供则自动选择）
+
+        Returns:
+            TransformResult: 转换结果
+        """
+        import time
+        start_time = time.time()
+
+        try:
+            # Step 1: Router - 验证来源名称
+            route_result = self._router.route(raw_payload, source_name=source_name)
+
+            # Step 2: Source Adapter - 字段映射
+            if source_adapter is None:
+                source_adapter = self._get_source_adapter(route_result.source_adapter)
+
+            record = source_adapter.transform(raw_payload)
+
+            # Step 3: Normalizer - 值格式归一化
+            normalized_record = self._normalizer.normalize(record)
+
+            # Step 4: DB Mapper - 映射到数据库 payload
+            db_payload = self._db_mapper.map_to_db_payload(normalized_record)
+            upsert_key = self._db_mapper.get_upsert_key(normalized_record)
+
+            # 转换为字典格式
+            payload_dict = {
+                "papers": db_payload.papers.to_dict() if db_payload.papers else None,
+                "paper_sources": db_payload.paper_sources.to_dict() if db_payload.paper_sources else None,
+                "paper_source_metadata": db_payload.paper_source_metadata.to_dict() if db_payload.paper_source_metadata else None,
+                "paper_author_affiliation": db_payload.paper_author_affiliation.to_dict() if db_payload.paper_author_affiliation else None,
+                "paper_keywords": db_payload.paper_keywords.to_list() if db_payload.paper_keywords else [],
+                "paper_references": db_payload.paper_references.to_list() if db_payload.paper_references else [],
+            }
+
+            execution_time = time.time() - start_time
+
+            # 提取 work_id
+            work_id = None
+            if db_payload.papers:
+                work_id = db_payload.papers.work_id
+
+            return TransformResult(
+                success=True,
+                input_path="<dict>",
+                source_name=source_name,
+                db_payload=payload_dict,
+                upsert_key=upsert_key,
+                work_id=work_id,  # ← 新增：全局唯一标识符
+                execution_time=execution_time,
+            )
+
+        except (RoutingError, NormalizerError, DBMapperError) as e:
+            execution_time = time.time() - start_time
+            return TransformResult(
+                success=False,
+                input_path="<dict>",
+                source_name=source_name,
+                error=str(e),
+                execution_time=execution_time,
+            )
+        except Exception as e:
+            execution_time = time.time() - start_time
+            return TransformResult(
+                success=False,
+                input_path="<dict>",
+                source_name=source_name,
+                error=f"Unexpected error: {str(e)}",
+                execution_time=execution_time,
+            )
+
+    def _get_input_adapter(self, input_path: str) -> BaseInputAdapter:
+        """根据文件扩展名获取 input_adapter
+
+        Args:
+            input_path: 输入文件路径
+
+        Returns:
+            BaseInputAdapter: 对应的 input_adapter 实例
+
+        Raises:
+            TransformerError: 不支持的文件格式
+        """
+        ext = Path(input_path).suffix.lower()
+
+        adapter_class = self.INPUT_ADAPTERS.get(ext)
+        if adapter_class is None:
+            supported = ", ".join(self.INPUT_ADAPTERS.keys())
+            raise TransformerError(
+                f"Unsupported file format: {ext}. Supported formats: {supported}"
+            )
+
+        return adapter_class()
+
+    def _get_source_adapter(self, source_name: str) -> BaseSourceAdapter:
+        """根据来源名称获取 source_adapter
+
+        Args:
+            source_name: 来源名称
+
+        Returns:
+            BaseSourceAdapter: 对应的 source_adapter 实例
+
+        Raises:
+            TransformerError: 不支持的来源
+        """
+        adapter_class = self.SOURCE_ADAPTERS.get(source_name)
+        if adapter_class is None:
+            supported = ", ".join(self.SOURCE_ADAPTERS.keys())
+            raise TransformerError(
+                f"Unsupported source: {source_name}. Supported sources: {supported}"
+            )
+
+        # 传入 source_name 参数，而不是使用默认值
+        return adapter_class(source_name=source_name)
