@@ -1,0 +1,17 @@
+{
+  "title": "The Fes tyrosine kinase guides CD19 receptor fate in B-cells by shaping regulatory Src phosphorylation networks",
+  "authors": "Helbig, A. O.; Kofler, M.; Gish, G.; Lorenzen, K.; Tucholska, M.; Zhang, C.; Roth, F. P.; Colwill, K.; Pawson, T.; Petsalaki, E.",
+  "author_corresponding": "Andreas Oliver Helbig",
+  "author_corresponding_institution": "Lunenfeld-Tanenbaum Research Institute, Sinai Health Systems, 600 University Ave, M5G 1X5, Toronto,",
+  "doi": "10.1101/125088",
+  "date": "2020-01-17",
+  "version": "2",
+  "type": "new results",
+  "license": "cc_by_nc",
+  "category": "systems biology",
+  "jatsxml": "https://www.biorxiv.org/content/early/2020/01/17/125088.source.xml",
+  "abstract": "The c-Fes protein tyrosine kinase is a proto-oncogene that can also act as a tumor suppressor. We implemented an unbiased phosphoproteomics-based analysis that establishes cognate kinase-substrate associations, and revealed that c-Fes directly phosphorylates Dok1, Ptpn18 and Sts1, facilitating recruitment of the Src inhibitory kinase Csk to these substrates. These interactions resulted in modulation of Src signaling following B-cell receptor (BCR) stimulation and subsequent alteration of the protein levels of CD19, a membrane-localized BCR co-receptor and emerging key protein affecting the development of B- and plasma cell-lymphoma. Strikingly, manipulating c-Fes expression levels drove opposing biological outcomes. Low-level exogenous c-Fes expression led to a strong increase in CD19 protein levels while high c-Fes expression abolished CD19 protein levels. Thus, we propose that a balance of c-Fes and Src signaling can regulate receptor maintenance, which may influence cellular outcome such as tumorigenesis or tumor suppression.",
+  "funder": "NA",
+  "published": "NA",
+  "server": "bioRxiv"
+}

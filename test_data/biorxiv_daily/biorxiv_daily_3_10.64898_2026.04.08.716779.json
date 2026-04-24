@@ -1,0 +1,17 @@
+{
+  "title": "Immune Checkpoint Therapy Drives Maturation of a Cellular Neighborhood Nucleated by T Cell-APC Triads Enabling Spatially Compartmentalized Tumor Immunity",
+  "authors": "Medrano, R. F. V.; Sukhov, V.; Hoffer-Hawlik, K.; Rozenman, B.; Arthur, C. D.; Han, F.; Cheikh, B. B.; Sultan, H.; Takeuchi, Y.; Ameh, S.; Theisen, D. J.; Song, Y.; Kohlmiller, H. N.; White, J. M.; Sergushichev, A.; Zinselmeyer, B.; Leinert, P.; Leinert, W. P.; Sheehan, K. C. F.; Nolan, G.; Azizi, E.; Artyomov, M.; Schreiber, R. D.",
+  "author_corresponding": "Robert D Schreiber",
+  "author_corresponding_institution": "Washington University School of Medicine in St Louis",
+  "doi": "10.64898/2026.04.08.716779",
+  "date": "2026-04-12",
+  "version": "1",
+  "type": "new results",
+  "license": "cc_no",
+  "category": "immunology",
+  "jatsxml": "https://www.biorxiv.org/content/early/2026/04/12//2026.04.08.716779.source.xml",
+  "abstract": "Spatially organized immune hubs of T cells and antigen-presenting cells (APCs) have been linked to immune checkpoint therapy (ICT) efficacy, yet the mechanisms underlying their function remain unclear. Using CODEX multiplex imaging, we longitudinally characterized the dynamic evolution of intratumoral cellular neighborhoods (CN) defined by triad interactions of CD4 and CD8 T cells with two distinct myeloid APC populations: cDC1s and IFN-gamma-activated macrophages. We termed this CN the immunity-promoting CN (IP-CN) and tracked its progressive development during tumor rejection induced by anti-CTLA-4/anti-PD-1 therapy. A coordinated IFN-gamma; and TNF-alpha signaling signature accompanied the IP-CN assembly. Over time, the IP-CN underwent functional maturation, forming specialized sub-neighborhoods that compartmentalized proliferating T cells at the tumor periphery versus cytotoxic T effector cells interacting with tumor cell targets. Our findings reveal a spatiotemporal mechanism by which the IP-CN sustains and amplifies cytotoxic T cell responses, demonstrating how T cell-APC neighborhoods orchestrate tumor immunity.",
+  "funder": "NA",
+  "published": "NA",
+  "server": "bioRxiv"
+}

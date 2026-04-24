@@ -1,0 +1,17 @@
+{
+  "title": "Dynamic Functional Connectivity between Order and Randomness and its Evolution across the Human Adult Lifespan",
+  "authors": "Battaglia, D.; Thomas, B.; Hansen, E. C.; Lombardo, D.; Chettouf, S.; Daffertshofer, A.; McIntosh, A. R.; Zimmermann, J.; Ritter, P.; Jirsa, V.",
+  "author_corresponding": "Demian  Battaglia",
+  "author_corresponding_institution": "INS, Aix-Marseille University",
+  "doi": "10.1101/107243",
+  "date": "2020-01-17",
+  "version": "3",
+  "type": "new results",
+  "license": "cc_by_nc_nd",
+  "category": "neuroscience",
+  "jatsxml": "https://www.biorxiv.org/content/early/2020/01/17/107243.source.xml",
+  "abstract": "Functional Connectivity (FC) during resting-state or task conditions is not fixed but inherently dynamic. Yet, there is no consensus on whether fluctuations in FC may resemble isolated transitions between discrete FC states rather than continuous changes. This quarrel hampers advancing the study of dynamic FC. This is unfortunate as the structure of fluctuations in FC can certainly provide more information about developmental changes, aging, and progression of pathologies. We merge the two perspectives and consider dynamic FC as an ongoing network reconfiguration, including a stochastic exploration of the space of possible steady FC states. The statistical properties of this random walk deviate both from a purely \"order-driven\" dynamics, in which the mean FC is preserved, and from a purely \"randomness-driven\" scenario, in which fluctuations of FC remain uncorrelated over time. Instead, dynamic FC has a complex structure endowed with long-range sequential correlations that give rise to transient slowing and acceleration epochs in the continuous flow of reconfiguration. Our analysis for fMRI data in healthy elderly revealed that dynamic FC tends to slow down and becomes less complex as well as more random with increasing age. These effects appear to be strongly associated with age-related changes in behavioural and cognitive performance.\n\nHighlightsO_LIDynamic Functional Connectivity (dFC) at rest and during cognitive task performs a \"complex\" (anomalous) random walk.\nC_LIO_LISpeed of dFC slows down with aging.\nC_LIO_LIResting dFC replaces complexity by randomness with aging.\nC_LIO_LITask performance correlates with the speed and complexity of dFC.\nC_LI",
+  "funder": "NA",
+  "published": "10.1016/j.neuroimage.2020.117156",
+  "server": "bioRxiv"
+}

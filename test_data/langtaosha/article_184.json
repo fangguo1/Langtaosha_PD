@@ -1,0 +1,202 @@
+{
+  "url": "https://langtaosha.org.cn/lts/en/preprint/view/184",
+  "sitemap_lastmod": "2026-04-13",
+  "meta": {
+    "viewport": [
+      "width=device-width, initial-scale=1.0"
+    ],
+    "csrf-token": [
+      "IzCYhkYq1ux2PZZYWvAwzbo7DMr7mYCWLx0xYItD",
+      "IzCYhkYq1ux2PZZYWvAwzbo7DMr7mYCWLx0xYItD"
+    ],
+    "generator": [
+      "LTS Preprint Systems 3.5.0.4",
+      "LTS Preprint Systems 3.5.0.4"
+    ],
+    "gs_meta_revision": [
+      "1.1"
+    ],
+    "citation_publisher": [
+      "LangTaoSha Preprint Server"
+    ],
+    "citation_author": [
+      "Hexin Xu",
+      "Chang-Yan Shao",
+      "Yinglan Wang",
+      "Xinyu Teng",
+      "Cheng Shen",
+      "Zhixuan Zhao",
+      "Fei Jin",
+      "Yichen Huang",
+      "Yimeng Zhao",
+      "Go Kasuya",
+      "Natsuko I Kobayashi",
+      "Keitaro Tanoi",
+      "Jun-Li Hou",
+      "Wenning Wang",
+      "Ye Yu",
+      "Meng-Yang Sun",
+      "Motoyuki Hattori"
+    ],
+    "citation_author_institution": [
+      "Fudan University",
+      "China Pharmaceutical University",
+      "Fudan University",
+      "Fudan University",
+      "Fudan University",
+      "Fudan University",
+      "Fudan University",
+      "Fudan University",
+      "Fudan University",
+      "Jichi Medical University",
+      "The University of Tokyo",
+      "The University of Tokyo",
+      "Fudan University",
+      "Fudan University",
+      "China Pharmaceutical University",
+      "China Pharmaceutical University"
+    ],
+    "citation_title": [
+      "Structural basis for Mg2+-dependent autoinhibition and stepwise gating in the Arabidopsis MRS2-1 Mg2+ channel"
+    ],
+    "citation_language": [
+      "en"
+    ],
+    "citation_date": [
+      "2026/04/13"
+    ],
+    "citation_online_date": [
+      "2026/04/13"
+    ],
+    "citation_publication_date": [
+      "2026/04/13"
+    ],
+    "citation_doi": [
+      "10.65215/LTSpreprints.2026.04.13.000184"
+    ],
+    "citation_abstract_html_url": [
+      "https://langtaosha.org.cn/lts/en/preprint/view/184"
+    ],
+    "citation_abstract": [
+      "  Magnesium ion (Mg2+) is essential for plant growth and metabolism, and plant MRS2/MGT channels, which belong to the diverse metal ion transporter (MIT) superfamily, mediate Mg2+ transport for Mg2+ homeostasis, yet the structural basis of Mg2+ transport by plant MRS2/MGT channels remains poorly understood. Here, we determined cryo-EM structures of Arabidopsis thaliana MRS2-1 (AtMRS2-1) in the presence and absence of Mg2+, together with whole-cell patch-clamp recordings and molecular dynamics simulations to investigate its gating mechanism. In the Mg2+-bound structure, AtMRS2-1 adopts a closed conformation with multiple cytoplasmic Mg2+-binding sites. These sites are distinct from those reported in other bacterial and eukaryotic MIT-superfamily members, indicating divergence in cytoplasmic Mg2+ sensing within the MIT superfamily. Patch-clamp recordings showed that these cytoplasmic sites contribute to cytoplasmic Mg2+-dependent autoinhibition. Under Mg2+-free conditions, AtMRS2-1 adopts two distinct conformations. State II exhibits an expanded pore and likely corresponds to the open state. By contrast, State I displays partial expansion of the cytoplasmic domain while the pore remains closed, suggesting an intermediate state along the activation pathway. In State I, Arg225 in one subunit interacts with Tyr354 and Thr358 in the adjacent subunit, and disruption of these interactions impairs channel activity. Together, our results support a stepwise gating model in which dissociation of cytoplasmic Mg2+ drives cytoplasmic-domain rearrangement, leading to an intermediate state consistent with a preopen state before full pore opening. These findings provide a structural framework for Mg2+ sensing, autoinhibition, and stepwise gating in a plant MRS2 channel, while extending the comparative framework for MIT-superfamily gating mechanisms."
+    ],
+    "og:title": [
+      "Structural basis for Mg2+-dependent autoinhibition and stepwise gating in the Arabidopsis MRS2-1 Mg2+ channel"
+    ],
+    "og:description": [
+      "  Magnesium ion (Mg2+) is essential for plant growth and metabolism, and plant MRS2/MGT channels, which belong to the diverse metal ion transporter (MIT) superfamily, mediate Mg2+ transport for Mg2+ h"
+    ],
+    "og:url": [
+      "https://langtaosha.org.cn/lts/en/preprint/view/184"
+    ],
+    "og:type": [
+      "article"
+    ],
+    "article:published_time": [
+      "2026-04-13T00:00:00+08:00"
+    ],
+    "twitter:card": [
+      "summary_large_image"
+    ],
+    "twitter:title": [
+      "Structural basis for Mg2+-dependent autoinhibition and stepwise gating in the Arabidopsis MRS2-1 Mg2+ channel"
+    ],
+    "citation_keywords": [
+      "ion channels",
+      "cryo-EM",
+      "patch clamp"
+    ],
+    "citation_pdf_url": [
+      "https://langtaosha.org.cn/lts/en/preprint/download/184/779"
+    ],
+    "citation_reference": [
+      "1. J. H. de Baaij, J. G. Hoenderop, R. J. Bindels, Magnesium in man: implications for health and disease. Physiol Rev 95, 1-46 (2015).",
+      "2. M. E. Maguire, J. A. Cowan, Magnesium chemistry and biochemistry. Biometals : an international journal on the role of metal ions in biology, biochemistry, and medicine 15, 203-210 (2002).",
+      "3. A. Hartwig, Role of magnesium in genomic stability. Mutation research 475, 113-121 (2001).",
+      "4. J. A. Cowan, Structural and catalytic chemistry of magnesium-dependent enzymes. Biometals : an international journal on the role of metal ions in biology, biochemistry, and medicine 15, 225-235 (2002).",
+      "5. N. Verbruggen, C. Hermans, Physiological and molecular responses to magnesium nutritional imbalance in plants. Plant and Soil 368, 87-99 (2013).",
+      "6. J. Gerendás, H. Führs, The significance of magnesium for crop quality. Plant and Soil 368, 101-128 (2013).",
+      "7. I. Cakmak, E. A. Kirkby, Role of magnesium in carbon partitioning and alleviating photooxidative damage. Physiol Plant 133, 692-704 (2008).",
+      "8. W. Guo, H. Nazim, Z. Liang, D. Yang, Magnesium deficiency in plants: An urgent problem. The Crop Journal 4, 83-91 (2016).",
+      "9. V. Knoop, M. Groth-Malonek, M. Gebert, K. Eifler, K. Weyand, Transport of magnesium and other divalent cations: evolution of the 2-TM-GxN proteins in the MIT superfamily. Mol Genet Genomics 274, 205-216 (2005).",
+      "10. D. Niegowski, S. Eshaghi, The CorA family: structure and function revisited. Cellular and molecular life sciences : CMLS 64, 2564-2574 (2007).",
+      "11. K. M. Papp-Wallace et al., The CorA Mg2+ channel is required for the virulence of Salmonella enterica serovar typhimurium. J Bacteriol 190, 6517-6523 (2008).",
+      "12. Y. Park et al., Inhibition of CorA-Dependent Magnesium Homeostasis Is Cidal in Mycobacterium tuberculosis. Antimicrob Agents Chemother 63 (2019).",
+      "13. D. Chatterjee et al., Involvement of CorA of Mycobacterium smegmatis in exerting intrinsic resistance towards structurally unrelated antibiotics. J Appl Microbiol 135 (2024).",
+      "14. M. Piskacek, L. Zotova, G. Zsurka, R. J. Schweyen, Conditional knockdown of hMRS2 results in loss of mitochondrial Mg2+ uptake and cell death. J Cell Mol Med 13, 693-700 (2009).",
+      "15. Y. Chen et al., Human mitochondrial Mrs2 protein promotes multidrug resistance in gastric cancer cells by regulating p27, cyclin D1 expression and cytochrome C release. Cancer Biol Ther 8, 607-614 (2009).",
+      "16. T. Kuramoto et al., A mutation in the gene encoding mitochondrial Mg2+ channel MRS2 results in demyelination in the rat. PLoS genetics 7, e1001262 (2011).",
+      "17. I. Schock et al., A member of a novel Arabidopsis thaliana gene family of candidate Mg2+ ion transporters complements a yeast mitochondrial group II intron-splicing mutant. Plant J 24, 489-501 (2000).",
+      "18. L. Li, A. F. Tutone, R. S. Drummond, R. C. Gardner, S. Luan, A novel family of magnesium transport genes in Arabidopsis. Plant Cell 13, 2761-2775 (2001).",
+      "19. B. M. Waters, Moving magnesium in plant cells. New Phytol 190, 510-513 (2011).",
+      "20. H. Lenz et al., Magnesium deficiency phenotypes upon multiple knockout of Arabidopsis thaliana MRS2 clade B genes can be ameliorated by concomitantly reduced calcium supply. Plant Cell Physiol 54, 1118-1131 (2013).",
+      "21. R. J. Tang et al., Two transporters mobilize magnesium from vacuolar stores to enable plant acclimation to magnesium deficiency. Plant Physiol 190, 1307-1320 (2022).",
+      "22. M. Gebert et al., A root-expressed magnesium transporter of the MRS2/MGT gene family in Arabidopsis thaliana allows for growth in low-Mg2+ environments. Plant Cell 21, 4018-4030 (2009).",
+      "23. Y. Sun, R. Yang, L. Li, J. Huang, The Magnesium Transporter MGT10 Is Essential for Chloroplast Development and Photosynthesis in Arabidopsis thaliana. Mol Plant 10, 1584-1587 (2017).",
+      "24. V. V. Lunin et al., Crystal structure of the CorA Mg2+ transporter. Nature 440, 833-837 (2006).",
+      "25. S. Eshaghi et al., Crystal structure of a divalent metal ion transporter CorA at 2.9 angstrom resolution. Science 313, 354-357 (2006).",
+      "26. J. Payandeh, E. F. Pai, A structural basis for Mg2+ homeostasis and the CorA translocation cycle. The EMBO journal 25, 3762-3773 (2006).",
+      "27. F. Jin, Y. Huang, M. Hattori, Recent advances in the structural biology of Mg2+ channels and transporters. Journal of Molecular Biology 434, 167729 (2022).",
+      "28. M. Li et al., Molecular basis of Mg2+ permeation through the human mitochondrial Mrs2 channel. Nat Commun 14, 4713 (2023).",
+      "29. L. T. F. Lai, J. Balaraman, F. Zhou, D. Matthies, Cryo-EM structures of human magnesium channel MRS2 reveal gating and regulatory mechanisms. Nat Commun 14, 7207 (2023).",
+      "30. Z. He et al., Structure and function of the human mitochondrial MRS2 channel. Nat Struct Mol Biol 32, 459-468 (2025).",
+      "31. P. Li et al., Closed and open structures of the eukaryotic magnesium channel Mrs2 reveal the auto-ligand-gating regulation mechanism. Nat Struct Mol Biol 32, 491-501 (2025).",
+      "32. O. Dalmas et al., A repulsion mechanism explains magnesium permeation and selectivity in CorA. Proceedings of the National Academy of Sciences of the United States of America 111, 3002-3007 (2014).",
+      "33. O. Dalmas, P. Sompornpisut, F. Bezanilla, E. Perozo, Molecular mechanism of Mg2+-dependent gating in CorA. Nature communications 5, 3590 (2014).",
+      "34. D. Matthies et al., Cryo-EM Structures of the Magnesium Channel CorA Reveal Symmetry Break upon Gating. Cell 164, 747-756 (2016).",
+      "35. T. Kawate, E. Gouaux, Fluorescence-detection size-exclusion chromatography for precrystallization screening of integral membrane proteins. Structure 14, 673-681 (2006).",
+      "36. R. Pfoh et al., Structural asymmetry in the magnesium channel CorA points to sequential allosteric regulation. Proceedings of the National Academy of Sciences of the United States of America 109, 18809-18814 (2012).",
+      "37. A. Guskov et al., Structural insights into the mechanisms of Mg2+ uptake, transport, and gating by CorA. Proceedings of the National Academy of Sciences of the United States of America 109, 18459-18464 (2012).",
+      "38. J. Payandeh et al., Probing structure-function relationships and gating mechanisms in the CorA Mg2+ transport system. The Journal of biological chemistry 283, 11721-11733 (2008).",
+      "39. X. Yang et al., Mutagenesis analysis of GMN motif in Arabidopsis thaliana Mg2+ transporter MRS2-1. Bioscience, Biotechnology, and Biochemistry 86, 870-874 (2022).",
+      "40. J. Payandeh, T. Scheuer, N. Zheng, W. A. Catterall, The crystal structure of a voltage-gated sodium channel. Nature 475, 353-358 (2011).",
+      "41. X. Zhang et al., Crystal structure of an orthologue of the NaChBac voltage-gated sodium channel. Nature 486, 130-134 (2012).",
+      "42. S. G. Brohawn, E. B. Campbell, R. MacKinnon, Physical mechanism for gating and mechanosensitivity of the human TRAAK K+ channel. Nature 516, 126-130 (2014).",
+      "43. H. Yang et al., Pore architecture of TRIC channels and insights into their gating mechanism. Nature 10.1038/nature19767 (2016).",
+      "44. G. Kasuya et al., Crystal structures of the TRIC trimeric intracellular cation channel orthologues. Cell research 26, 1288-1301 (2016).",
+      "45. M. Hattori, Y. Tanaka, S. Fukai, R. Ishitani, O. Nureki, Crystal structure of the MgtE Mg2+ transporter. Nature 448, 1072-1075 (2007).",
+      "46. M. Hattori et al., Mg2+-dependent gating of bacterial MgtE channel underlies Mg2+ homeostasis. The EMBO journal 28, 3602-3612 (2009).",
+      "47. F. Jin et al., The structure of MgtE in the absence of magnesium provides new insights into channel gating. PLoS biology 19, e3001231 (2021).",
+      "48. S. J. Conn et al., Magnesium transporters, MGT2/MRS2-1 and MGT3/MRS2-5, are important for magnesium partitioning within Arabidopsis thaliana mesophyll vacuoles. New Phytol 190, 583-594 (2011).",
+      "49. R. J. Tang et al., Tonoplast CBL-CIPK calcium signaling network regulates magnesium homeostasis in Arabidopsis. Proc Natl Acad Sci U S A 112, 3134-3139 (2015).",
+      "50. S. I. Inoue et al., A tonoplast-localized magnesium transporter is crucial for stomatal opening in Arabidopsis under high Mg2+ conditions. New Phytol 236, 864-877 (2022).",
+      "51. T. Saito et al., Expression and functional analysis of the CorA-MRS2-ALR-type magnesium transporter family in rice. Plant Cell Physiol 54, 1673-1683 (2013).",
+      "52. H. Li et al., Identification, and Functional and Expression Analyses of the CorA/MRS2/MGT-Type Magnesium Transporter Family in Maize. Plant Cell Physiol 57, 1153-1168 (2016).",
+      "53. R. Reddi, K. Matulef, E. Riederer, P. Moenne-Loccoz, F. I. Valiyaveetil, Structures of Gating Intermediates in a K+ channel. J Mol Biol 433, 167296 (2021).",
+      "54. N. Bharambe et al., Cryo-EM structures of prokaryotic ligand-gated ion channel GLIC provide insights into gating in a lipid environment. Nat Commun 15, 2967 (2024).",
+      "55. J. Yu et al., Mechanism of gating and partial agonist action in the glycine receptor. Cell 184, 957-968 e921 (2021).",
+      "56. S. K. Erramilli et al., Conformational ensembles of the magnesium channel CorA reveal structural basis for channel gating. Proc Natl Acad Sci U S A 123, e2512532123 (2026).",
+      "57. D. J. Scott et al., A Novel Ultra-Stable, Monomeric Green Fluorescent Protein For Direct Volumetric Imaging of Whole Organs Using CLARITY. Sci Rep 8, 667 (2018).",
+      "58. A. Punjani, J. L. Rubinstein, D. J. Fleet, M. A. Brubaker, cryoSPARC: algorithms for rapid unsupervised cryo-EM structure determination. Nat Methods 14, 290-296 (2017).",
+      "59. A. Punjani, H. Zhang, D. J. Fleet, Non-uniform refinement: adaptive regularization improves single-particle cryo-EM reconstruction. Nat Methods 17, 1214-1221 (2020).",
+      "60. A. Punjani, D. J. Fleet, 3D variability analysis: Resolving continuous flexibility and discrete heterogeneity from single particle cryo-EM. J Struct Biol 213, 107702 (2021).",
+      "61. M. Mirdita et al., ColabFold: making protein folding accessible to all. Nature Methods 19, 679-682 (2022).",
+      "62. J. Jumper et al., Highly accurate protein structure prediction with AlphaFold. Nature 596, 583-589 (2021).",
+      "63. D. Liebschner et al., Macromolecular structure determination using X-rays, neutrons and electrons: recent developments in Phenix. Acta Crystallographica Section D 75, 861-877 (2019).",
+      "64. P. Emsley, K. Cowtan, Coot: model-building tools for molecular graphics. Acta Crystallographica Section D: Biological Crystallography 60, 2126-2132 (2004).",
+      "65. E. F. Pettersen et al., UCSF Chimera--a visualization system for exploratory research and analysis. Journal of computational chemistry 25, 1605-1612 (2004).",
+      "66. F. Sievers, D. G. Higgins, Clustal Omega, accurate alignment of very large numbers of sequences. Methods Mol Biol 1079, 105-116 (2014).",
+      "67. X. Robert, C. Guillon, P. Gouet, FoldScript: a web server for the efficient analysis of AI-generated 3D protein models. Nucleic acids research 53, W277-W282 (2025).",
+      "68. O. S. Smart, J. G. Neduvelil, X. Wang, B. A. Wallace, M. S. Sansom, HOLE: a program for the analysis of the pore dimensions of ion channel structural models. J Mol Graph 14, 354-360, 376 (1996).",
+      "69. M. Y. Sun et al., Mechanism of capsaicin entry into buried vanilloid sites in TRPV1. Nat Chem Biol 21, 1957-1969 (2025).",
+      "70. E. Schmidt et al., Structural mechanism of TRPM7 channel regulation by intracellular magnesium. Cell Mol Life Sci 79, 225 (2022).",
+      "71. Y. Z. Huang et al., TRPV1 analgesics disturb core body temperature via a biased allosteric mechanism involving conformations distinct from that for nociception. Neuron 112, 1815-1831 e1814 (2024).",
+      "72. Y. Y. Lin et al., Finely ordered intracellular domain harbors an allosteric site to modulate physiopathological function of P2X3 receptors. Nat Commun 15, 7652 (2024).",
+      "73. X. F. Ma et al., The long beta2,3-sheets encoded by redundant sequences play an integral role in the channel function of P2X7 receptors. J Biol Chem 298, 102002 (2022).",
+      "74. A. Sali, T. L. Blundell, Comparative protein modelling by satisfaction of spatial restraints. J Mol Biol 234, 779-815 (1993).",
+      "75. A. Sali, J. P. Overington, Derivation of rules for comparative protein modeling from a database of protein structure alignments. Protein Sci 3, 1582-1596 (1994).",
+      "76. M. H. Olsson, C. R. Sondergaard, M. Rostkowski, J. H. Jensen, PROPKA3: Consistent Treatment of Internal and Surface Residues in Empirical pKa Predictions. J Chem Theory Comput 7, 525-537 (2011).",
+      "77. J. Lee et al., CHARMM-GUI Input Generator for NAMD, GROMACS, AMBER, OpenMM, and CHARMM/OpenMM Simulations Using the CHARMM36 Additive Force Field. J Chem Theory Comput 12, 405-413 (2016).",
+      "78. M. A. Lomize, A. L. Lomize, I. D. Pogozheva, H. I. Mosberg, OPM: orientations of proteins in membranes database. Bioinformatics 22, 623-625 (2006).",
+      "79. W. L. Jorgensen, J. Chandrasekhar, J. D. Madura, R. W. Impey, M. L. Klein, Comparison of simple potential functions for simulating liquid water. The Journal of Chemical Physics 79, 926-935 (1983).",
+      "80. M. J. Abraham et al., GROMACS: High performance molecular simulations through multi-level parallelism from laptops to supercomputers. SoftwareX 1-2, 19-25 (2015).",
+      "81. A. D. MacKerell et al., All-atom empirical potential for molecular modeling and dynamics studies of proteins. J Phys Chem B 102, 3586-3616 (1998).",
+      "82. S. Nosé, A molecular dynamics method for simulations in the canonical ensemble. Molecular Physics 52, 255-268 (1984).",
+      "83. W. G. Hoover, Canonical dynamics: Equilibrium phase-space distributions. Phys Rev A Gen Phys 31, 1695-1697 (1985).",
+      "84. M. Parrinello, A. Rahman, Polymorphic transitions in single crystals: A new molecular dynamics method. Journal of Applied Physics 52, 7182-7190 (1981).",
+      "85. B. Hess, H. Bekker, H. J. C. Berendsen, J. G. E. M. Fraaije, LINCS: A linear constraint solver for molecular simulations. Journal of computational chemistry 18, 1463-1472 (1997).",
+      "86. T. Darden, D. York, L. Pedersen, Particle mesh Ewald: An N⋅log(N) method for Ewald sums in large systems. The Journal of Chemical Physics 98, 10089-10092 (1993)."
+    ]
+  },
+  "fetched_at": "2026-04-14T04:00:00Z"
+}

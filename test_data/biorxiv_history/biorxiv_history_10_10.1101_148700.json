@@ -1,0 +1,17 @@
+{
+  "title": "Recovery from transgenerational RNA silencing is driven by gene-specific homeostasis",
+  "authors": "Devanapally, S.; Raman, P.; Allgood, S.; Ettefa, F.; Diop, M.; Chey, M.; Lin, Y.; Cho, Y. E.; Yin, R.; Jose, A. M.",
+  "author_corresponding": "Antony M. Jose",
+  "author_corresponding_institution": "University of Maryland College Park",
+  "doi": "10.1101/148700",
+  "date": "2020-01-07",
+  "version": "3",
+  "type": "new results",
+  "license": "cc_by_nd",
+  "category": "genetics",
+  "jatsxml": "https://www.biorxiv.org/content/early/2020/01/07/148700.source.xml",
+  "abstract": "Changes in gene expression that last for multiple generations without changes in gene sequence have been reported in many plants and animals1-3. Cases of such transgenerational epigenetic inheritance (TEI) could support the ancestral origins of some diseases and drive evolutionary novelty. Here, we report that stably expressed sequences in C. elegans have features that provide a barrier against TEI. By using double-stranded RNA (dsRNA) targeting the same sequence in different genes, we show that genes typically recover from silencing within the germline in a few generations. A rare recombinant two-gene operon containing this target sequence that recovered poorly from induced silencing enabled us to delineate mechanisms that can perpetuate silencing. Parental exposure to dsRNA targeting one gene within this operon reveals two distinct phases of the resulting TEI: only the matching gene is silenced in early generations, but both can become silenced in later generations. However, silencing of both genes can be initiated within one generation by mating, which perturbs intergenerational RNA-based mechanisms such that silencing dominates for more than 250 generations. This stable RNA silencing can also reduce the expression of homologous sequences in different genes in trans within the germline, but the homologous genes recover expression after a few generations. These results suggest that stably expressed sequences are subject to feedback control that opposes TEI initiated by multiple mechanisms within the germline. We speculate that similar homeostatic mechanisms that enable recovery from epigenetic changes underlie the observed preservation of form and function in successive generations of living systems.",
+  "funder": "NA",
+  "published": "NA",
+  "server": "bioRxiv"
+}

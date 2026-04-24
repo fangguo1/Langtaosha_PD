@@ -1,0 +1,17 @@
+{
+  "title": "A Framework of All Discovered Immunological Pathways and Their Roles for Four Specific Types of Pathogens and Hypersensitivities",
+  "authors": "Hu, W.",
+  "author_corresponding": "Wanchung  Hu",
+  "author_corresponding_institution": "Shin Kong Hospital",
+  "doi": "10.1101/006965",
+  "date": "2020-01-08",
+  "version": "13",
+  "type": "confirmatory results",
+  "license": "cc_no",
+  "category": "immunology",
+  "jatsxml": "https://www.biorxiv.org/content/early/2020/01/08/006965.source.xml",
+  "abstract": "Tfh initiates four eradicable immunities. Tfh includes FDC, LTi, IL21 CD4 T cell, and IgG/M B cell. Treg initiates four tolerable immunities. Treg includes DCreg, ILCreg, TGF{beta} CD4 T cell, and IgA B cell. TH1/TH1-like is immunity for intracellular bacteria/protozoa and type 4 delayed type hypersensitivity. TH1 includes M1 macrophage, mDC2, Tc1 CD8 T cell, IFNg CD4 T cell, ILC1, iNKT1, and IgG3 B cell. TH1-like includes M2 macrophage, ILC1, suppressive CD8 T cell, IFNg/TGF{beta} CD4 T cell, regulatory iNKT cells, and IgA1 B cell. TH2/TH9 is immunity for helminths and type1 IgE mediated hypersensitivity. TH2 includes iEOS eosinophil, Langerhans cell, basophil/MCt mast cell, IL-4 CD4 T cell, ILC2, iNKT2, and IgE/IgG4 B cell. TH9 includes rEOS eosinophil, basophils/mast cell MCct, IL-9 CD4 T cell, ILC2, regulatory iNKT cells, and IgA2 B cell. TH22/TH17 is immunity for extracellular bacteria/fungi and type 3 immune complex hypersensitivity. TH22 includes N1 neutrophils, mDC1, IL-22 CD4 T cell, ILC3(NCR+), iNKT17, and IgG2 B cell. TH17 includes N2 neutrophils, IL-17 CD4 T cell, regulatory iNKT cells, ILC3(NCR-), and IgA2 B cell. TH{beta}/TH3 is immunity for viruses and type 2 antibody dependent cytotoxic hypersensitivity. TH{beta} includes NK1 natural killer cell, pDC, Tc2 CD8 T cell, IL10 CD4 T cell, ILC10, iNKT10, and IgG1 B cell. TH3 includes NK2 natural killer cell, suppressive CD8 T cell, ILC10, IL-10/TGF{beta} CD4 T cell, regulatory iNKT cells, and IgA1 B cell.\n\nSummary sentenceThe summarized framework of host immunities to explain their relations to specific pathogens and hypersensitivities",
+  "funder": "NA",
+  "published": "10.3389/fimmu.2020.01992",
+  "server": "bioRxiv"
+}

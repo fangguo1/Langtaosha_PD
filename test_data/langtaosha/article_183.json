@@ -1,0 +1,167 @@
+{
+  "url": "https://langtaosha.org.cn/lts/en/preprint/view/183",
+  "sitemap_lastmod": "2026-04-12",
+  "meta": {
+    "viewport": [
+      "width=device-width, initial-scale=1.0"
+    ],
+    "csrf-token": [
+      "ArGOjGyh49JvLWBK7AFAFuykYpdERdzP4EOsWS3k",
+      "ArGOjGyh49JvLWBK7AFAFuykYpdERdzP4EOsWS3k"
+    ],
+    "generator": [
+      "LTS Preprint Systems 3.5.0.4",
+      "LTS Preprint Systems 3.5.0.4"
+    ],
+    "gs_meta_revision": [
+      "1.1"
+    ],
+    "citation_publisher": [
+      "LangTaoSha Preprint Server"
+    ],
+    "citation_author": [
+      "Ruibo Zhai",
+      "Jiening Wang",
+      "Xianhui Hou",
+      "Xiaogang Niu",
+      "Changwen Jin",
+      "Shan Wu",
+      "Yunfei Hu"
+    ],
+    "citation_author_institution": [
+      "Institute Academy for Precision Measurment Science and Technology, CAS",
+      "Peking University",
+      "Hubei University",
+      "Peking University",
+      "Peking University",
+      "Peking University",
+      "Hubei University",
+      "Institute Academy for Precision Measurment Science and Technology, CAS"
+    ],
+    "citation_title": [
+      "Distinct C-tail dynamics between β-arrestin isoforms in forming GPCR tail- and core-engaged complexes"
+    ],
+    "citation_language": [
+      "en"
+    ],
+    "citation_date": [
+      "2026/04/12"
+    ],
+    "citation_online_date": [
+      "2026/04/12"
+    ],
+    "citation_publication_date": [
+      "2026/04/12"
+    ],
+    "citation_doi": [
+      "10.65215/LTSpreprints.2026.04.11.000183"
+    ],
+    "citation_abstract_html_url": [
+      "https://langtaosha.org.cn/lts/en/preprint/view/183"
+    ],
+    "citation_abstract": [
+      "The two non-visual β-arrestins (βarrs) are essential scaffolding proteins involved in desensitization, internalization and signaling of G protein-coupled receptors (GPCRs), and they show functional divergence despite high structural similarity. By employing NMR, cryo-EM and computational methods, we herein report previously unanticipated differences between the two isoforms in the basal and both the receptor tail- and core-engaged states. The autoinhibitory C-tails of the two βarrs show distinct dynamics in the basal state, and only that of βarr2 robustly transits into an α-helix that docks at the central crest in the tail-engaged state. This difference is encoded in the amino acid sequences of the disordered regions flanking the chameleon motif. Moreover, core interaction releases βarr2 C-tail, and the core-engaged complex structures determined in lipid nanodiscs reveal a less tilted binding angle of βarr2 due to a shallower insertion of its C-edge loops into the membrane. Our findings provide a conceptual molecular framework for understanding the functional divergence between the βarr isoforms in regulating GPCR signaling."
+    ],
+    "og:title": [
+      "Distinct C-tail dynamics between β-arrestin isoforms in forming GPCR tail- and core-engaged complexes"
+    ],
+    "og:description": [
+      "The two non-visual β-arrestins (βarrs) are essential scaffolding proteins involved in desensitization, internalization and signaling of G protein-coupled receptors (GPCRs), and they show functional di"
+    ],
+    "og:url": [
+      "https://langtaosha.org.cn/lts/en/preprint/view/183"
+    ],
+    "og:type": [
+      "article"
+    ],
+    "article:published_time": [
+      "2026-04-12T00:00:00+08:00"
+    ],
+    "twitter:card": [
+      "summary_large_image"
+    ],
+    "twitter:title": [
+      "Distinct C-tail dynamics between β-arrestin isoforms in forming GPCR tail- and core-engaged complexes"
+    ],
+    "citation_keywords": [
+      "GPCR",
+      "arrestin",
+      "dynamics",
+      "structure",
+      "NMR",
+      "cryo-EM"
+    ],
+    "citation_pdf_url": [
+      "https://langtaosha.org.cn/lts/en/preprint/download/183/771"
+    ],
+    "citation_reference": [
+      "1. W. I. Weis, B. K. Kobilka, The molecular basis of G protein-coupled receptor activation. Annu. Rev. Biochem. 87, 897–919 (2018).",
+      "2. S. M. DeWire, S. Ahn, R. J. Lefkowitz, S. K. Shenoy, Beta-arrestins and cell signaling. Annu. Rev. Physiol. 69, 483–510 (2007).",
+      "3. D. Hilger, M. Masureel, B. K. Kobilka, Structure and dynamics of GPCR signaling complexes. Nat. Struct. Mol. Biol. 25, 4–12 (2018).",
+      "4. A. K. Shukla et al., Visualization of arrestin recruitment by a G-protein-coupled receptor. Nature 512, 218–222 (2014).",
+      "5. T. J. Cahill et al., Distinct conformations of GPCR-β-arrestin complexes mediate desensitization, signaling, and endocytosis. Proc. Natl. Acad. Sci. U.S.A. 114, 2562–2567 (2017).",
+      "6. T. A. Kohout, F. S. Lin, S. J. Perry, D. A. Conner, R. J. Lefkowitz, beta-Arrestin 1 and 2 differentially regulate heptahelical receptor signaling and trafficking. Proc. Natl. Acad. Sci.",
+      "U.S.A. 98, 1601–1606 (2001).",
+      "7. S. Ahn, C. D. Nelson, T. R. Garrison, W. E. Miller, R. J. Lefkowitz, Desensitization, internalization, and signaling functions of beta-arrestins demonstrated by RNA interference. Proc. Natl. Acad. Sci. U.S.A. 100, 1740–1744 (2003).",
+      "8. S. Ahn, H. Wei, T. R. Garrison, R. J. Lefkowitz, Reciprocal regulation of angiotensin receptor activated extracellular signal-regulated kinases by beta-arrestins 1 and 2. J. Biol. Chem. 279, 7807–7811 (2004).",
+      "9. A. Srivastava, B. Gupta, C. Gupta, A. K. Shukla, Emerging functional divergence of beta arrestin isoforms in GPCR function. Trends Endocrinol. Metab. 26, 628–642 (2015).",
+      "10. W. Yin et al., A complex structure of arrestin-2 bound to a G protein-coupled receptor. Cell Res. 29, 971–983 (2019).",
+      "11. W. Huang et al., Structure of the neurotensin receptor 1 in complex with β-arrestin 1. Nature 579, 303–308 (2020).",
+      "12. Y. Lee et al., Molecular basis of β-arrestin coupling to formoterol-bound β1-adrenoceptor. Nature 583, 862–866 (2020).",
+      "13. D. P. Staus et al., Structure of the M2 muscarinic receptor-β-arrestin complex in a lipid nanodisc. Nature 579, 297–302 (2020).",
+      "14. J. Bous et al., Structure of the vasopressin hormone-V2 receptor-β-arrestin1 ternary complex. Sci. Adv. 8, eabo7761 (2022).",
+      "15. C. Cao et al., Signaling snapshots of a serotonin receptor activated by the prototypical psychedelic LSD. Neuron 110, 3154–3167.e7 (2022).",
+      "16. Y.-Y. Liao et al., Snapshot of the cannabinoid receptor 1-arrestin complex unravels the biased signaling mechanism. Cell 186, 5784–5797.e17 (2023).",
+      "17. H. Zhang et al., The molecular basis of μ-opioid receptor signaling plasticity. Cell Res. 35, 1021–1036 (2025).",
+      "18. K. Chen et al., Tail engagement of arrestin at the glucagon receptor. Nature 620, 904–910 (2023).",
+      "19. H. Cai et al., Noncanonical agonist-dependent and -independent arrestin recruitment of GPR1. Science 390, eadt8794 (2025).",
+      "20. Q. Chen et al., Effect of phosphorylation barcodes on arrestin binding to a chemokine receptor. Nature 643, 280–287 (2025).",
+      "21. R. Zhai et al., Distinct activation mechanisms of β-arrestin-1 revealed by 19F NMR spectroscopy. Nat. Commun. 14, 7865 (2023).",
+      "22. E. Cassier et al., Phosphorylation of β-arrestin2 at Thr383 by MEK underlies β-arrestindependent activation of Erk1/2 by GPCRs. eLife 6, e23777 (2017).",
+      "23. W. B. Asher et al., GPCR-mediated β-arrestin activation deconvoluted with single-molecule precision. Cell 185, 1661–1675.e16 (2022).",
+      "24. V. V. Gurevich, E. V. Gurevich, GPCR-dependent and -independent arrestin signaling. Trends Pharmacol. Sci. 45, 639–650 (2024).",
+      "25. I. Petrovic et al., A high-resolution analysis of arrestin2 interactions responsible for CCR5 endocytosis. eLife 14, RP106839 (2026).",
+      "26. J. Maharana et al., Molecular insights into atypical modes of β-arrestin interaction with seven transmembrane receptors. Science 383, 101–108 (2024).",
+      "27. J. Abramson et al., Accurate structure prediction of biomolecular interactions with AlphaFold 3. Nature 630, 493–500 (2024).",
+      "28. J. Grimes et al., Plasma membrane preassociation drives β-arrestin coupling to receptors and activation. Cell 186, 2238–2255.e20 (2023).",
+      "29. A. A. S. Gomes et al., Lipids modulate the dynamics of GPCR:β-arrestin interaction. Nat. Commun. 16, 4982 (2025).",
+      "30. T. D. Killeen et al., Distinct membrane binding properties of the two non-visual arrestins. Commun. Biol. 9, 150 (2026).",
+      "31. S. G. F. Rasmussen et al., Crystal structure of the β2 adrenergic receptor-Gs protein complex. Nature 477, 549–555 (2011).",
+      "32. J. J. Liu, R. Horst, V. Katritch, R. C. Stevens, K. Wüthrich, Biased signaling pathways in beta2adrenergic receptor characterized by 19F-NMR. Science 335, 1106–1110 (2012).",
+      "33. C.-M. Suomivuori et al., Molecular mechanism of biased signaling in a prototypical G proteincoupled receptor. Science 367, 881–887 (2020).",
+      "34. Q. Qu et al., Insights into distinct signaling profiles of the µOR activated by diverse agonists. Nat. Chem. Biol. 19, 423–430 (2022).",
+      "35. V. A. Rangari et al., A cryptic pocket in CB1 drives peripheral and functional selectivity. Nature 640, 265–273 (2025).",
+      "36. Q. Chen et al., An Eight amino acid segment controls oligomerization and preferred conformation of the two non-visual arrestins. J. Mol. Biol. 433, 166790 (2021).",
+      "37. R. S. Haider et al., β-arrestin1 and 2 exhibit distinct phosphorylation-dependent conformations when coupling to the same GPCR in living cells. Nat. Commun. 13, 5638 (2022).",
+      "38. R. H. Oakley, S. A. Laporte, J. A. Holt, M. G. Caron, L. S. Barak, Differential affinities of visual arrestin, beta arrestin1, and beta arrestin2 for G protein-coupled receptors delineate two major classes of receptors. J. Biol. Chem. 275, 17201–17210 (2000).",
+      "39. M. O'Hayre et al., Genetic evidence that β-arrestins are dispensable for the initiation of β2adrenergic receptor signaling to ERK. Sci. Signal. 10, eaal3395 (2017).",
+      "40. S. A. Laporte, W. E. Miller, K.-M. Kim, M. G. Caron, beta-Arrestin/AP-2 interaction in G protein-coupled receptor internalization: identification of a beta-arrestin binding site in beta 2 adaptin. J. Biol. Chem. 277, 9247–9254 (2002).",
+      "41. Y.-M. Kim, J. L. Benovic, Differential roles of arrestin-2 interaction with clathrin and adaptor protein 2 in G protein-coupled receptor trafficking. J. Biol. Chem. 277, 30760–30768 (2002).",
+      "42. E. M. Schmid et al., Role of the AP2 beta-appendage hub in recruiting partners for clathrincoated vesicle assembly. PLoS Biol. 4, e262 (2006).",
+      "43. D. S. Kang et al., Structure of an arrestin2-clathrin complex reveals a novel clathrin binding domain that modulates receptor trafficking. J. Biol. Chem. 284, 29860–29872 (2009).",
+      "44. L. M. Luttrell et al., Activation and targeting of extracellular signal-regulated kinases by betaarrestin scaffolds. Proc. Natl. Acad. Sci. U.S.A. 98, 2449–2454 (2001).",
+      "45. A. W. Kahsai et al., Signal transduction at GPCRs: Allosteric activation of the ERK MAPK by β-arrestin. Proc. Natl. Acad. Sci. U.S.A. 120, e2303794120 (2023).",
+      "46. A. R. B. Thomsen et al., GPCR-G protein-β-arrestin super-complex mediates sustained G protein signaling. Cell 166, 907–919 (2016).",
+      "47. G. He et al., A GPCR-G protein-β-arrestin megacomplex enabled by a versatile allosteric modulator. Cell 189, 1434–1450.e22 (2026).",
+      "48. B. Carpenter, C. G. Tate, Expression and purification of mini G proteins from Escherichia coli. Bio Protoc. 7, e2235 (2017).",
+      "49. A. H. Nguyen et al., Structure of an endosomal signaling GPCR-G protein-β-arrestin megacomplex. Nat. Struct. Mol. Biol. 26, 1123–1131 (2019).",
+      "50. J. Heng et al., Function and dynamics of the intrinsically disordered carboxyl terminus of β2 adrenergic receptor. Nat. Commun. 14, 2005 (2023).",
+      "51. M. Casiraghi et al., Structure and dynamics determine G protein coupling specificity at a class A GPCR. Sci. Adv. 11, eadq3971 (2025).",
+      "52. I. G. Denisov, Y. V. Grinkova, A. A. Lazarides, S. G. Sligar, Directed self-assembly of monodisperse phospholipid bilayer nanodiscs with controlled size. J. Am. Chem. Soc. 126,",
+      "3477–3487 (2004).",
+      "53. Z. Chai et al., Visualizing proteins in human cells at near-physiological concentrations with sensitive 19F NMR chemical tags. Angew. Chem. Int. Ed. 62, e202300318 (2023).",
+      "54. L. Ye, N. Van Eps, M. Zimmer, O. P. Ernst, R. S. Prosser, Activation of the A2A adenosine Gprotein-coupled receptor by conformational selection. Nature 533, 265–268 (2016).",
+      "55. A. Punjani, J. L. Rubinstein, D. J. Fleet, M. A. Brubaker, cryoSPARC: algorithms for rapid unsupervised cryo-EM structure determination. Nat. Methods 14, 290–296 (2017).",
+      "56. S. H. Scheres, RELION: implementation of a Bayesian approach to cryo-EM structure determination. J. Struct. Biol. 180, 519–530 (2012).",
+      "57. R. Sanchez-Garcia et al., DeepEMhancer: a deep learning solution for cryo-EM volume postprocessing. Commun. Biol. 4, 874 (2021).",
+      "58. P. Emsley, K. Cowtan, Coot: model-building tools for molecular graphics. Acta Crystallogr. D Biol. Crystallogr. 60, 2126–2132 (2004).",
+      "59. P. D. Adams et al., PHENIX: a comprehensive Python-based system for macromolecular structure solution. Acta Crystallogr. D Biol. Crystallogr. 66, 213–221 (2010).",
+      "60. C. J. Williams et al., MolProbity: More and better reference data for improved all-atom structure validation. Protein Sci. 27, 293–315 (2018).",
+      "61. J. Huang et al., CHARMM36m: an improved force field for folded and intrinsically disordered proteins. Nat. Methods 14, 71–73 (2017).",
+      "62. N. R. Latorraca et al., How GPCR phosphorylation patterns orchestrate arrestin-mediated signaling. Cell 183, 1813–1825.e18 (2020).",
+      "63. B. Hess, P-LINCS: A parallel Linear constraint solver for molecular simulation. J. Chem. Theory Comput. 4, 116–122 (2008).",
+      "64. C. W. Hopkins, S. Le Grand, R. C. Walker, A. E. Roitberg, Long-time-step molecular dynamics through hydrogen mass repartitioning. J. Chem. Theory Comput. 11, 1864–1874 (2015)."
+    ]
+  },
+  "fetched_at": "2026-04-14T04:00:00Z"
+}

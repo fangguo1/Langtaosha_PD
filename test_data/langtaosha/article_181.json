@@ -1,0 +1,93 @@
+{
+  "url": "https://langtaosha.org.cn/lts/en/preprint/view/181",
+  "sitemap_lastmod": "2026-04-09",
+  "meta": {
+    "viewport": [
+      "width=device-width, initial-scale=1.0"
+    ],
+    "csrf-token": [
+      "hqfDzK3zC9zRcBpkwf42hB4od5tj7SAuo7uUbpTM",
+      "hqfDzK3zC9zRcBpkwf42hB4od5tj7SAuo7uUbpTM"
+    ],
+    "generator": [
+      "LTS Preprint Systems 3.5.0.4",
+      "LTS Preprint Systems 3.5.0.4"
+    ],
+    "gs_meta_revision": [
+      "1.1"
+    ],
+    "citation_publisher": [
+      "LangTaoSha Preprint Server"
+    ],
+    "citation_author": [
+      "Jiali Gao",
+      "Yangyi Lu"
+    ],
+    "citation_author_institution": [
+      "Beijing University Shenzhen Graduate School",
+      "Shenzhen Bay Laboratory",
+      "Shenzhen Bay Laboratory"
+    ],
+    "citation_title": [
+      "Local Spectral Formulation of the One-Determines-All (ODA) Principle for Multistate Density Functionals"
+    ],
+    "citation_language": [
+      "en"
+    ],
+    "citation_date": [
+      "2026/04/09"
+    ],
+    "citation_online_date": [
+      "2026/04/09"
+    ],
+    "citation_publication_date": [
+      "2026/04/09"
+    ],
+    "citation_doi": [
+      "10.65215/LTSpreprints.2026.04.09.000181"
+    ],
+    "citation_abstract_html_url": [
+      "https://langtaosha.org.cn/lts/en/preprint/view/181"
+    ],
+    "citation_abstract": [
+      "Multistate density functional theory (MSDFT) generalizes Kohn–Sham density functional theory to a finite subspace of interacting states through a Hamiltonian matrix functional of the matrix density D(r). A central challenge is to construct matrix functionals that preserve subspace unitary invariance while encoding nontrivial state coupling. Here we show that any local, unitary-equivariant matrix functional of D(r) must be co-diagonalizable with D(r), and is therefore completely specified by a scalar generator acting on its eigenvalues. This establishes a one-to-all mapping from a scalar generator to the full matrix functional. As a consequence, the construction of N2 matrix elements is reduced to a single scalar mapping evaluated on the eigenvalue spectrum at each spatial grid point. The formalism is illustrated using a four-state Hubbard model, where exact reconstruction is achieved with a known scalar function, and deviations from this mapping can be systematically corrected within the spectral framework. The results provide a rigorous foundation for constructing local matrix exchange–correlation functionals with computational complexity comparable to Kohn–Sham DFT, and offer a practical route toward scalable MSDFT approximations."
+    ],
+    "og:title": [
+      "Local Spectral Formulation of the One-Determines-All (ODA) Principle for Multistate Density Functionals"
+    ],
+    "og:description": [
+      "Multistate density functional theory (MSDFT) generalizes Kohn–Sham density functional theory to a finite subspace of interacting states through a Hamiltonian matrix functional of the matrix density D("
+    ],
+    "og:url": [
+      "https://langtaosha.org.cn/lts/en/preprint/view/181"
+    ],
+    "og:type": [
+      "article"
+    ],
+    "article:published_time": [
+      "2026-04-09T00:00:00+08:00"
+    ],
+    "twitter:card": [
+      "summary_large_image"
+    ],
+    "twitter:title": [
+      "Local Spectral Formulation of the One-Determines-All (ODA) Principle for Multistate Density Functionals"
+    ],
+    "citation_keywords": [
+      "Computational Chemistry",
+      "Quantum Chemistry",
+      "Density Functional Theory"
+    ],
+    "citation_pdf_url": [
+      "https://langtaosha.org.cn/lts/en/preprint/download/181/764"
+    ],
+    "citation_reference": [
+      "1. Lu, Y.; Gao, J. Multistate Density Functional Theory of Excited States. J. Phys. Chem. Lett. 2022, 13, 7762–7769, DOI: 10.1021/acs.jpclett.2c02088.",
+      "2. Lu, Y.; Gao, J. Multistate Density Functional Theory: Theory, Methods, and Applications. Wiley Interdiscip. Rev. Comput. Mol. Sci. 2025, 15, 1–35, DOI:10.1002/wcms.70043.",
+      "3. Lu, Y.; Gao, J. Fundamental Variable and Density Representation in Multistate DFT for Excited States. J. Chem. Theory Comput. 2022, 18, 7403–7411, DOI: 10.1021/acs.jctc.2c00859.",
+      "4. Lu, Y.; Gao, J. Structure of Multi-State Correlation in Electronic Systems. J. Chem. Theory Comput. 2024, 20, 8474–8481, DOI: 10.1021/acs.jctc.4c00545.",
+      "5. Cohen, A. J.; Mori-Sanchez, P.; Yang, W. T. Challenges for Density Functional Theory. Chemical Reviews 2012, 112, 289320."
+    ]
+  },
+  "fetched_at": "2026-04-14T04:00:01Z"
+}

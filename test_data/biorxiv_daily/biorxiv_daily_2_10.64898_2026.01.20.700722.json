@@ -1,0 +1,30 @@
+{
+  "title": "On the correctness of gene tree tagging under a unified model of gene duplication, loss, and coalescence",
+  "authors": "Parsons, R.; Liu, Y.; Dua, P.; Markin, A.; Molloy, E.",
+  "author_corresponding": "Erin Molloy",
+  "author_corresponding_institution": "University of Maryland, College Park",
+  "doi": "10.64898/2026.01.20.700722",
+  "date": "2026-04-12",
+  "version": "2",
+  "type": "new results",
+  "license": "cc_no",
+  "category": "bioinformatics",
+  "jatsxml": "https://www.biorxiv.org/content/early/2026/04/12//2026.01.20.700722.source.xml",
+  "abstract": "ASTRAL-pro is the leading method for reconstructing species trees under complex evolutionary scenarios involving gene duplication, loss, and coalescence, commonly modeled by DLCoal. A unique aspect of A-pro is that it utilizes rooted gene trees, with internal vertices labeled as duplications or speciations, to modify its objective function compared to the traditional ASTRAL method. Although there is a natural event-based definition of correct tagging when genes evolve with only gene duplications and losses, it cannot be applied when there is deep coalescence. Here, we introduce a definition of correct tagging that is broadly applicable, proposing that a gene tree vertex is correctly tagged as a duplication if it is the most recent common ancestor of at least one pair of gene copies related via a duplication event. Using this definition, we study some statistical properties of ASTRAL-pro's objective function under the DLCoal model and evaluate the accuracy of ASTRAL-pro's tagging algorithm in simulations.",
+  "funder": [
+    {
+      "name": "U.S. National Science Foundation",
+      "id": "https://ror.org/021nxhr62",
+      "id-type": "ROR",
+      "award": "2441458;"
+    },
+    {
+      "name": "USDA Agricultural Research Service",
+      "id": "",
+      "id-type": "ROR",
+      "award": ""
+    }
+  ],
+  "published": "NA",
+  "server": "bioRxiv"
+}

@@ -1,0 +1,17 @@
+{
+  "title": "Design Principles of Lambda's Lysis/Lysogeny Decision vis-a-vis Multiplicity of Infection",
+  "authors": "Wadhwa, D.",
+  "author_corresponding": "Dinkar  Wadhwa",
+  "author_corresponding_institution": "Indian Institute of Technology Bombay",
+  "doi": "10.1101/146308",
+  "date": "2020-01-12",
+  "version": "12",
+  "type": "new results",
+  "license": "cc_by_nd",
+  "category": "systems biology",
+  "jatsxml": "https://www.biorxiv.org/content/early/2020/01/12/146308.source.xml",
+  "abstract": "Bacteriophage lambda makes a decision between lysis and lysogeny based on the number of coinfecting phages, namely the multiplicity of infection (MoI): lysis at low MoIs; lysogeny at high MoIs. Here, by evaluating various rationally designed models on their ability a) to make the lytic decision at MoI of 1 and the lysogeny decision at MoI of 2, b) to exhibit bistability at both MoIs, and c) to perform accurately in the presence of noise, it is demonstrated that lambdas lysis/lysogeny decision is based on three features, namely a) mutual repression, b) cooperative positive autoregulation of CI, and c) cooperative binding of the activator protein, not basal expression, triggering positive autoregulatory loop of CI. Cro and CI are sufficient to acquire the first two features. CII is required to acquire the third feature. The quasi-minimal two-protein model for the switch is justified by showing its qualitative equivalence, except for Cro repression of pRM, to the lambdas gene regulatory network responsible for the decision. A three-protein simplified version of the lambdas switch is shown to possess all the three design features. Bistability at MoI of 1 is responsible for lysogen stability, whereas bistability at MoI of 2 imparts stability to lytic development post-infection and especially during prophage induction.",
+  "funder": "NA",
+  "published": "NA",
+  "server": "bioRxiv"
+}

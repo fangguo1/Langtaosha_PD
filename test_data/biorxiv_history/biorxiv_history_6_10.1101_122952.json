@@ -1,0 +1,17 @@
+{
+  "title": "A Systematic Nomenclature for the Drosophila Ventral Nervous System",
+  "authors": "Court, R.; Namiki, S.; Armstrong, J. D.; Borner, J.; Card, G.; Costa, M.; Dickinson, M.; Duch, C.; Korff, W.; Mann, R.; Merritt, D.; Murphey, R.; Seeds, A.; Shirangi, T.; Simpson, J.; Truman, J.; Tuthill, J.; Williams, D.; Shepherd, D.",
+  "author_corresponding": "David  Shepherd",
+  "author_corresponding_institution": "University of Edinburgh",
+  "doi": "10.1101/122952",
+  "date": "2020-01-30",
+  "version": "2",
+  "type": "new results",
+  "license": "cc_by",
+  "category": "neuroscience",
+  "jatsxml": "https://www.biorxiv.org/content/early/2020/01/30/122952.source.xml",
+  "abstract": "The fruit fly, Drosophila melanogaster, is an established and powerful model system for neuroscience research with wide relevance in biology and medicine. Until recently, research on the Drosophila brain was hindered by the lack of a complete and uniform nomenclature. Recognising this problem, the Insect Brain Name Working Group produced an authoritative hierarchical nomenclature system for the adult insect brain, using Drosophila melanogaster as the reference framework, with other taxa considered to ensure greater consistency and expandability (Ito et al., 2014). Here, we extend this nomenclature system to the sub-gnathal regions of the adult Drosophila nervous system, thus providing a systematic anatomical description of the ventral nervous system (VNS). This portion of the nervous system includes the thoracic and abdominal neuromeres that were not included in the original work and contains the motor circuits that play essential roles in most fly behaviours.",
+  "funder": "NA",
+  "published": "10.1016/j.neuron.2020.08.005",
+  "server": "bioRxiv"
+}

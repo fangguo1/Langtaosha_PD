@@ -1,0 +1,17 @@
+{
+  "title": "Sperm chemotaxis is driven by the slope of the chemoattractant concentration field",
+  "authors": "Ramirez-Gomez, H. V.; Jimenez-Sabinina, V.; Velazquez-Perez, M.; Beltran, C.; Carneiro, J.; Wood, C.; Tuval, I.; Darszon, A.; Guerrero, A.",
+  "author_corresponding": "Adan  Guerrero",
+  "author_corresponding_institution": "IBt/UNAM",
+  "doi": "10.1101/148650",
+  "date": "2020-01-30",
+  "version": "4",
+  "type": "new results",
+  "license": "cc_by_nd",
+  "category": "biophysics",
+  "jatsxml": "https://www.biorxiv.org/content/early/2020/01/30/148650.source.xml",
+  "abstract": "Spermatozoa of marine invertebrates are attracted to their conspecific female gamete by diffusive molecules, called chemoattractants, released from the egg investments in a process known as chemotaxis. The information from the egg chemoattractant concentration field is decoded into intracellular Ca2+ concentration ([Ca2+]i) changes that regulate the internal motors that shape the flagellum as it beats. By studying sea urchin species-specific differences in sperm chemoattractant-receptor characteristics we show that receptor density constrains the steepness of the chemoattractant concentration gradient detectable by spermatozoa. Through analyzing different chemoattractant gradient forms, we demonstrate for the first time that Strongylocentrotus purpuratus sperm are chemotactic and this response is consistent with frequency entrainment of two coupled physiological oscillators: i) the stimulus function and ii) the [Ca2+]i changes. We demonstrate that the slope of the chemoattractant gradients provides the coupling force between both oscillators, arising as a fundamental requirement for sperm chemotaxis.",
+  "funder": "NA",
+  "published": "10.7554/eLife.50532",
+  "server": "bioRxiv"
+}

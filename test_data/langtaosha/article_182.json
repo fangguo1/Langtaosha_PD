@@ -1,0 +1,164 @@
+{
+  "url": "https://langtaosha.org.cn/lts/en/preprint/view/182",
+  "sitemap_lastmod": "2026-04-11",
+  "meta": {
+    "viewport": [
+      "width=device-width, initial-scale=1.0"
+    ],
+    "csrf-token": [
+      "0TH2CXrJdcHlC17HfmTJx8w7UlcT6b1Vo5Ki5JUh",
+      "0TH2CXrJdcHlC17HfmTJx8w7UlcT6b1Vo5Ki5JUh"
+    ],
+    "generator": [
+      "LTS Preprint Systems 3.5.0.4",
+      "LTS Preprint Systems 3.5.0.4"
+    ],
+    "gs_meta_revision": [
+      "1.1"
+    ],
+    "citation_publisher": [
+      "LangTaoSha Preprint Server"
+    ],
+    "citation_author": [
+      "Jinzhou Ye",
+      "Beibei Chen",
+      "Yazhou Xu",
+      "Danzhi Wu",
+      "Qiulong Tan",
+      "Wenjun Chen",
+      "Xing Li",
+      "Chao Wang",
+      "Xinhai Chen"
+    ],
+    "citation_author_institution": [
+      "Insititute of Infectious Diseases, Shenzhen Bay Laboratory",
+      "Insititute of Infectious Diseases, Shenzhen Bay Laboratory",
+      "School of Biology and Biological Engineering, South China University of Technology",
+      "Department of Laboratory Medicine, Third Affiliated Hospital of Sun Yat-Sen University",
+      "Rare Disease Center, Shenzhen Medical Academy of Research and Translation",
+      "Rare Disease Center, Shenzhen Medical Academy of Research and Translation",
+      "Department of Laboratory Medicine, Third Affiliated Hospital of Sun Yat-Sen University",
+      "Medical Examination Center and Department of Medical Oncology, the Third Affiliated Hospital of Sun Yat-sen University",
+      "Institute of Systems and Physical Biology, Shenzhen Bay Laboratory",
+      "Shenzhen Bay Laboratory",
+      "Shenzhen Medical Academy of Research and Translation",
+      "Guangdong Provincial Key Laboratory of Infection Immunity and Inflammation"
+    ],
+    "citation_title": [
+      "Systemic 5-fluorouracil drives competitive release of multidrug‑resistant, virulent Enterococcus faecalis lineages in the gut"
+    ],
+    "citation_language": [
+      "en"
+    ],
+    "citation_date": [
+      "2026/04/11"
+    ],
+    "citation_online_date": [
+      "2026/04/11"
+    ],
+    "citation_publication_date": [
+      "2026/04/11"
+    ],
+    "citation_doi": [
+      "10.65215/LTSpreprints.2026.04.11.000182"
+    ],
+    "citation_abstract_html_url": [
+      "https://langtaosha.org.cn/lts/en/preprint/view/182"
+    ],
+    "citation_abstract": [
+      "Systemic chemotherapy perturbs the intestinal ecosystem, yet its impact on within-species population dynamics remains poorly understood. Here, we show that systemic 5-fluorouracil (5FU) exerts strong strain-selective pressure on gut Enterococcus faecalis, reshaping population structure without altering overall abundance. In patients receiving 5FU and in murine models, intestinal exposure to the drug suppresses 5FU-sensitive lineages while enriching pre-existing resistant clones. Resistant lineages exhibit enhanced 5FU detoxification associated with PreT/A-like enzymes and a redox-buffering program that preserves NADPH through disruption of CDP-ribitol-dependent metabolism. Drug-sensitive strains suppress resistant competitors via secreted inhibitory activity; 5FU eliminates this constraint, enabling competitive release and clonal expansion of resistant lineages. These 5FU-selected lineages display multidrug resistance, including elevated cephalosporin tolerance linked to upregulated penicillin-binding proteins, and exhibit increased virulence in vivo. Thus, systemic chemotherapy can inadvertently select high-risk pathobiont lineages through strain-level competitive release, generating intestinal reservoirs of multidrug-resistant and virulent bacteria. These findings highlight the importance of strain-resolved microbiome analysis and reveal an ecological mechanism by which anticancer therapy may increase infectious risk."
+    ],
+    "og:title": [
+      "Systemic 5-fluorouracil drives competitive release of multidrug‑resistant, virulent Enterococcus faecalis lineages in the gut"
+    ],
+    "og:description": [
+      "Systemic chemotherapy perturbs the intestinal ecosystem, yet its impact on within-species population dynamics remains poorly understood. Here, we show that systemic 5-fluorouracil (5FU) exerts strong "
+    ],
+    "og:url": [
+      "https://langtaosha.org.cn/lts/en/preprint/view/182"
+    ],
+    "og:type": [
+      "article"
+    ],
+    "article:published_time": [
+      "2026-04-11T00:00:00+08:00"
+    ],
+    "twitter:card": [
+      "summary_large_image"
+    ],
+    "twitter:title": [
+      "Systemic 5-fluorouracil drives competitive release of multidrug‑resistant, virulent Enterococcus faecalis lineages in the gut"
+    ],
+    "citation_keywords": [
+      "5-fluorouracil",
+      "Enterococcus faecalis",
+      "Competitive release",
+      "Strain-selective pressure",
+      "Multidrug resistance & virulence"
+    ],
+    "citation_pdf_url": [
+      "https://langtaosha.org.cn/lts/en/preprint/download/182/765"
+    ],
+    "citation_reference": [
+      "1 Sangiorgio, G., Calvo, M., Migliorisi, G., Campanile, F. & Stefani, S. The Impact of Enterococcus spp. in the Immunocompromised Host: A Comprehensive Review. Pathogens 13 (2024). https://doi.org/10.3390/pathogens13050409",
+      "2 Stringer, A. M. et al. Updated perspectives on the contribution of the microbiome to the pathogenesis of mucositis using the MASCC/ISOO framework. Support Care Cancer 32, 558 (2024). https://doi.org/10.1007/s00520-024-08752-4",
+      "3 Martinelli, F. & Thiele, I. Microbial metabolism marvels: a comprehensive review of microbial drug transformation capabilities. Gut Microbes 16, 2387400 (2024). https://doi.org/10.1080/19490976.2024.2387400",
+      "4 Alexander, J. L. et al. Gut microbiota modulation of chemotherapy efficacy and toxicity. Nat Rev Gastroenterol Hepatol 14, 356–365 (2017). https://doi.org/10.1038/nrgastro.2017.20",
+      "5 Chrysostomou, D., Roberts, L. A., Marchesi, J. R. & Kinross, J. M. Gut Microbiota Modulation of Efficacy and Toxicity of Cancer Chemotherapy and Immunotherapy. Gastroenterology 164, 198–213 (2023). https://doi.org/10.1053/j.gastro.2022.10.018",
+      "6 Yan, Y., Nguyen, L. H., Franzosa, E. A. & Huttenhower, C. Strain-level epidemiology of microbial communities and the human microbiome. Genome Med 12, 71 (2020). https://doi.org/10.1186/s13073-020-00765-y",
+      "7 Kalan, L. R. et al. Strain- and Species-Level Variation in the Microbiome of Diabetic Wounds Is Associated with Clinical Outcomes and Therapeutic Efficacy. Cell Host Microbe 25, 641–655.e645 (2019). https://doi.org/10.1016/j.chom.2019.03.006",
+      "8 Tričković, M., Kieser, S., Zdobnov, E. M. & Trajkovski, M. Subspecies of the human gut microbiota carry implicit information for in-depth microbiome research. Cell Host Microbe 33, 1446–1458.e1444 (2025). https://doi.org/10.1016/j.chom.2025.07.015",
+      "9 Longley, D. B., Harkin, D. P. & Johnston, P. G. 5-fluorouracil: mechanisms of action and clinical strategies. Nat Rev Cancer 3, 330–338 (2003). https://doi.org/10.1038/nrc1074",
+      "10 Spanogiannopoulos, P. et al. Host and gut bacteria share metabolic pathways for anti-cancer drug metabolism. Nat Microbiol 7, 1605–1620 (2022). https://doi.org/10.1038/s41564-022-01226-5",
+      "11 Xu, W. et al. PreTA-mediated metabolism of 5-fluorouracil by intratumoral Citrobacter freundii drives chemoresistance in pancreatic cancer. Cell Reports 44 (2025). https://doi.org/10.1016/j.celrep.2025.116473",
+      "12 Almeida-Santos, A. C., Novais, C., Peixe, L. & Freitas, A. R. Enterococcus spp. as a Producer and Target of Bacteriocins: A Double-Edged Sword in the Antimicrobial Resistance Crisis Context. Antibiotics (Basel) 10 (2021). https://doi.org/10.3390/antibiotics10101215",
+      "13 Foladori, P. et al. SARS-CoV-2 from faeces to wastewater treatment: What do we know? A review. Science of The Total Environment 743 (2020). https://doi.org/10.1016/j.scitotenv.2020.140444",
+      "14 Spanogiannopoulos, P. et al. Host and gut bacteria share metabolic pathways for anti-cancer drug metabolism. Nature Microbiology 7, 1605–1620 (2022). https://doi.org/10.1038/s41564-022-01226-5",
+      "15 Diógenes, E. M. et al. Effect of 5-fluorouracil on Escherichia coli and Enterococcus spp.: insights into the selective pressures caused by this cytotoxic drug. Microbial Pathogenesis 206 (2025). https://doi.org/10.1016/j.micpath.2025.107701",
+      "16 Zhang, M. et al. Anticancer agent 5-fluorouracil reverses meropenem resistance in carbapenem-resistant Gram-negative pathogens. International Journal of Antimicrobial Agents 64 (2024). https://doi.org/10.1016/j.ijantimicag.2024.107337",
+      "17 Fernandez-Marcos, P. J. & Nóbrega-Pereira, S. NADPH: new oxygen for the ROS theory of aging. Oncotarget 7, 50814–50815 (2016). https://doi.org/10.18632/oncotarget.10744",
+      "18 Brown, S., Santa Maria, J. P. & Walker, S. Wall Teichoic Acids of Gram-Positive Bacteria. Annual Review of Microbiology 67, 313–336 (2013). https://doi.org/10.1146/annurev-micro-092412-155620",
+      "19 Pereira, M. P. & Brown, E. D. Bifunctional catalysis by CDP-ribitol synthase: convergent recruitment of reductase and cytidylyltransferase activities in Haemophilus influenzae and Staphylococcus aureus. Biochemistry 43, 11802–11812 (2004). https://doi.org/10.1021/bi048866v",
+      "20 Baur, S., Marles-Wright, J., Buckenmaier, S., Lewis, R. J. & Vollmer, W. Synthesis of CDP-activated ribitol for teichoic acid precursors in Streptococcus pneumoniae. J Bacteriol 191, 1200–1210 (2009). https://doi.org/10.1128/jb.01120-08",
+      "21 Djorić, D., Little, J. L. & Kristich, C. J. Multiple Low-Reactivity Class B Penicillin-Binding Proteins Are Required for Cephalosporin Resistance in Enterococci. Antimicrob Agents Chemother 64 (2020). https://doi.org/10.1128/aac.02273-19",
+      "22 Arbeloa, A. et al. Role of class A penicillin-binding proteins in PBP5-mediated beta-lactam resistance in Enterococcus faecalis. J Bacteriol 186, 1221–1228 (2004). https://doi.org/10.1128/jb.186.5.1221-1228.2004",
+      "23 Paulsen, I. T. et al. Role of mobile DNA in the evolution of vancomycin-resistant Enterococcus faecalis. Science 299, 2071–2074 (2003).",
+      "24 Wei, L., Wen, X. S. & Xian, C. J. Chemotherapy-Induced Intestinal Microbiota Dysbiosis Impairs Mucosal Homeostasis by Modulating Toll-like Receptor Signaling Pathways. Int J Mol Sci 22 (2021). https://doi.org/10.3390/ijms22179474",
+      "25 van Vliet, M. J., Harmsen, H. J., de Bont, E. S. & Tissing, W. J. The role of intestinal microbiota in the development and severity of chemotherapy-induced mucositis. PLoS Pathog 6, e1000879 (2010). https://doi.org/10.1371/journal.ppat.1000879",
+      "26 Dapa, T. et al. Within-host evolution of the gut microbiome. Curr Opin Microbiol 71, 102258 (2023). https://doi.org/10.1016/j.mib.2022.102258",
+      "27 Forster, S. C. et al. A human gut bacterial genome and culture collection for improved metagenomic analyses. Nat Biotechnol 37, 186–192 (2019). https://doi.org/10.1038/s41587-018-0009-7",
+      "28 Chen, D. W. & Garud, N. R. Rapid evolution and strain turnover in the infant gut microbiome. Genome Res 32, 1124–1136 (2022). https://doi.org/10.1101/gr.276306.121",
+      "29 Trepka, K. R. et al. Expansion of a bacterial operon during cancer treatment ameliorates fluoropyrimidine toxicity. Sci Transl Med 17, eadq8870 (2025). https://doi.org/10.1126/scitranslmed.adq8870",
+      "30 Zhang, M. et al. Deciphering the Antibacterial Mechanisms of 5-Fluorouracil in Escherichia coli through Biochemical and Transcriptomic Analyses. Antibiotics (Basel) 13 (2024). https://doi.org/10.3390/antibiotics13060528",
+      "31 Nathan, C. & Cunningham-Bussel, A. Beyond oxidative stress: an immunologist's guide to reactive oxygen species. Nat Rev Immunol 13, 349–361 (2013). https://doi.org/10.1038/nri3423",
+      "32 Nguyen, G. T., Green, E. R. & Mecsas, J. Neutrophils to the ROScue: Mechanisms of NADPH Oxidase Activation and Bacterial Resistance. Front Cell Infect Microbiol 7, 373 (2017). https://doi.org/10.3389/fcimb.2017.00373",
+      "33 Daca, A. & Jarzembowski, T. From the Friend to the Foe-Enterococcus faecalis Diverse Impact on the Human Immune System. Int J Mol Sci 25 (2024). https://doi.org/10.3390/ijms25042422",
+      "34 Spaans, S. K., Weusthuis, R. A., van der Oost, J. & Kengen, S. W. NADPH-generating systems in bacteria and archaea. Front Microbiol 6, 742 (2015). https://doi.org/10.3389/fmicb.2015.00742",
+      "35 Seixas, A. F. et al. Bacterial Response to Oxidative Stress and RNA Oxidation. Front Genet 12, 821535 (2021). https://doi.org/10.3389/fgene.2021.821535",
+      "36 Day, T., Huijben, S. & Read, A. F. Is selection relevant in the evolutionary emergence of drug resistance? Trends Microbiol 23, 126–133 (2015). https://doi.org/10.1016/j.tim.2015.01.005",
+      "37 Ladjouzi, R., Lucau-Danila, A., Benachour, A. & Drider, D. A Leaderless Two-Peptide Bacteriocin, Enterocin DD14, Is Involved in Its Own Self-Immunity: Evidence and Insights. Front Bioeng Biotechnol 8, 644 (2020). https://doi.org/10.3389/fbioe.2020.00644",
+      "38 Fiore, E., Van Tyne, D. & Gilmore, M. S. Pathogenicity of Enterococci. Microbiol Spectr 7 (2019). https://doi.org/10.1128/microbiolspec.GPP3-0053-2018",
+      "39 Anderson, B. D. & Bisanz, J. E. Challenges and opportunities of strain diversity in gut microbiome research. Front Microbiol 14, 1117122 (2023). https://doi.org/10.3389/fmicb.2023.1117122",
+      "40 Hillege, L. E. et al. Microbial vitamin biosynthesis links gut microbiota dynamics to chemotherapy toxicity. mBio 16, e0093025 (2025). https://doi.org/10.1128/mbio.00930-25",
+      "41 Xavier, J. B. Ecological management of the microbiota in patients with cancer. Nat Rev Clin Oncol 22, 627–639 (2025). https://doi.org/10.1038/s41571-025-01049-3",
+      "42 Roggiani, S. et al. Gut microbiota resilience and recovery after anticancer chemotherapy. Microbiome Res Rep 2, 16 (2023). https://doi.org/10.20517/mrr.2022.23",
+      "43 Hillege, L. E. et al. Metagenomic analysis during capecitabine therapy reveals microbial chemoprotective mechanisms and predicts drug toxicity in colorectal cancer patients. medRxiv (2024). https://doi.org/10.1101/2024.10.11.24315249",
+      "44 Vigneswaran, N. et al. Changing antimicrobial prescribing patterns, and laboratory reporting in Enterococcus faecalis infective endocarditis at a tertiary Australian centre. Eur J Clin Microbiol Infect Dis (2025). https://doi.org/10.1007/s10096-025-05331-1",
+      "45 Holleran, J. L., Eiseman, J. L., Parise, R. A., Kummar, S. & Beumer, J. H. LC-MS/MS assay for the quantitation of FdCyd and its metabolites FdUrd and FU in human plasma. J Pharm Biomed Anal 129, 359–366 (2016). https://doi.org/10.1016/j.jpba.2016.07.027",
+      "46 Radovanovic, M., Schneider, J. J., Shafiei, M., Martin, J. H. & Galettis, P. Measurement of 5- fluorouracil, capecitabine and its metabolite concentrations in blood using volumetric absorptive microsampling technology and LC-MS/MS. J Chromatogr B Analyt Technol Biomed Life Sci 1188, 123075 (2022). https://doi.org/10.1016/j.jchromb.2021.123075",
+      "47 Knijff, E., Dellaglio, F., Lombardi, A., Andrighetto, C. & Torriani, S. Rapid identification of Enterococcus durans and Enterococcus hirae by PCR with primers targeted to the ddl genes. J Microbiol Methods 47, 35–40 (2001). https://doi.org/10.1016/s0167-7012(01)00297-4",
+      "48 Bulacio Mde, L., Galván, L. R., Gaudioso, C., Cangemi, R. & Erimbaue, M. I. Enterococcus Faecalis Biofilm. Formation and Development in Vitro Observed by Scanning Electron Microscopy. Acta Odontol Latinoam 28, 210–214 (2015).",
+      "49 Abramson, J. et al. Accurate structure prediction of biomolecular interactions with AlphaFold 3. Nature 630, 493–500 (2024). https://doi.org/10.1038/s41586-024-07487-w",
+      "50 van Kempen, M. et al. Fast and accurate protein structure search with Foldseek. Nat Biotechnol 42, 243–246 (2024). https://doi.org/10.1038/s41587-023-01773-0",
+      "51 Wang, X. et al. Proteomic analysis of the Enterococcus faecalis V583 strain and clinical isolate V309 under vancomycin treatment. J Proteome Res 9, 1772–1785 (2010). https://doi.org/10.1021/pr901216e",
+      "52 Cathro, P., McCarthy, P., Hoffmann, P., Kidd, S. & Zilm, P. Enterococcus faecalis V583 cell membrane protein expression to alkaline stress. FEMS Microbiol Lett 369 (2022). https://doi.org/10.1093/femsle/fnac082",
+      "53 Zhang, H., Zeng, X., Yin, Y. & Zhu, Z. J. Knowledge and data-driven two-layer networking for accurate metabolite annotation in untargeted metabolomics. Nat Commun 16, 8118 (2025). https://doi.org/10.1038/s41467-025-63536-6",
+      "54 Jávega, B., Herrera, G. & O'Connor, J. E. Flow Cytometric Analysis of Oxidative Stress in Escherichia coli B Strains Deficient in Genes of the Antioxidant Defence. Int J Mol Sci 23 (2022). https://doi.org/10.3390/ijms23126537",
+      "55 Kho, K. & Meredith, T. C. Extraction and Analysis of Bacterial Teichoic Acids. Bio Protoc 8, e3078 (2018). https://doi.org/10.21769/BioProtoc.3078",
+      "56 Hirt, H. et al. Enterococcus faecalis Sex Pheromone cCF10 Enhances Conjugative Plasmid Transfer In Vivo. mBio 9 (2018). https://doi.org/10.1128/mBio.00037-18",
+      "57 Ju, Y. et al. Inactivation of glutathione S-transferase alpha 4 blocks Enterococcus faecalis-induced bystander effect by promoting macrophage ferroptosis. Gut Microbes 17, 2451090 (2025). https://doi.org/10.1080/19490976.2025.2451090",
+      "58 Amorim, N. et al. Refining a Protocol for Faecal Microbiota Engraftment in Animal Models After Successful Antibiotic-Induced Gut Decontamination. Front Med (Lausanne) 9, 770017 (2022). https://doi.org/10.3389/fmed.2022.770017"
+    ]
+  },
+  "fetched_at": "2026-04-14T04:00:01Z"
+}

@@ -1,0 +1,17 @@
+{
+  "title": "RNPP-type quorum sensing regulates solvent formation and sporulation in Clostridium acetobutylicum",
+  "authors": "Kotte, A.-K.; Severn, O.; Bean, Z.; Schwarz, K.; Minton, N. P.; Winzer, K.",
+  "author_corresponding": "Klaus  Winzer",
+  "author_corresponding_institution": "University of Nottingham",
+  "doi": "10.1101/106666",
+  "date": "2020-01-28",
+  "version": "2",
+  "type": "new results",
+  "license": "cc_by_nc",
+  "category": "microbiology",
+  "jatsxml": "https://www.biorxiv.org/content/early/2020/01/28/106666.source.xml",
+  "abstract": "The strictly anaerobic bacterium Clostridium acetobutylicum is well known for its ability to convert sugars into organic acids and solvents, most notably the potential biofuel butanol. However, the regulation of its fermentation metabolism, in particular the shift from acid to solvent production, remains poorly understood. The aim of this study was to investigate whether cell-cell communication plays a role in controlling the timing of this shift or the extent of solvent formation. Analysis of the available C. acetobutylicum genome sequences revealed the presence of eight putative RNPP-type quorum sensing systems, here designated qssA to qssH, each consisting of RNPP-type regulator gene followed by a small open reading frame encoding a putative signalling peptide precursor. The identified regulator and signal peptide precursor genes were designated qsrA to qsrH and qspA to qspH, respectively. Triplicate regulator mutants were generated in strain ATCC 824 for each of the eight systems and screened for phenotypic changes. The qsrB mutants showed increased solvent formation during early solventogenesis and hence the QssB system was selected for further characterisation. Overexpression of qsrB severely reduced solvent and endospore formation and this effect could be overcome by adding short synthetic peptides to the culture medium representing a specific region of the QspB signalling peptide precursor. In addition, overexpression of qspB increased the production of acetone and butanol and the initial (48-hour) titre of heat-resistant endospores. Together, these findings establish a role for QssB quorum sensing in the regulation of early solventogenesis and sporulation in C. acetobutylicum.",
+  "funder": "NA",
+  "published": "NA",
+  "server": "bioRxiv"
+}

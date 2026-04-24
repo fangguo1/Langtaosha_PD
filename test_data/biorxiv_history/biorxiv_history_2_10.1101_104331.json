@@ -1,0 +1,17 @@
+{
+  "title": "Functional gene categories differentiate maize leafdrought-related microbial epiphytic communities",
+  "authors": "Methe, B. A.; Hiltbrand, D.; Roach, J.; Xu, W.; Gordon, S. G.; Goodner, B. W.; Stapleton, A. E.",
+  "author_corresponding": "Ann E Stapleton",
+  "author_corresponding_institution": "University of North Carolina Wilmington",
+  "doi": "10.1101/104331",
+  "date": "2020-01-15",
+  "version": "2",
+  "type": "new results",
+  "license": "cc_by",
+  "category": "microbiology",
+  "jatsxml": "https://www.biorxiv.org/content/early/2020/01/15/104331.source.xml",
+  "abstract": "The phyllosphere epiphytic microbiome is composed of microorganisms that colonize the external aerial portions of plants. Relationships of plant responses to specific microorganisms-both pathogenic and beneficial-have been examined, but the phyllosphere microbiome functional and metabolic profile responses are not well described. Changing crop growth conditions, such as increased drought, can have profound impacts on crop productivity. Also, epiphytic microbial communities provide a new target for crop yield optimization. We compared Zea mays leaf microbiomes collected under drought and well-watered conditions by examining functional gene annotation patterns across three physically disparate locations each with and without drought treatment, through the application of short read metagenomic sequencing. Drought samples exhibited different functional sequence compositions at each of the three field sites. Maize phyllosphere functional profiles revealed a wide variety of metabolic and regulatory processes that differed in drought and normal water conditions and provide key baseline information for future selective breeding.",
+  "funder": "NA",
+  "published": "10.1371/journal.pone.0237493",
+  "server": "bioRxiv"
+}

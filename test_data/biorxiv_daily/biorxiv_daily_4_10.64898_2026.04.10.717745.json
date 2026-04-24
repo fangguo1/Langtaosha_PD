@@ -1,0 +1,17 @@
+{
+  "title": "Dysregulation of Hippo Signaling Pathway as a Convergent Mechanism Underlying Choroid Plexus Defects in Bipolar Disorder",
+  "authors": "Kim, J.; Choe, M.; Kaya, K.; Hu, Y.; Ng, K.; Qiu, C.; Zhong, M.; Yang, W.; Kiral, F.; Scandura, M.; Cha, H.-J.; Gruen, J.; Lek, M.; Jonas, E.; Blumberg, H.; Park, I.-H.",
+  "author_corresponding": "In-Hyun Park",
+  "author_corresponding_institution": "Yale University",
+  "doi": "10.64898/2026.04.10.717745",
+  "date": "2026-04-12",
+  "version": "1",
+  "type": "new results",
+  "license": "cc_by_nc_nd",
+  "category": "developmental biology",
+  "jatsxml": "https://www.biorxiv.org/content/early/2026/04/12//2026.04.10.717745.source.xml",
+  "abstract": "Bipolar disorder (BD) is a prevalent and highly heritable psychiatric condition. Developmental mechanisms are implicated but the specific molecular origins remain unclear. The choroid plexus (ChP), which regulates cerebrospinal fluid (CSF) and brain homeostasis, has been implicated in BD, but its role is poorly understood. Here, we identify aberrant expansion of ChP in human cortical (hCOs) and ChP organoids (hChPOs) derived from, and in vivo structural magnetic resonance imaging (sMRI) scans of, individuals with BD compared to healthy comparison individuals. Single-cell transcriptomics revealed a lineage bias toward ChP fate in BD hCOs, accompanied by structural enlargement observed in both BD hChPOs and ChP in sMRI scans from individuals with BD. Comprehensive transcriptomic profiling implicates early hyperactivation of the Hippo signaling pathway in neural progenitor cells as a convergent mechanism driving ChP overgrowth. Whole-genome and genome-wide association study analyses highlight recurrent genetic variants in Hippo regulators, including STK4 and YAP1, suggesting genetic priming. BD hChPOs exhibit disrupted epithelial junctions and altered in vitro CSF secretion. These findings position the ChP as a genetically and developmentally predisposed to pathology in BD and highlight organoids as a platform for translational discovery in diagnostics and therapeutics.",
+  "funder": "NA",
+  "published": "NA",
+  "server": "bioRxiv"
+}

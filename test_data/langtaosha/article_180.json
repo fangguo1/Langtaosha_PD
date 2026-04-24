@@ -1,0 +1,140 @@
+{
+  "url": "https://langtaosha.org.cn/lts/en/preprint/view/180",
+  "sitemap_lastmod": "2026-04-08",
+  "meta": {
+    "viewport": [
+      "width=device-width, initial-scale=1.0"
+    ],
+    "csrf-token": [
+      "kqJEj3PCw8fL9KBV8iluPswwTzh5ifSVJUwXSxFm",
+      "kqJEj3PCw8fL9KBV8iluPswwTzh5ifSVJUwXSxFm"
+    ],
+    "generator": [
+      "LTS Preprint Systems 3.5.0.4",
+      "LTS Preprint Systems 3.5.0.4"
+    ],
+    "gs_meta_revision": [
+      "1.1"
+    ],
+    "citation_publisher": [
+      "LangTaoSha Preprint Server"
+    ],
+    "citation_author": [
+      "Chu Wang",
+      "Xiaohui Wang",
+      "Yannan Qu",
+      "Huaizong Shen"
+    ],
+    "citation_author_institution": [
+      "University of Chinese Academy of Sciences",
+      "Shenzhen Medical Academy of Research and Translation"
+    ],
+    "citation_title": [
+      "Structural insights into the transport and gating mechanisms of the plant high-affinity K+ transporter AtHAK5"
+    ],
+    "citation_language": [
+      "en"
+    ],
+    "citation_date": [
+      "2026/04/08"
+    ],
+    "citation_online_date": [
+      "2026/04/08"
+    ],
+    "citation_publication_date": [
+      "2026/04/08"
+    ],
+    "citation_doi": [
+      "10.65215/LTSpreprints.2026.04.07.000180"
+    ],
+    "citation_abstract_html_url": [
+      "https://langtaosha.org.cn/lts/en/preprint/view/180"
+    ],
+    "citation_abstract": [
+      "Plant high-affinity K⁺ (HAK) transporters are essential for survival in nutrient-depleted soils. However, the mechanisms governing their energetically costly active transport and stringent regulation have remained structurally elusive. Here, we present high-resolution cryo-EM structures of Arabidopsis thaliana HAK5, revealing a homodimeric assembly characterized by a modified LeuT-fold. A unique topological \"knot\" within the permeation pathway establishes a selective K⁺ coordination site and coordinates critical residues facilitating proton-coupled symport. Unexpectedly, we discovered a uniquely folded adenine nucleotide-binding domain (NBD) at the cytoplasmic interface. The bound endogenous ADP orients an intracellular loop (ICLgate) to physically plug the intracellular exit of the pore. Crucially, structural analysis of rationally engineered nucleotide-binding mutants reveals a substantial rigid-body rearrangement of the cytoplasmic domain that displaces this plug to open the gate. Validated by in vivo yeast complementation assays, these structural insights unveil a sophisticated autoinhibitory mechanism that directly couples the mechanical gating of ion transport to the cellular energy status. This study provides a definitive structural framework for understanding plant HAK transporters and offers a crucial blueprint for engineering nutrient-efficient crops."
+    ],
+    "og:title": [
+      "Structural insights into the transport and gating mechanisms of the plant high-affinity K+ transporter AtHAK5"
+    ],
+    "og:description": [
+      "Plant high-affinity K⁺ (HAK) transporters are essential for survival in nutrient-depleted soils. However, the mechanisms governing their energetically costly active transport and stringent regulation "
+    ],
+    "og:url": [
+      "https://langtaosha.org.cn/lts/en/preprint/view/180"
+    ],
+    "og:type": [
+      "article"
+    ],
+    "article:published_time": [
+      "2026-04-08T00:00:00+08:00"
+    ],
+    "twitter:card": [
+      "summary_large_image"
+    ],
+    "twitter:title": [
+      "Structural insights into the transport and gating mechanisms of the plant high-affinity K+ transporter AtHAK5"
+    ],
+    "citation_keywords": [
+      "HAK5",
+      "K+ transporter",
+      "K+ homeostasis"
+    ],
+    "citation_pdf_url": [
+      "https://langtaosha.org.cn/lts/en/preprint/download/180/758"
+    ],
+    "citation_reference": [
+      "1.Ahmad, I. & Maathuis, F. J. Cellular and tissue distribution of potassium: physiological relevance, mechanisms and regulation. J Plant Physiol 171, 708-714, doi:10.1016/j.jplph.2013.10.016 (2014).",
+      "2 Wang, M., Zheng, Q., Shen, Q. & Guo, S. The critical role of potassium in plant stress response. Int J Mol Sci 14, 7370-7390, doi:10.3390/ijms14047370 (2013).",
+      "3 Anschutz, U., Becker, D. & Shabala, S. Going beyond nutrition: regulation of potassium homoeostasis as a common denominator of plant adaptive responses to environment. J Plant Physiol 171, 670-687, doi:10.1016/j.jplph.2014.01.009 (2014).",
+      "4 Battie-Laclau, P. et al. Photosynthetic and anatomical responses of Eucalyptus grandis leaves to potassium and sodium supply in a field experiment. Plant, cell & environment 37, 70-81, doi:10.1111/pce.12131 (2013).",
+      "5 Adams, E. & Shin, R. Transport, signaling, and homeostasis of potassium and sodium in plants. Journal of Integrative Plant Biology 56, 231-249, doi:10.1111/jipb.12159 (2014).",
+      "6 Zorb, C., Senbayram, M. & Peiter, E. Potassium in agriculture--status and perspectives. J Plant Physiol 171, 656-669, doi:10.1016/j.jplph.2013.08.008 (2014).",
+      "7 Coskun, D., Britto, D. T., Kochian, L. V. & Kronzucker, H. J. How high do ion fluxes go? A re-evaluation of the two-mechanism model of K(+) transport in plant roots. Plant Sci 243, 96-104, doi:10.1016/j.plantsci.2015.12.003 (2016).",
+      "8 Dreyer, I. & Uozumi, N. Potassium channels in plant cells. Febs j 278, 4293-4303, doi:10.1111/j.1742-4658.2011.08371.x (2011).",
+      "9 Durell, S. R., Hao, Y., Nakamura, T., Bakker, E. P. & Guy, H. R. Evolutionary relationship between K(+) channels and symporters. Biophys J 77, 775-788, doi:10.1016/s0006-3495(99)76931-6 (1999).",
+      "10 Gierth, M., Mäser, P. & Schroeder, J. I. The Potassium Transporter AtHAK5 Functions in K+ Deprivation-Induced High-Affinity K+ Uptake and AKT1 K+ Channel Contribution to K+ Uptake Kinetics in Arabidopsis Roots. Plant Physiology 137, 1105-1114, doi:10.1104/pp.104.057216 (2005).",
+      "11 Qi, Z. et al. The high affinity K+ transporter AtHAK5 plays a physiological role in planta at very low K+ concentrations and provides a caesium uptake pathway in Arabidopsis. J Exp Bot 59, 595-607, doi:10.1093/jxb/erm330 (2008).",
+      "12 Rubio, F., Nieves-Cordones, M., Alemán, F. & Martínez, V. Relative contribution of AtHAK5 and AtAKT1 to K+ uptake in the high-affinity range of concentrations. Physiologia Plantarum 134, 598-608, doi:10.1111/j.1399-3054.2008.01168.x (2008).",
+      "13 Ta, N. et al. Identification of Functional Sites of High-Affinity HAK5 SCIENTIA SINICA Vitae 44, 929-937, doi:10.1360/n052014-00088 (2014).",
+      "14 Nieves-Cordones, M., Alemán, F., Martínez, V. & Rubio, F. K+ uptake in plant roots. The systems involved, their regulation and parallels in other organisms. Journal of Plant Physiology 171, 688-695, doi:10.1016/j.jplph.2013.09.021 (2014).",
+      "15 Lara, A. et al. Arabidopsis K+ transporter HAK5-mediated high-affinity root K+ uptake is regulated by protein kinases CIPK1 and CIPK9. Journal of Experimental Botany 71, 5053-5060, doi:10.1093/jxb/eraa212 (2020).",
+      "16 Ródenas, R. et al. Insights into the mechanisms of transport and regulation of the arabidopsis high-affinity K+ transporter HAK51. Plant Physiology 185, 1860-1874, doi:10.1093/plphys/kiab028 (2021).",
+      "17 Nieves-Cordones, M., Alemán, F., Fon, M., Martínez, V. & Rubio, F. in Environmental Adaptations and Stress Tolerance of Plants in the Era of Climate Change 85-112 (Springer New York, 2012).",
+      "18 Cai, K., Zeng, F., Wang, J. & Zhang, G. Identification and characterization of HAK/KUP/KT potassium transporter gene family in barley and their expression under abiotic stress. BMC Genomics 22, 317, doi:10.1186/s12864-021-07633-y (2021).",
+      "19 Tascon, I. et al. Structural basis of proton-coupled potassium transport in the KUP family. Nat Commun 11, 626, doi:10.1038/s41467-020-14441-7 (2020).",
+      "20 Shi, Y. Common folds and transport mechanisms of secondary active transporters. Annu Rev Biophys 42, 51-72, doi:10.1146/annurev-biophys-083012-130429 (2013).",
+      "21 Licht, J. A., Berry, S. P., Gutierrez, M. A. & Gaudet, R. They all rock: A systematic comparison of conformational movements in LeuT-fold transporters. Structure 32, 1528-1543.e1523, doi:https://doi.org/10.1016/j.str.2024.06.015 (2024).",
+      "22 Vastermark, A., Wollwage, S., Houle, M. E., Rio, R. & Saier Jr., M. H. Expansion of the APC superfamily of secondary carriers. Proteins: Structure, Function, and Bioinformatics 82, 2797-2811, doi:https://doi.org/10.1002/prot.24643 (2014).",
+      "23 del Alamo, D., Meiler, J. & McHaourab, H. S. Principles of Alternating Access in LeuT-fold Transporters: Commonalities and Divergences. Journal of Molecular Biology 434, 167746, doi:https://doi.org/10.1016/j.jmb.2022.167746 (2022).",
+      "24 Jegla, T., Busey, G. & Assmann, S. M. Evolution and Structural Characteristics of Plant Voltage-Gated K+ Channels. Plant Cell 30, 2898-2909, doi:10.1105/tpc.18.00523 (2018).",
+      "25 Yuan, G. et al. Research progress on plant shaker K+ channels. Plants 13, 1423 (2024).",
+      "26 Alemán, F. et al. The F130S point mutation in the Arabidopsis high-affinity K+ transporter AtHAK5 increases K+ over Na+ and Cs+ selectivity and confers Na+ and Cs+ tolerance to yeast under heterologous expression. Frontiers in Plant Science 5, doi:10.3389/fpls.2014.00430 (2014).",
+      "27 Jiménez-Estévez, E. et al. Increased tolerance to low K+, and to cationic stress of Arabidopsis plants by expressing the F130S mutant version of the K+ transporter AtHAK5. Plant Physiology and Biochemistry 212, doi:10.1016/j.plaphy.2024.108768 (2024).",
+      "28 Qin, Y. J., Wu, W. H. & Wang, Y. ZmHAK5 and ZmHAK1 function in K+ uptake and distribution in maize under low K+ conditions. J Integr Plant Biol 61, 691-705, doi:10.1111/jipb.12756 (2019).",
+      "29 Pilot, G., Gaymard, F., Mouline, K., Chérel, I. & Sentenac, H. Regulated expression of Arabidopsis Shaker K+ channel genes involved in K+ uptake and distribution in the plant. Plant molecular biology 51, 773-787, doi:10.1023/A:1022597102282 (2003).",
+      "30 Lebaudy, A., Very, A. A. & Sentenac, H. K+ channel activity in plants: genes, regulations and functions. FEBS Lett 581, 2357-2366, doi:10.1016/j.febslet.2007.03.058 (2007).",
+      "31 Sardans, J. & Penuelas, J. Potassium Control of Plant Functions: Ecological and Agricultural Implications. Plants (Basel) 10, doi:10.3390/plants10020419 (2021).",
+      "32 Tyerman, S. D. et al. in New Phytologist.1 edn 25-29 (Blackwell Publishing Ltd, 30488600).",
+      "33 Shah, I. H. et al. Exploring the role of nitrogen and potassium in photosynthesis implications for sugar: Accumulation and translocation in horticultural crops. Scientia Horticulturae 327, doi:10.1016/j.scienta.2023.112832 (2024).",
+      "34 Rubio, F., Guillermo, E. & Rodríguez-Navarro, A. Cloning of Arabidopsis and barley cDNAs encoding HAK potassium transporters in root and shoot cells. Physiologia Plantarum 109, 34-43, doi:10.1034/j.1399-3054.2000.100106.x (2000).",
+      "35 Zhao, Y., Liang, S., Huang, K. & Huang, R. Construction of a set of secreting expression vectors for Saccharomyces cerevisiea. Wei Sheng Wu Xue Bao 42, 431-403 435 (2002).",
+      "36 Wright, M. B. et al. Potassium transport by amino acid permeases in Saccharomyces cerevisiae. J Biol Chem 272, 13647-13652, doi:10.1074/jbc.272.21.13647 (1997).",
+      "37 Hopp, T. P. et al. A Short Polypeptide Marker Sequence Useful for Recombinant Protein Identification and Purification. Bio/Technology 6, 1204-1210, doi:10.1038/nbt1088-1204 (1988).",
+      "38 Chalfie, M., Tu, Y., Euskirchen, G., Ward, W. W. & Prasher, D. C. Green fluorescent protein as a marker for gene expression. Science 263, 802-805, doi:10.1126/science.8303295 (1994).",
+      "39 Niwa, H., Yamamura, K. & Miyazaki, J. Efficient selection for high-expression transfectants with a novel eukaryotic vector. Gene 108, 193-199, doi:10.1016/0378-1119(91)90434-d (1991).",
+      "40 Lin, Y. C. et al. Genome dynamics of the human embryonic kidney 293 lineage in response to cell biology manipulations. Nat Commun 5, 4767, doi:10.1038/ncomms5767 (2014).",
+      "41 Wang, X. et al. Structural insights into ion selectivity and transport mechanisms of Oryza sativa HKT2;1 and HKT2;2/1 transporters. Nature Plants 10, 633-644, doi:10.1038/s41477-024-01665-4 (2024).",
+      "42 Lei, J. & Frank, J. Automated acquisition of cryo-electron micrographs for single particle reconstruction on an FEI Tecnai electron microscope. Journal of Structural Biology 150, 69-80, doi:https://doi.org/10.1016/j.jsb.2005.01.002 (2005).",
+      "43 Zheng, S. Q. et al. MotionCor2: anisotropic correction of beam-induced motion for improved cryo-electron microscopy. Nature Methods 14, 331-332, doi:10.1038/nmeth.4193 (2017).",
+      "44 Grant, T. & Grigorieff, N. Measuring the optimal exposure for single particle cryo-EM using a 2.6 Å reconstruction of rotavirus VP6. eLife 4, e06980, doi:10.7554/eLife.06980 (2015).",
+      "45 Zhang, K. Gctf: Real-time CTF determination and correction. Journal of Structural Biology 193, 1-12, doi:https://doi.org/10.1016/j.jsb.2015.11.003 (2016).",
+      "46 Punjani, A., Rubinstein, J. L., Fleet, D. J. & Brubaker, M. A. cryoSPARC: algorithms for rapid unsupervised cryo-EM structure determination. Nature Methods 14, 290-296, doi:10.1038/nmeth.4169 (2017).",
+      "47 Punjani, A., Zhang, H. & Fleet, D. J. Non-uniform refinement: adaptive regularization improves single-particle cryo-EM reconstruction. Nature Methods 17, 1214-1221, doi:10.1038/s41592-020-00990-8 (2020).",
+      "48 Chen, S. et al. High-resolution noise substitution to measure overfitting and validate resolution in 3D structure determination by single particle electron cryomicroscopy. Ultramicroscopy 135, 24-35, doi:https://doi.org/10.1016/j.ultramic.2013.06.004 (2013).",
+      "49 Pettersen, E. F. et al. UCSF Chimera--a visualization system for exploratory research and analysis. J Comput Chem 25, 1605-1612, doi:10.1002/jcc.20084 (2004).",
+      "50 Emsley, P., Lohkamp, B., Scott, W. G. & Cowtan, K. Features and development of Coot. Acta Crystallogr D Biol Crystallogr 66, 486-501, doi:10.1107/s0907444910007493 (2010).",
+      "51 Adams, P. D. et al. PHENIX: a comprehensive Python-based system for macromolecular structure solution. Acta Crystallogr D Biol Crystallogr 66, 213-221, doi:10.1107/s0907444909052925 (2010)."
+    ]
+  },
+  "fetched_at": "2026-04-14T04:00:02Z"
+}

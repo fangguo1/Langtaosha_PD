@@ -1,0 +1,60 @@
+{
+  "title": "CRIS: A Centralized Resource for High-Quality RNA Structure and Interaction Data in the AI Era",
+  "authors": "Lee, W. H.; Dharmawan, C.; Li, K.; Bai, J.; Solanki, P.; Sharma, A.; Zhang, M.; Lu, Z.",
+  "author_corresponding": "Zhipeng Lu",
+  "author_corresponding_institution": "University of Southern California",
+  "doi": "10.1101/2025.05.05.652292",
+  "date": "2026-04-12",
+  "version": "2",
+  "type": "new results",
+  "license": "cc_no",
+  "category": "bioinformatics",
+  "jatsxml": "https://www.biorxiv.org/content/early/2026/04/12/2025.05.05.652292.source.xml",
+  "abstract": "As interest in RNA-based therapeutics expands, there is a growing demand for RNA structure elucidation and RNA-RNA interactions in both academic and clinical settings. Despite rapid advances in methods for RNA structure determination, the field faces persistent challenges in data reproducibility, quality control, and accessibility, largely due to inconsistencies in data processing and analysis workflows. Concurrently, methodological improvements have generated increasingly complex datasets, which necessitate a standardized framework. Here, we present the Crosslinking-based RNA Interactomes and Structuromes (CRIS) database, a comprehensive resource designed to address these limitations. Among existing experimental and computational approaches for RNA structure characterization, crosslinking-based technologies offer superior reliability, high throughput, and high resolution. CRIS provides rigorously curated datasets, standardized workflows, and user-friendly tools, together with built-in quality metrics and detailed visualization guidance to ensure reproducibility and transparency while pairing seamlessly with existing experimental pipelines. By delivering high-complexity RNA datasets alongside accessible computational tools, CRIS serves as a standardized reference for both new and existing data, facilitating investigation through comparative analyses and providing a training resource for deep learning-based computational exploration. This will enable integration into machine learning workflows for large scale, novel RNA structure discovery.",
+  "funder": [
+    {
+      "name": "National Human Genome Research Institute",
+      "id": "https://ror.org/00baak391",
+      "id-type": "ROR",
+      "award": "R00HG009662;R01HG012928;"
+    },
+    {
+      "name": "National Institute of General Medical Sciences",
+      "id": "https://ror.org/04q48ey07",
+      "id-type": "ROR",
+      "award": "R35GM143068;"
+    },
+    {
+      "name": "USC Research Center for Liver Disease",
+      "id": "",
+      "id-type": "ROR",
+      "award": "P30DK48522;"
+    },
+    {
+      "name": "USC-Illumina Keck Genomics Platform Core Lab Partnership Program",
+      "id": "",
+      "id-type": "ROR",
+      "award": ""
+    },
+    {
+      "name": "USC Research Center for Alcoholic Liver and Pancreatic Diseases and Cirrhosis",
+      "id": "",
+      "id-type": "ROR",
+      "award": "P50AA011999;"
+    },
+    {
+      "name": "Norris Comprehensive Cancer Center",
+      "id": "",
+      "id-type": "ROR",
+      "award": "P30CA014089;"
+    },
+    {
+      "name": "USC Center for Advanced Research Computing",
+      "id": "",
+      "id-type": "ROR",
+      "award": ""
+    }
+  ],
+  "published": "NA",
+  "server": "bioRxiv"
+}
