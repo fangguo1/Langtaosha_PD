@@ -566,7 +566,7 @@ class TestVectorDBUnit:
         vector_db = VectorDB(config_path=config_path)
 
         collection_name = vector_db._get_collection_name('biorxiv_history')
-        assert collection_name == 'lt_biorxiv_history'
+        assert collection_name == f'{vector_db.collection_prefix}biorxiv_history'
 
     def test_generate_doc_id(self):
         """测试文档 ID 生成"""
@@ -615,46 +615,53 @@ class TestVectorDBUnit:
         """测试获取 collection 列表（名称模式与详情模式）"""
         config_path = get_config_path_from_args()
         vector_db = VectorDB(config_path=config_path)
+        history_collection = vector_db._get_collection_name("biorxiv_history")
+        langtaosha_collection = vector_db._get_collection_name("langtaosha")
 
         with patch.object(vector_db.client, 'list_collections') as mock_list:
-            mock_list.return_value = ["lt_biorxiv_history", "lt_langtaosha"]
+            mock_list.return_value = [history_collection, langtaosha_collection]
             names = vector_db.get_collection_list(with_info=False)
-            assert names == ["lt_biorxiv_history", "lt_langtaosha"]
+            assert names == [history_collection, langtaosha_collection]
 
         with patch.object(vector_db.client, 'list_collections_with_info') as mock_list_info:
             mock_list_info.return_value = [
-                {"collection": "lt_biorxiv_history", "documentCount": 5},
-                {"collection": "lt_langtaosha", "documentCount": 7},
+                {"collection": history_collection, "documentCount": 5},
+                {"collection": langtaosha_collection, "documentCount": 7},
             ]
             infos = vector_db.get_collection_list(with_info=True)
             assert len(infos) == 2
-            assert infos[0]["collection"] == "lt_biorxiv_history"
+            assert infos[0]["collection"] == history_collection
 
     def test_get_collection_list_with_source_filter(self):
         """测试按 source 过滤 collection 列表"""
         config_path = get_config_path_from_args()
         vector_db = VectorDB(config_path=config_path)
+        history_collection = vector_db._get_collection_name("biorxiv_history")
+        langtaosha_collection = vector_db._get_collection_name("langtaosha")
+        daily_collection = vector_db._get_collection_name("biorxiv_daily")
 
         with patch.object(vector_db.client, 'list_collections') as mock_list:
-            mock_list.return_value = ["lt_biorxiv_history", "lt_langtaosha", "lt_biorxiv_daily"]
+            mock_list.return_value = [history_collection, langtaosha_collection, daily_collection]
             names = vector_db.get_collection_list(with_info=False, source_list=["biorxiv_history", "langtaosha"])
-            assert names == ["lt_biorxiv_history", "lt_langtaosha"]
+            assert names == [history_collection, langtaosha_collection]
 
     def test_get_vector_db_info(self):
         """测试获取 VectorDB 信息摘要"""
         config_path = get_config_path_from_args()
         vector_db = VectorDB(config_path=config_path)
+        history_collection = vector_db._get_collection_name("biorxiv_history")
+        langtaosha_collection = vector_db._get_collection_name("langtaosha")
 
         with patch.object(vector_db.client, 'list_databases') as mock_dbs, \
              patch.object(vector_db.client, 'list_collections') as mock_cols:
             mock_dbs.return_value = [vector_db.database, "other_db"]
-            mock_cols.return_value = ["lt_biorxiv_history", "lt_langtaosha"]
+            mock_cols.return_value = [history_collection, langtaosha_collection]
 
             info = vector_db.get_vector_db_info()
             assert info["database"] == vector_db.database
             assert info["database_exists"] is True
             assert info["collection_count"] == 2
-            assert "lt_biorxiv_history" in info["collections"]
+            assert history_collection in info["collections"]
     '''
     def test_local_made_not_supported(self):
         """测试 local_made 模式不支持"""
