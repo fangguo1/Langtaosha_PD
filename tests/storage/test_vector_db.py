@@ -30,7 +30,6 @@ import pytest
 import logging
 import argparse
 import os
-import json
 from pathlib import Path
 from typing import Dict, Any, List
 from unittest.mock import Mock, patch
@@ -125,61 +124,6 @@ def get_config_path_from_args() -> Path:
     return config_path
 
 
-# =============================================================================
-# 测试工具函数
-# =============================================================================
-
-def load_test_papers() -> Dict[str, List[Dict[str, Any]]]:
-    """从 test_data 目录加载测试论文数据
-
-    Returns:
-        Dict: {
-            "langtaosha": [...],           # LangTaoSha 论文列表（5个文件）
-            "biorxiv_history": [...],      # bioRxiv 历史（2020年）论文列表（10个文件）
-            "biorxiv_daily": [...]         # bioRxiv 日常（2025-2026年）论文列表（4个文件）
-        }
-    """
-    # Find project root by searching upward for marker files
-    current_path = Path(__file__).resolve()
-    project_root = current_path
-    for parent in [current_path] + list(current_path.parents):
-        if (parent / 'pyproject.toml').exists() or (parent / '.git').exists() or (parent / 'src').exists():
-            project_root = parent
-            break
-
-    test_data_dir = project_root / "test_data"
-
-    # 加载 LangTaoSha 数据（5个文件）
-    langtaosha_dir = test_data_dir / "langtaosha"
-    langtaosha_files = sorted(langtaosha_dir.glob("*.json"))
-    langtaosha_papers = []
-    for file_path in langtaosha_files:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            langtaosha_papers.append(json.load(f))
-
-    # 加载 bioRxiv 历史数据（10个文件，2020年数据）
-    biorxiv_history_dir = test_data_dir / "biorxiv_history"
-    biorxiv_history_files = sorted(biorxiv_history_dir.glob("*.json"))
-    biorxiv_history_papers = []
-    for file_path in biorxiv_history_files:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            biorxiv_history_papers.append(json.load(f))
-
-    # 加载 bioRxiv 日常数据（4个文件，2025-2026年数据）
-    biorxiv_daily_dir = test_data_dir / "biorxiv_daily"
-    biorxiv_daily_files = sorted(biorxiv_daily_dir.glob("*.json"))
-    biorxiv_daily_papers = []
-    for file_path in biorxiv_daily_files:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            biorxiv_daily_papers.append(json.load(f))
-
-    return {
-        "langtaosha": langtaosha_papers,
-        "biorxiv_history": biorxiv_history_papers,
-        "biorxiv_daily": biorxiv_daily_papers
-    }
-
-
 def prepare_document_for_vector_db_from_transformer(
     db_payload: Dict[str, Any],
     work_id: str
@@ -221,12 +165,6 @@ def prepare_document_for_vector_db_from_transformer(
 # =============================================================================
 # Pytest Fixtures
 # =============================================================================
-
-@pytest.fixture(scope="session")
-def test_papers():
-    """测试论文数据"""
-    return load_test_papers()
-
 
 @pytest.fixture(scope="function")
 def transformer():

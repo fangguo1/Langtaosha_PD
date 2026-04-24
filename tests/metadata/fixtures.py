@@ -1,75 +1,6 @@
-"""测试数据 fixtures"""
-from typing import Dict, Any, List
-from pathlib import Path
-import json
+"""Shared in-memory samples for metadata unit tests."""
 
-
-# =============================================================================
-# 从test_data目录读取真实数据
-# =============================================================================
-
-def load_biorxiv_test_data(limit: int = 14) -> List[Dict[str, Any]]:
-    """从test_data/bio_arxiv目录加载bioarxiv测试数据
-
-    Args:
-        limit: 最多加载的文件数量（默认14个）
-
-    Returns:
-        List[Dict]: bioarxiv原始数据列表
-    """
-    test_data_dir = Path(__file__).parent.parent.parent / "test_data" / "bio_arxiv"
-    files = sorted(test_data_dir.glob("*.json"))[:limit]
-
-    data_list = []
-    for file_path in files:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            data_list.append(data)
-
-    return data_list
-
-
-def load_langtaosha_test_data(limit: int = 5) -> List[Dict[str, Any]]:
-    """从test_data/langtaosha目录加载langtaosha测试数据
-
-    Args:
-        limit: 最多加载的文件数量（默认5个）
-
-    Returns:
-        List[Dict]: langtaosha原始数据列表
-    """
-    test_data_dir = Path(__file__).parent.parent.parent / "test_data" / "langtaosha"
-    files = sorted(test_data_dir.glob("*.json"))[:limit]
-
-    data_list = []
-    for file_path in files:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            data_list.append(data)
-
-    return data_list
-
-
-def load_all_test_data(
-    biorxiv_limit: int = 14,
-    langtaosha_limit: int = 5
-) -> Dict[str, List[Dict[str, Any]]]:
-    """加载所有测试数据
-
-    Args:
-        biorxiv_limit: bioarxiv文件数量限制（默认14个）
-        langtaosha_limit: langtaosha文件数量限制（默认5个）
-
-    Returns:
-        Dict: {
-            "bioarxiv": [...],
-            "langtaosha": [...]
-        }
-    """
-    return {
-        "bioarxiv": load_biorxiv_test_data(biorxiv_limit),
-        "langtaosha": load_langtaosha_test_data(langtaosha_limit)
-    }
+from typing import Any, Dict
 
 
 # =============================================================================
@@ -220,4 +151,3 @@ INCOMPLETE_SAMPLES = {
         "citation_author": "Test Author",
     },
 }
-

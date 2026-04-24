@@ -114,55 +114,6 @@ except Exception:
 
 
 # =============================================================================
-# Fixtures - 从 test_data 读取真实数据
-# =============================================================================
-
-def load_test_papers() -> Dict[str, List[Dict[str, Any]]]:
-    """从 test_data 目录加载测试论文数据
-
-    Returns:
-        Dict: {
-            "langtaosha": [...],           # LangTaoSha 论文列表（5个文件）
-            "biorxiv_history": [...],      # bioRxiv 历史（2020年）论文列表（10个文件）
-            "biorxiv_daily": [...]         # bioRxiv 日常（2025-2026年）论文列表（4个文件）
-        }
-    """
-    test_data_dir = Path(__file__).parent.parent.parent / "test_data"
-
-    import json
-
-    # 加载 LangTaoSha 数据（5个文件）
-    langtaosha_dir = test_data_dir / "langtaosha"
-    langtaosha_files = sorted(langtaosha_dir.glob("*.json"))
-    langtaosha_papers = []
-    for file_path in langtaosha_files:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            langtaosha_papers.append(json.load(f))
-
-    # 加载 bioRxiv 历史数据（10个文件，2020年数据）
-    biorxiv_history_dir = test_data_dir / "biorxiv_history"
-    biorxiv_history_files = sorted(biorxiv_history_dir.glob("*.json"))
-    biorxiv_history_papers = []
-    for file_path in biorxiv_history_files:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            biorxiv_history_papers.append(json.load(f))
-
-    # 加载 bioRxiv 日常数据（4个文件，2025-2026年数据）
-    biorxiv_daily_dir = test_data_dir / "biorxiv_daily"
-    biorxiv_daily_files = sorted(biorxiv_daily_dir.glob("*.json"))
-    biorxiv_daily_papers = []
-    for file_path in biorxiv_daily_files:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            biorxiv_daily_papers.append(json.load(f))
-
-    return {
-        "langtaosha": langtaosha_papers,
-        "biorxiv_history": biorxiv_history_papers,
-        "biorxiv_daily": biorxiv_daily_papers
-    }
-
-
-# =============================================================================
 # Pytest Fixtures
 # =============================================================================
 
@@ -236,12 +187,6 @@ def metadata_db(clean_db):
 def transformer():
     """MetadataTransformer 实例"""
     return MetadataTransformer()
-
-
-@pytest.fixture(scope="session")
-def test_papers():
-    """测试论文数据"""
-    return load_test_papers()
 
 
 # =============================================================================

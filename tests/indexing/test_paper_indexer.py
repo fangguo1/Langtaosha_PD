@@ -15,7 +15,6 @@ import pytest
 import logging
 import argparse
 import os
-import json
 import uuid
 from pathlib import Path
 from typing import Dict, Any, List
@@ -106,54 +105,6 @@ def get_config_path_from_args() -> Path:
 
 
 # =============================================================================
-# 测试数据加载
-# =============================================================================
-
-def load_test_papers() -> Dict[str, List[Dict[str, Any]]]:
-    """从 test_data 目录加载原始测试论文数据
-
-    Returns:
-        Dict: {
-            "langtaosha": [...],           # 5个文件
-            "biorxiv_history": [...],      # 10个文件
-            "biorxiv_daily": [...]         # 4个文件（重要）
-        }
-    """
-    test_data_dir = Path(__file__).parent.parent.parent / "test_data"
-
-    result = {}
-
-    # 加载 langtaosha 数据
-    langtaosha_dir = test_data_dir / "langtaosha"
-    langtaosha_files = sorted(langtaosha_dir.glob("*.json"))
-    langtaosha_papers = []
-    for file_path in langtaosha_files:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            langtaosha_papers.append(json.load(f))
-    result["langtaosha"] = langtaosha_papers
-
-    # 加载 biorxiv_history 数据
-    biorxiv_history_dir = test_data_dir / "biorxiv_history"
-    biorxiv_history_files = sorted(biorxiv_history_dir.glob("*.json"))
-    biorxiv_history_papers = []
-    for file_path in biorxiv_history_files:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            biorxiv_history_papers.append(json.load(f))
-    result["biorxiv_history"] = biorxiv_history_papers
-
-    # 加载 biorxiv_daily 数据（重要）
-    biorxiv_daily_dir = test_data_dir / "biorxiv_daily"
-    biorxiv_daily_files = sorted(biorxiv_daily_dir.glob("*.json"))
-    biorxiv_daily_papers = []
-    for file_path in biorxiv_daily_files:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            biorxiv_daily_papers.append(json.load(f))
-    result["biorxiv_daily"] = biorxiv_daily_papers
-
-    return result
-
-
-# =============================================================================
 # Pytest Fixtures
 # =============================================================================
 
@@ -238,24 +189,6 @@ def indexer(config_path, clean_db):
     yield indexer
 
     # 清理（如果需要）
-
-
-@pytest.fixture(scope="session")
-def test_papers():
-    """加载所有测试论文数据（session 级别，只加载一次）"""
-    return load_test_papers()
-
-
-@pytest.fixture(scope="session")
-def test_paper_files():
-    """获取测试论文文件路径（用于测试 MetadataTransformer 集成）"""
-    test_data_dir = Path(__file__).parent.parent.parent / "test_data"
-
-    return {
-        "langtaosha": sorted((test_data_dir / "langtaosha").glob("*.json")),
-        "biorxiv_history": sorted((test_data_dir / "biorxiv_history").glob("*.json")),
-        "biorxiv_daily": sorted((test_data_dir / "biorxiv_daily").glob("*.json"))
-    }
 
 
 @pytest.fixture(scope="session")
@@ -445,11 +378,10 @@ class TestIndexDict:
 class TestIndexFile:
     """测试 index_file 方法"""
 
-    def test_index_file_langtaosha_success(self, indexer, test_papers):
+    def test_index_file_langtaosha_success(self, indexer, test_paper_files):
         """测试索引 langtaosha 文件成功"""
         # 使用测试数据目录中的实际文件
-        test_data_dir = Path(__file__).parent.parent.parent / "test_data"
-        langtaosha_file = sorted((test_data_dir / "langtaosha").glob("*.json"))[0]
+        langtaosha_file = test_paper_files["langtaosha"][0]
 
         result = indexer.index_file(
             input_path=langtaosha_file,
@@ -461,10 +393,9 @@ class TestIndexFile:
         assert result['source_name'] == 'langtaosha'
         print(f"✅ 文件索引成功: {langtaosha_file.name}")
 
-    def test_index_file_biorxiv_history_success(self, indexer, test_papers):
+    def test_index_file_biorxiv_history_success(self, indexer, test_paper_files):
         """测试索引 biorxiv_history 文件成功"""
-        test_data_dir = Path(__file__).parent.parent.parent / "test_data"
-        biorxiv_file = sorted((test_data_dir / "biorxiv_history").glob("*.json"))[0]
+        biorxiv_file = test_paper_files["biorxiv_history"][0]
 
         result = indexer.index_file(
             input_path=biorxiv_file,
@@ -475,10 +406,9 @@ class TestIndexFile:
         assert result['success'] is True
         assert result['source_name'] == 'biorxiv_history'
 
-    def test_index_file_biorxiv_daily_success(self, indexer, test_papers):
+    def test_index_file_biorxiv_daily_success(self, indexer, test_paper_files):
         """测试索引 biorxiv_daily 文件成功（重要）"""
-        test_data_dir = Path(__file__).parent.parent.parent / "test_data"
-        biorxiv_file = sorted((test_data_dir / "biorxiv_daily").glob("*.json"))[0]
+        biorxiv_file = test_paper_files["biorxiv_daily"][0]
 
         result = indexer.index_file(
             input_path=biorxiv_file,
@@ -549,28 +479,24 @@ class TestPaperIndexerIntegrated:
         3. teardown_class: 统一删除所有数据，验证清理成功
     """
 
-    @classmethod
-    def setup_class(cls):
-        """测试类初始化：索引所有测试论文"""
+    @pytest.fixture(scope="class", autouse=True)
+    def integrated_suite(self, request, config_path, test_papers):
+        """测试类初始化：索引所有测试论文，并在类结束后统一清理。"""
         print("\n" + "="*70)
         print("🔄 TestPaperIndexerIntegrated - 开始预索引测试数据")
         print("="*70)
 
         # 初始化配置和 indexer
-        config_path = get_config_path_from_args()
         _reset_config()
         init_config(config_path)
 
-        cls.indexer = PaperIndexer(
+        request.cls.indexer = PaperIndexer(
             config_path=config_path,
             enable_vectorization=True
         )
 
-        # 加载测试数据
-        cls.test_papers = load_test_papers()
-
         # 存储所有 work_ids
-        cls.indexed_work_ids = {
+        request.cls.indexed_work_ids = {
             "langtaosha": [],
             "biorxiv_history": [],
             "biorxiv_daily": [],
@@ -587,8 +513,8 @@ class TestPaperIndexerIntegrated:
         for source_name, count in index_plan:
             print(f"\n📥 索引 {source_name} ({count} 篇)...")
             for i in range(count):
-                paper = cls.test_papers[source_name][i]
-                result = cls.indexer.index_dict(
+                paper = test_papers[source_name][i]
+                result = request.cls.indexer.index_dict(
                     raw_payload=paper,
                     source_name=source_name,
                     mode='insert'
@@ -596,8 +522,8 @@ class TestPaperIndexerIntegrated:
 
                 if result['success']:
                     work_id_tuple = (result['work_id'], source_name)
-                    cls.indexed_work_ids[source_name].append(work_id_tuple)
-                    cls.indexed_work_ids["all"].append(work_id_tuple)
+                    request.cls.indexed_work_ids[source_name].append(work_id_tuple)
+                    request.cls.indexed_work_ids["all"].append(work_id_tuple)
                     print(f"  ✅ [{i+1}/{count}] {result['work_id']}")
                 else:
                     print(f"  ❌ [{i+1}/{count}] 索引失败: {result.get('error', 'Unknown error')}")
@@ -607,12 +533,63 @@ class TestPaperIndexerIntegrated:
         print(f"\n⏳ 等待向量化完成...")
         time.sleep(3)
 
-        total_count = len(cls.indexed_work_ids["all"])
+        total_count = len(request.cls.indexed_work_ids["all"])
         print(f"\n✅ 预索引完成: 共 {total_count} 篇论文")
+        print(f"   - langtaosha: {len(request.cls.indexed_work_ids['langtaosha'])} 篇")
+        print(f"   - biorxiv_history: {len(request.cls.indexed_work_ids['biorxiv_history'])} 篇")
+        print(f"   - biorxiv_daily: {len(request.cls.indexed_work_ids['biorxiv_daily'])} 篇")
+        print("="*70 + "\n")
+
+        yield
+
+        cls = request.cls
+        print("\n" + "="*70)
+        print("🗑️  TestPaperIndexerIntegrated - 开始清理测试数据")
+        print("="*70)
+
+        remaining_count = len(cls.indexed_work_ids["all"])
+        print(f"\n📊 剩余待清理数据: {remaining_count} 篇")
         print(f"   - langtaosha: {len(cls.indexed_work_ids['langtaosha'])} 篇")
         print(f"   - biorxiv_history: {len(cls.indexed_work_ids['biorxiv_history'])} 篇")
         print(f"   - biorxiv_daily: {len(cls.indexed_work_ids['biorxiv_daily'])} 篇")
-        print("="*70 + "\n")
+
+        delete_failures = []
+        for work_id, source_name in cls.indexed_work_ids["all"]:
+            try:
+                delete_result = cls.indexer.delete(
+                    work_id=work_id,
+                    source_name=source_name
+                )
+                if delete_result['success']:
+                    print(f"  ✅ 清理成功: {work_id} ({source_name})")
+                else:
+                    error_msg = delete_result.get('error', 'Unknown error')
+                    print(f"  ❌ 清理失败: {work_id} ({source_name}) - {error_msg}")
+                    delete_failures.append((work_id, source_name, error_msg))
+            except Exception as e:
+                print(f"  ❌ 清理异常: {work_id} ({source_name}) - {e}")
+                delete_failures.append((work_id, source_name, str(e)))
+
+        print(f"\n🔍 验证清理结果...")
+
+        verification_failures = []
+        for work_id, source_name in cls.indexed_work_ids["all"]:
+            paper_info = cls.indexer.read(work_id=work_id)
+            if paper_info is not None:
+                print(f"  ❌ 验证失败: {work_id} 仍然存在")
+                verification_failures.append(work_id)
+            else:
+                print(f"  ✅ 验证成功: {work_id} 已删除")
+
+        print("\n" + "="*70)
+        if delete_failures or verification_failures:
+            print(f"⚠️  清理完成，但有失败:")
+            print(f"   - 删除失败: {len(delete_failures)} 个")
+            print(f"   - 验证失败: {len(verification_failures)} 个")
+            print("="*70 + "\n")
+        else:
+            print(f"✅ 清理完成: 所有 {remaining_count} 篇论文已成功删除并验证")
+            print("="*70 + "\n")
 
     # =========================================================================
     # 测试方法：直接使用 cls.indexed_work_ids 中的预索引数据
@@ -773,61 +750,6 @@ class TestPaperIndexerIntegrated:
             # 从列表中移除
             self.indexed_work_ids[source_name].remove((work_id, source_name))
             self.indexed_work_ids['all'].remove((work_id, source_name))
-
-    @classmethod
-    def teardown_class(cls):
-        """测试类清理：删除所有剩余数据并验证"""
-        print("\n" + "="*70)
-        print("🗑️  TestPaperIndexerIntegrated - 开始清理测试数据")
-        print("="*70)
-
-        remaining_count = len(cls.indexed_work_ids["all"])
-        print(f"\n📊 剩余待清理数据: {remaining_count} 篇")
-        print(f"   - langtaosha: {len(cls.indexed_work_ids['langtaosha'])} 篇")
-        print(f"   - biorxiv_history: {len(cls.indexed_work_ids['biorxiv_history'])} 篇")
-        print(f"   - biorxiv_daily: {len(cls.indexed_work_ids['biorxiv_daily'])} 篇")
-
-        # 统一删除所有剩余数据
-        delete_failures = []
-        for work_id, source_name in cls.indexed_work_ids["all"]:
-            try:
-                delete_result = cls.indexer.delete(
-                    work_id=work_id,
-                    source_name=source_name
-                )
-                if delete_result['success']:
-                    print(f"  ✅ 清理成功: {work_id} ({source_name})")
-                else:
-                    error_msg = delete_result.get('error', 'Unknown error')
-                    print(f"  ❌ 清理失败: {work_id} ({source_name}) - {error_msg}")
-                    delete_failures.append((work_id, source_name, error_msg))
-            except Exception as e:
-                print(f"  ❌ 清理异常: {work_id} ({source_name}) - {e}")
-                delete_failures.append((work_id, source_name, str(e)))
-
-        # 验证清理结果
-        print(f"\n🔍 验证清理结果...")
-
-        verification_failures = []
-        for work_id, source_name in cls.indexed_work_ids["all"]:
-            paper_info = cls.indexer.read(work_id=work_id)
-            if paper_info is not None:
-                print(f"  ❌ 验证失败: {work_id} 仍然存在")
-                verification_failures.append(work_id)
-            else:
-                print(f"  ✅ 验证成功: {work_id} 已删除")
-
-        # 总结
-        print("\n" + "="*70)
-        if delete_failures or verification_failures:
-            print(f"⚠️  清理完成，但有失败:")
-            print(f"   - 删除失败: {len(delete_failures)} 个")
-            print(f"   - 验证失败: {len(verification_failures)} 个")
-            print("="*70 + "\n")
-        else:
-            print(f"✅ 清理完成: 所有 {remaining_count} 篇论文已成功删除并验证")
-            print("="*70 + "\n")
-
 
 # =============================================================================
 # 阶段 7: MetadataTransformer 集成测试
