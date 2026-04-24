@@ -1,548 +1,430 @@
-# 论文数据库系统 - 改进版表设计
-# 基于实际 JSON 数据结构优化
-# 创建时间: 2025
-# 
-# 主要改进：
-# 1. 添加了 JSON 中存在的字段（doi, journal_ref, comments, primary_category, platform）
-# 2. 新增版本管理表（paper_versions）
-# 3. 新增引用统计表（paper_citations）
-# 4. 优化作者-机构关系表，支持多机构
-# 5. 扩展 venue_type 支持 "repository" 类型
-# 6. 添加更多索引和约束优化查询性能
-#
-# 重要说明 - 自增ID字段：
-# - 所有标记为"数据库内部自增ID（SERIAL）"的字段都是数据库自动生成的主键
-# - 这些字段不需要在插入数据时手动指定值，数据库会自动分配唯一ID
-# - 自增ID字段包括：
-#   * papers.paper_id
-#   * venues.venue_id
-#   * categories.cat_id
-#   * paper_publications.pub_id
-#   * paper_versions.version_id
-#   * paper_citations.citation_id
-#   * meta_update_logs.id
-#   * fields.field_id
-# - 在 PostgreSQL 中，这些字段使用 SERIAL 或 BIGSERIAL 类型实现
-# - 插入数据时，只需插入其他字段，自增ID会自动生成
+# 论文数据库系统 - 0413 架构简化版表说明
 
-================================================================================
-1. papers（主表）
-================================================================================
-| 字段                   | 类型       | 说明                                    |
-| -------------------- | -------- | ------------------------------------- |
-| paper_id             | int PK   | 主键，数据库内部自增ID（SERIAL），不需要手动插入      |
-| work_id              | varchar(200) | 业务唯一标识符（如"W0000000001"），用于跨数据库索引，唯一索引 |
-| arxiv_id             | varchar(50) | ArXiv ID，可空，唯一索引                      |
-| title                 | text     | 标题，非空                                  |
-| abstract              | text     | 摘要，可空                                  |
-| keywords              | text     | 关键词（逗号分隔或JSON数组），可空                  |
-| pdf_url               | varchar(500) | PDF 链接，可空                              |
-| source_url            | varchar(500) | 来源URL（如arxiv论文页面链接），可空              |
-| year                  | int      | 年份，可空，索引                              |
-| is_preprint           | boolean  | 是否为预印本，默认 FALSE                        |
-| is_published          | boolean  | 是否正式发表，默认 FALSE                        |
-| source                | varchar(100) | 论文来源（如"arxiv", "library_xxx", "database_xxx"），默认'arxiv'，索引 |
-| platform              | varchar(50) | 平台名称（如"arxiv"），可空，索引                   |
-| primary_category      | varchar(50) | 主分类（如"cs.CC"），可空，索引                    |
-| doi                   | varchar(200) | 数字对象标识符（Digital Object Identifier），可空，唯一索引 |
-| semantic_scholar_id   | varchar(100) | Semantic Scholar ID，可空，索引            |
-| pubmed_id             | varchar(100) | PubMed ID，可空，索引                        |
-| journal_ref           | varchar(500) | 期刊引用信息，可空                              |
-| comments              | text     | 评论/备注（如"24 pages"），可空                   |
-| contribution_types    | jsonb    | 贡献类型数组（如["Method", "Theory"]），可空，GIN索引 |
-| created_at            | timestamp | 首次提交时间（对应 JSON 中的 submitted_date），可空，从 JSON 读取 |
-| updated_at            | timestamp | 论文在 arXiv 的最后更新时间（对应 JSON 中的 updated_date），可空，从 JSON 读取 |
-| imported_at           | timestamp | 论文导入到数据库的时间，默认 CURRENT_TIMESTAMP，索引 |
-| embedding_status      | smallint  | 向量化状态: 0=raw(未处理), 1=exported(已导出为Arrow batch), 2=ready(已写入FAISS索引)，默认 0，索引 |
-| shard_id              | int       | 文献所属的 shard ID，仅在 embedding_status=2 时赋值，可空，索引 |
-| paper_type            | varchar(100) | 论文类型，可空                                  |
-| primary_field         | varchar(100) | 主要研究领域，可空                                |
-| target_application_domain | varchar(200) | 目标应用领域，可空                            |
-| is_llm_era            | boolean   | 是否为LLM时代论文，默认 FALSE                        |
-| short_reasoning       | varchar(200) | 简短理由说明（最多50字），可空                        |
+设计目标：统一作品 + 多来源记录 + 原始元数据沉淀 + 来源文件追溯。
+支持 Langtaosha、bioRxiv、arXiv、PubMed 并存。
 
-PRIMARY KEY (paper_id)
-UNIQUE (work_id)  -- work_id 唯一（业务标识符）
-UNIQUE (arxiv_id)  -- ArXiv ID 唯一
-UNIQUE (doi)  -- DOI 唯一（如果存在）
-INDEX idx_papers_source (source)
-INDEX idx_papers_year (year)
-INDEX idx_papers_arxiv_id (arxiv_id)
-INDEX idx_papers_platform (platform)
-INDEX idx_papers_primary_category (primary_category)
-INDEX idx_papers_created_at (created_at)
-INDEX idx_papers_imported_at (imported_at)  -- 导入时间索引
-INDEX idx_papers_semantic_scholar_id (semantic_scholar_id)  -- Semantic Scholar ID索引
-INDEX idx_papers_pubmed_id (pubmed_id)  -- PubMed ID索引
-INDEX idx_papers_contribution_types USING GIN(contribution_types)  -- contribution_types JSONB索引
-INDEX idx_papers_title_fts USING GIN(to_tsvector('english', title))  -- 全文检索索引
-INDEX idx_papers_abstract_fts USING GIN(to_tsvector('english', abstract))  -- 全文检索索引
-INDEX idx_papers_embedding_status (embedding_status)  -- 向量化状态索引
-INDEX idx_papers_shard_id (shard_id)  -- shard ID索引
-INDEX idx_papers_embedding_status_shard_id (embedding_status, shard_id)  -- 复合索引，优化按状态和shard查询
-INDEX idx_papers_embedding_status_paper_id (embedding_status, paper_id)  -- 复合索引，优化按状态和paper_id查询
-INDEX idx_papers_paper_type (paper_type)  -- 论文类型索引
-INDEX idx_papers_primary_field (primary_field)  -- 主要研究领域索引
-INDEX idx_papers_target_application_domain (target_application_domain)  -- 目标应用领域索引
-INDEX idx_papers_is_llm_era (is_llm_era)  -- LLM时代标记索引
+核心设计原则：
+- `papers` 只存统一作品的 canonical 视图字段。
+- 来源记录进入 `paper_sources`，允许一篇作品对应多个来源。
+- 原始来源 metadata 统一进入 `paper_source_metadata`。
+- 来源特异字段进入 `paper_source_metadata.normalized_json.source_specific`。
+- 当前不参与核心检索的附加信息，不再单独建表，统一进入 `paper_source_metadata.normalized_json.common_normalized`。
+
+暂时取消独立建模的表：
+- `paper_texts`
+- `venues`
+- `paper_publications`
+- `paper_versions`
+- `paper_citations`
+- `fields`
+- `paper_fields`
 
 说明：
-- work_id 是业务唯一标识符，用于跨数据库索引（元数据库、向量数据库）
-- created_at 对应 JSON 中的 submitted_date（首次提交时间），从 JSON 中读取，不是默认当前时间
-- updated_at 对应 JSON 中的 updated_date（爬取时论文在 arXiv 的最后更新时间），从 JSON 中读取，不是默认当前时间
-- imported_at 记录论文实际导入到数据库的时间，用于追踪数据导入历史
-- platform 来自 additional_info.platform
-- primary_category 来自 default_info.primary_category
-- doi, journal_ref, comments 来自 additional_info
-- semantic_scholar_id 来自 default_info.identifiers.semantic_scholar
-- pubmed_id 来自 default_info.identifiers.pubmed
-- contribution_types 来自 additional_info.contribution_types（JSONB数组）
-- embedding_status 用于跟踪文献的向量化处理状态，支持大规模文献向量化系统
-- shard_id 用于记录文献所属的 shard，仅在向量化完成后（embedding_status=2）时赋值
-- paper_type 用于标记论文类型（如：research paper, review, survey等）
-- primary_field 用于标记论文的主要研究领域
-- target_application_domain 用于标记论文的目标应用领域
-- is_llm_era 用于标记是否为LLM时代（2022年后）的论文
-- short_reasoning 用于存储简短的理由说明，最多50字
-
+- 所有 `SERIAL` / `BIGSERIAL` 字段均为数据库自动生成的内部主键，无需手动插入。
+- 下文内容以当前 `database/schema.sql` 为准。
 
 ================================================================================
-2. paper_keywords（论文关键词表）【新增】
+1. papers（统一作品主表）
 ================================================================================
-| 字段                   | 类型       | 说明                           |
-| -------------------- | -------- | ---------------------------- |
-| paper_id             | int PK, FK | 论文ID，外键 → papers.paper_id，复合主键的一部分 |
-| keyword_type         | varchar(50) PK | 关键词类型（见下方枚举值），复合主键的一部分 |
-| keyword              | varchar(200) PK | 关键词内容，复合主键的一部分            |
-| weight               | real     | 权重/置信度 (0.0-1.0)，默认 1.0        |
-| source               | varchar(50) | 关键词来源（见下方枚举值），可空            |
-| created_at           | timestamp | 创建时间，默认 CURRENT_TIMESTAMP        |
+功能描述：
+- 每行代表一篇去重后的学术作品。
+- 只保存 canonical 统一视图字段。
+- 来源侧原始字段与来源特异字段不直接落在本表中，而由 `paper_sources` 与 `paper_source_metadata` 承载。
 
-PRIMARY KEY (paper_id, keyword_type, keyword)
-FOREIGN KEY (paper_id) REFERENCES papers(paper_id) ON DELETE CASCADE
-CHECK (weight >= 0.0 AND weight <= 1.0)  -- 权重范围约束
-INDEX idx_pk_paper_id (paper_id)  -- 用于快速查找某篇论文的所有关键词
-INDEX idx_pk_keyword_type (keyword_type)  -- 用于按关键词类型查询
-INDEX idx_pk_keyword (keyword)  -- 用于按关键词内容查询
-INDEX idx_pk_paper_id_keyword_type (paper_id, keyword_type)  -- 复合索引，优化按论文和类型查询
+字段说明：
+| 字段名 | 类型 | 说明 |
+| --- | --- | --- |
+| `paper_id` | `SERIAL` PK | 论文内部主键 |
+| `work_id` | `VARCHAR(200)` | 全局唯一标识符（UUID v7 格式，前缀 W），用于 Vector DB 关联、跨系统数据交换、API 对外接口 |
+| `canonical_title` | `TEXT` | 统一标题，可空 |
+| `canonical_abstract` | `TEXT` | 统一摘要，可空 |
+| `canonical_language` | `VARCHAR(32)` | 统一语言标识，可空 |
+| `canonical_publisher` | `VARCHAR(200)` | 统一出版方，可空 |
+| `submitted_at` | `TIMESTAMP` | 统一提交时间，可空 |
+| `online_at` | `TIMESTAMP` | 统一上线时间，可空 |
+| `published_at` | `TIMESTAMP` | 统一发表时间，可空 |
+| `merge_status` | `VARCHAR(32)` | 合并状态，默认 `single_source`，取值约定：`single_source` / `merged` |
+| `created_at` | `TIMESTAMP` | 创建时间，默认 `CURRENT_TIMESTAMP` |
+| `updated_at` | `TIMESTAMP` | 更新时间，默认 `CURRENT_TIMESTAMP`，由触发器自动更新 |
+| `canonical_source_id` | `BIGINT` FK | 指向 `paper_sources.paper_source_id`，标记 canonical 优先来源，可空 |
 
-说明：
-- keyword_type 枚举值：
-  * 'task'          -- 任务关键词：object detection, sentiment analysis, machine translation
-  * 'method'        -- 方法关键词：transformer, CNN, reinforcement learning, attention mechanism
-  * 'contribution'  -- 贡献类型：novel architecture, benchmark, theoretical analysis
-  * 'dataset'       -- 数据集：ImageNet, COCO, SQuAD, GLUE
-  * 'metric'        -- 评估指标：accuracy, F1-score, BLEU, mAP
-  * 'library'       -- 工具库：PyTorch, TensorFlow, HuggingFace
-  * 'domain'        -- 应用领域：healthcare, finance, autonomous driving
-  * 'concept'       -- 核心概念：few-shot learning, self-supervised, multimodal
-  * 'model'         -- 模型名称：BERT, GPT, ResNet, CLIP
-- source 枚举值（关键词来源）：
-  * 'manual'        -- 手动标注
-  * 'ai_extract'    -- AI提取
-  * 'keyword_match' -- 关键词匹配
-  * 'llm_tag'       -- LLM标注
-  * 'paper_metadata' -- 论文元数据
-- weight 表示关键词的权重或置信度，范围0.0-1.0
-- 一篇论文可以有多个关键词，每个关键词有唯一的(paper_id, keyword_type, keyword)组合
+约束与索引：
+- `PRIMARY KEY (paper_id)`
+- `FOREIGN KEY (canonical_source_id) REFERENCES paper_sources(paper_source_id) ON DELETE SET NULL`
+- `UNIQUE INDEX idx_papers_work_id (work_id) WHERE work_id IS NOT NULL`（全局唯一标识符）
+- `INDEX idx_papers_canonical_source_id (canonical_source_id) WHERE canonical_source_id IS NOT NULL`
 
-
-================================================================================
-3. paper_texts（PDF 文本 + embedding）
-================================================================================
-| 字段            | 类型                           | 说明               |
-| ------------- | ---------------------------- | ---------------- |
-| paper_id      | int PK, FK → papers.paper_id | 1:1 关系，级联删除      |
-| pdf_path      | varchar(500)                 | 本地 PDF 路径        |
-| pdf_hash      | varchar(64)                  | SHA256 hash，用于查重 |
-| embedding     | jsonb                        | 向量（JSON格式存储向量） |
-| created_at    | timestamp                   | 创建时间             |
-| updated_at    | timestamp                   | 更新时间，自动更新触发器   |
-
-PRIMARY KEY (paper_id)
-FOREIGN KEY (paper_id) REFERENCES papers(paper_id) ON DELETE CASCADE
-INDEX idx_paper_texts_pdf_hash (pdf_hash)  -- 用于查重
-
+补充说明：
+- `work_id` 使用 UUID v7 格式（前缀 W），保证全局唯一性，格式如 `W019b73d6-1634-77d3-9574-b6014f85b118`。
+  - 用于 Vector DB 向量与元数据的关联
+  - 用于跨系统数据交换和迁移
+  - 用于 API 对外接口（避免暴露内部自增 ID）
+  - UUID v7 时间有序，索引性能接近自增 ID
+- `canonical_source_id` 通过 `ALTER TABLE` 在 `paper_sources` 创建后追加，以解决循环依赖。
+- `merge_status='merged'` 表示当前 canonical 视图由多个来源合并而成。
 
 ================================================================================
-4. paper_author_affiliation（作者—论文—机构表）
+2. paper_keywords（论文关键词表）
 ================================================================================
-| 字段                   | 类型                   | 说明                       |
-| -------------------- | -------------------- | ------------------------ |
-| paper_id             | int PK, FK           | 论文ID，外键 → papers.paper_id，唯一 |
-| authors              | jsonb                | 作者信息 JSON 数组，包含姓名、顺序、机构等 |
+功能描述：
+- 存储论文结构化关键词。
+- 支持任务、方法、数据集、指标、模型等多种关键词类型。
+- 记录关键词来源和置信度权重。
 
-PRIMARY KEY (paper_id)
-FOREIGN KEY (paper_id) REFERENCES papers(paper_id) ON DELETE CASCADE
-INDEX idx_paa_paper_id (paper_id)
-INDEX idx_paa_authors USING GIN(authors)  -- GIN 索引支持 JSONB 查询
+字段说明：
+| 字段名 | 类型 | 说明 |
+| --- | --- | --- |
+| `paper_id` | `INTEGER` FK | 论文ID，外键到 `papers.paper_id` |
+| `keyword_type` | `VARCHAR(50)` | 关键词类型 |
+| `keyword` | `VARCHAR(200)` | 关键词内容 |
+| `weight` | `REAL` | 权重/置信度，默认 `1.0`，取值范围 `0.0-1.0` |
+| `source` | `VARCHAR(50)` | 来源，如 `manual`、`ai_extract`、`llm_tag` |
+| `created_at` | `TIMESTAMP` | 创建时间，默认 `CURRENT_TIMESTAMP` |
 
-说明：
-- 一个 paper_id 只有一行数据
-- authors 字段存储完整的作者信息 JSON 数组，格式如下：
-  [
-    {
-      "sequence": 1,
-      "name": "Sean Robertson",
-      "affiliations": [
-        "Department of Computer Science, University of Toronto, Canada",
-        "Vector Institute, Canada"
-      ]
+约束与索引：
+- `PRIMARY KEY (paper_id, keyword_type, keyword)`
+- `FOREIGN KEY (paper_id) REFERENCES papers(paper_id) ON DELETE CASCADE`
+- `CHECK (weight >= 0.0 AND weight <= 1.0)`
+- `INDEX idx_pk_paper_id (paper_id)`
+- `INDEX idx_pk_keyword_type (keyword_type)`
+- `INDEX idx_pk_keyword (keyword)`
+- `INDEX idx_pk_paper_id_keyword_type (paper_id, keyword_type)`
+
+关键词类型约定：
+- `task`
+- `method`
+- `contribution`
+- `dataset`
+- `metric`
+- `library`
+- `domain`
+- `concept`
+- `model`
+
+================================================================================
+3. paper_author_affiliation（作者-论文-机构表）
+================================================================================
+功能描述：
+- 以 JSONB 数组形式保存论文作者及机构信息。
+- 与 `papers` 为 1:1 关系。
+
+字段说明：
+| 字段名 | 类型 | 说明 |
+| --- | --- | --- |
+| `paper_id` | `INTEGER` PK, FK | 论文ID，主键，同时外键到 `papers.paper_id` |
+| `authors` | `JSONB` | 作者数组，保存姓名、排序、机构等信息 |
+
+约束与索引：
+- `PRIMARY KEY (paper_id)`
+- `FOREIGN KEY (paper_id) REFERENCES papers(paper_id) ON DELETE CASCADE`
+- `INDEX idx_paa_paper_id (paper_id)`
+- `GIN INDEX idx_paa_authors ON authors`
+
+JSON 结构示意：
+```json
+[
+  {
+    "sequence": 1,
+    "name": "Author Name",
+    "affiliations": ["Institution A"]
+  }
+]
+```
+
+================================================================================
+4. categories（学科领域字典表）
+================================================================================
+功能描述：
+- 存储大领域与子领域分类。
+- 作为 `paper_categories` 的字典表。
+- 当前仍保留独立建模，用于分类过滤和标准化分类维护。
+
+字段说明：
+| 字段名 | 类型 | 说明 |
+| --- | --- | --- |
+| `cat_id` | `SERIAL` PK | 分类内部主键 |
+| `domain` | `VARCHAR(50)` | 大领域，如 `cs`、`math` |
+| `subdomain` | `VARCHAR(100)` | 子领域，如 `cs.AI` |
+| `description` | `VARCHAR(500)` | 描述，可空 |
+
+约束与索引：
+- `PRIMARY KEY (cat_id)`
+- `UNIQUE (domain, subdomain)`
+- `INDEX idx_categories_domain (domain)`
+- `INDEX idx_categories_subdomain (subdomain)`
+
+================================================================================
+5. paper_categories（论文分类关联表）
+================================================================================
+功能描述：
+- 建立论文与学科分类的多对多关系。
+- 保留 `is_primary`，用于标识主分类。
+- 当前仍建议保留，因为 category 检索属于核心查询能力的一部分。
+
+字段说明：
+| 字段名 | 类型 | 说明 |
+| --- | --- | --- |
+| `paper_id` | `INTEGER` FK | 论文ID |
+| `cat_id` | `INTEGER` FK | 分类ID |
+| `is_primary` | `BOOLEAN` | 是否主分类，默认 `FALSE` |
+
+约束与索引：
+- `PRIMARY KEY (paper_id, cat_id)`
+- `FOREIGN KEY (paper_id) REFERENCES papers(paper_id) ON DELETE CASCADE`
+- `FOREIGN KEY (cat_id) REFERENCES categories(cat_id) ON DELETE CASCADE`
+- `INDEX idx_pc_paper_id (paper_id)`
+- `INDEX idx_pc_cat_id (cat_id)`
+- `INDEX idx_pc_is_primary (is_primary)`
+
+================================================================================
+6. meta_update_logs（元数据更新日志）
+================================================================================
+功能描述：
+- 记录论文元数据字段的变更历史。
+- 用于审计、回溯、人工修订记录和合并策略分析。
+
+字段说明：
+| 字段名 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | `SERIAL` PK | 日志内部主键 |
+| `paper_id` | `INTEGER` FK | 论文ID |
+| `field` | `VARCHAR(100)` | 被修改字段名 |
+| `old_value` | `TEXT` | 旧值，可空 |
+| `new_value` | `TEXT` | 新值，可空 |
+| `update_time` | `TIMESTAMP` | 更新时间，默认 `CURRENT_TIMESTAMP` |
+| `source` | `VARCHAR(50)` | 更新来源，如 `manual`、`agent`、`merger` |
+
+约束与索引：
+- `PRIMARY KEY (id)`
+- `FOREIGN KEY (paper_id) REFERENCES papers(paper_id) ON DELETE CASCADE`
+- `INDEX idx_mul_paper_id (paper_id)`
+- `INDEX idx_mul_update_time (update_time)`
+- `INDEX idx_mul_field (field)`
+
+================================================================================
+7. pubmed_additional_info（PubMed 扩展信息表）
+================================================================================
+功能描述：
+- 保存 PubMed 特有扩展字段。
+- 目前仍保留为独立表，用于兼容现有 PubMed 扩展信息结构。
+- 长期看，来源特异字段更推荐进入 `paper_source_metadata.normalized_json.source_specific`。
+
+字段说明：
+| 字段名 | 类型 | 说明 |
+| --- | --- | --- |
+| `paper_id` | `INTEGER` PK, FK | 论文ID，1:1 对应 `papers.paper_id` |
+| `additional_info_json` | `JSONB` | PubMed 扩展信息，非空 |
+| `created_at` | `TIMESTAMP` | 创建时间，默认 `CURRENT_TIMESTAMP` |
+| `updated_at` | `TIMESTAMP` | 更新时间，默认 `CURRENT_TIMESTAMP`，由触发器自动更新 |
+
+约束与索引：
+- `PRIMARY KEY (paper_id)`
+- `FOREIGN KEY (paper_id) REFERENCES papers(paper_id) ON DELETE CASCADE`
+- `INDEX idx_pai_paper_id (paper_id)`
+- `GIN INDEX idx_pai_additional_info_json ON additional_info_json`
+
+================================================================================
+8. paper_sources（来源记录表）
+================================================================================
+功能描述：
+- 每条记录表示一篇作品在某个来源系统中的一次可追踪记录。
+- 用于承载来源侧标题、摘要、标识符、链接、时间字段等“来源级信息”。
+- 是多来源并存架构的核心表之一。
+- 旧迁移里挂在 `papers` 上的来源级标识（如 `pubmed_id`、`semantic_scholar_id`）已迁移到这里。
+
+字段说明：
+| 字段名 | 类型 | 说明 |
+| --- | --- | --- |
+| `paper_source_id` | `BIGSERIAL` PK | 来源记录内部主键 |
+| `paper_id` | `INTEGER` FK | 关联到统一作品 `papers.paper_id` |
+| `source_name` | `VARCHAR(64)` | 来源名，如 `langtaosha`、`biorxiv`、`arxiv`、`pubmed` |
+| `platform` | `VARCHAR(64)` | 平台名，可空 |
+| `source_record_id` | `VARCHAR(200)` | 来源内部唯一记录ID，可空 |
+| `source_url` | `VARCHAR(500)` | 来源页面URL，可空 |
+| `abstract_url` | `VARCHAR(500)` | 摘要页URL，可空 |
+| `pdf_url` | `VARCHAR(500)` | PDF URL，可空 |
+| `title` | `TEXT` | 来源侧标题，可空 |
+| `abstract` | `TEXT` | 来源侧摘要，可空 |
+| `publisher` | `VARCHAR(200)` | 来源侧出版方，可空 |
+| `language` | `VARCHAR(32)` | 来源侧语言，可空 |
+| `doi` | `VARCHAR(200)` | DOI，可空 |
+| `arxiv_id` | `VARCHAR(50)` | arXiv ID，可空 |
+| `pubmed_id` | `VARCHAR(100)` | PubMed ID，可空 |
+| `semantic_scholar_id` | `VARCHAR(100)` | Semantic Scholar ID，可空 |
+| `submitted_at` | `TIMESTAMP` | 来源侧提交时间，可空 |
+| `online_at` | `TIMESTAMP` | 来源侧上线时间，可空 |
+| `published_at` | `TIMESTAMP` | 来源侧发表时间，可空 |
+| `updated_at_source` | `TIMESTAMP` | 来源侧最近更新时间，可空 |
+| `version` | `VARCHAR(50)` | 来源记录版本号，可空，用于同一来源内版本比较 |
+| `is_preprint` | `BOOLEAN` | 是否预印本，默认 `FALSE` |
+| `is_published` | `BOOLEAN` | 是否正式发表，默认 `FALSE` |
+| `is_primary_source` | `BOOLEAN` | 是否为 canonical 优先来源，默认 `FALSE` |
+| `sync_status` | `VARCHAR(32)` | 同步状态，默认 `active`，约定：`active` / `deprecated` / `error` |
+| `last_synced_at` | `TIMESTAMP` | 最近同步时间，默认 `CURRENT_TIMESTAMP` |
+| `created_at` | `TIMESTAMP` | 创建时间，默认 `CURRENT_TIMESTAMP` |
+| `updated_at` | `TIMESTAMP` | 更新时间，默认 `CURRENT_TIMESTAMP`，由触发器自动更新 |
+
+约束与索引：
+- `PRIMARY KEY (paper_source_id)`
+- `FOREIGN KEY (paper_id) REFERENCES papers(paper_id) ON DELETE CASCADE`
+- `UNIQUE INDEX idx_ps_source_record_unique ON (source_name, source_record_id) WHERE source_record_id IS NOT NULL`
+- `UNIQUE INDEX idx_ps_source_doi ON (source_name, doi) WHERE doi IS NOT NULL`
+- `UNIQUE INDEX idx_ps_source_arxiv ON (source_name, arxiv_id) WHERE arxiv_id IS NOT NULL`
+- `UNIQUE INDEX idx_ps_source_pubmed ON (source_name, pubmed_id) WHERE pubmed_id IS NOT NULL`
+- `INDEX idx_ps_paper_id (paper_id)`
+- `INDEX idx_ps_source_name (source_name)`
+- `INDEX idx_ps_doi (doi)`
+- `INDEX idx_ps_arxiv_id (arxiv_id)`
+- `INDEX idx_ps_pubmed_id (pubmed_id)`
+- `INDEX idx_ps_updated_at_source (updated_at_source)`
+- `INDEX idx_ps_last_synced_at (last_synced_at)`
+
+补充说明：
+- 同一 `paper_id` 可以对应多条 `paper_sources`。
+- `is_primary_source` 与 `papers.canonical_source_id` 共同服务于 canonical 来源选择逻辑。
+
+================================================================================
+9. paper_source_metadata（来源元数据沉淀表）
+================================================================================
+功能描述：
+- 保存每条来源记录的完整原始 payload 和归一化结果。
+- 是“原始数据可审计、归一化结果可重放”的核心表。
+- 当前原本分散在 `paper_publications`、`paper_versions`、`paper_citations`、`fields` 等表的信息，统一进入 `normalized_json.common_normalized`。
+- 旧迁移里的 `contribution_types`、`paper_type`、`primary_field`、`target_application_domain`、`is_llm_era`、`short_reasoning` 也统一沉淀到 `normalized_json.common_normalized`。
+
+字段说明：
+| 字段名 | 类型 | 说明 |
+| --- | --- | --- |
+| `paper_source_id` | `BIGINT` PK, FK | 来源记录ID，1:1 对应 `paper_sources.paper_source_id` |
+| `raw_metadata_json` | `JSONB` | 完整原始记录，非空 |
+| `normalized_json` | `JSONB` | 归一化结果，结构约定为 `{"common_normalized": {...}, "source_specific": {...}}` |
+| `parser_version` | `VARCHAR(64)` | 解析器版本，可空 |
+| `source_schema_version` | `VARCHAR(64)` | 来源 payload 版本，可空 |
+| `created_at` | `TIMESTAMP` | 创建时间，默认 `CURRENT_TIMESTAMP` |
+| `updated_at` | `TIMESTAMP` | 更新时间，默认 `CURRENT_TIMESTAMP`，由触发器自动更新 |
+
+约束与索引：
+- `PRIMARY KEY (paper_source_id)`
+- `FOREIGN KEY (paper_source_id) REFERENCES paper_sources(paper_source_id) ON DELETE CASCADE`
+- `GIN INDEX idx_psm_raw ON raw_metadata_json`
+- `GIN INDEX idx_psm_normalized ON normalized_json`
+
+`normalized_json` 结构说明：
+```json
+{
+  "common_normalized": {
+    "title": "string",
+    "abstract": "string",
+    "language": "en",
+    "publisher": "string",
+    "authors": [],
+    "categories": [],
+    "keywords": [],
+    "contribution_types": [],
+    "paper_type": "survey",
+    "primary_field": "biology",
+    "target_application_domain": "genomics",
+    "is_llm_era": false,
+    "short_reasoning": "string",
+    "pub_info": {
+      "venue_name": "string",
+      "venue_type": "journal",
+      "publish_time": "2025-01-01",
+      "presentation_type": null
     },
-    {
-      "sequence": 2,
-      "name": "Gerald Penn",
-      "affiliations": [
-        "Department of Computer Science, University of Toronto, Canada"
-      ]
+    "versions": [],
+    "citations": {
+      "cited_by_count": 0,
+      "update_time": "2025-01-01"
     },
-    {
-      "sequence": 3,
-      "name": "Yingxue Wang",
-      "affiliations": [
-        "Department of Computer Science, University of Toronto, Canada"
-      ]
-    }
-  ]
-- 如果 JSON 中 affiliation 为 null，则存储 null
-- JSON 格式能更好地体现作者、顺序、机构的对应关系
-- 使用 PostgreSQL 的 JSONB 类型，支持高效的 JSON 查询和索引
+    "fields": []
+  },
+  "source_specific": {}
+}
+```
 
+补充说明：
+- `raw_metadata_json` 必须保留完整原始记录，不做裁剪。
+- `common_normalized` 只放跨来源可解释的统一字段。
+- `source_specific` 只放来源特异字段。
 
 ================================================================================
-5. venues（期刊/会议/平台）
+10. paper_references（来源参考文献表）
 ================================================================================
-| 字段             | 类型      | 说明                              |
-| -------------- | ------- | ------------------------------- |
-| venue_id       | int PK   | 主键，数据库内部自增ID（SERIAL），不需要手动插入                          |
-| venue_name     | varchar(200) | 名称（如"ICLR", "CVPR", "arXiv", "SIAM Journal on Applied Algebra and Geometry"），唯一 |
-| venue_type     | varchar(50) | 类型：conference / journal / preprint / repository，索引 |
-| url            | varchar(500) | 官网链接，可空                        |
-| created_at     | timestamp | 创建时间，默认 CURRENT_TIMESTAMP        |
+功能描述：
+- 保存来源提供的参考文献列表。
+- 区别于“被引统计”：这里存的是参考文献原文或结构化引用条目。
+- 该表保留独立建模，因为参考文献列表天然适合一对多存储。
 
-PRIMARY KEY (venue_id)
-UNIQUE (venue_name)
-INDEX idx_venues_type (venue_type)
+字段说明：
+| 字段名 | 类型 | 说明 |
+| --- | --- | --- |
+| `reference_id` | `BIGSERIAL` PK | 参考文献内部主键 |
+| `paper_id` | `INTEGER` FK | 论文ID |
+| `paper_source_id` | `BIGINT` FK | 来源记录ID，可空 |
+| `reference_order` | `INTEGER` | 参考文献在原文中的顺序，可空 |
+| `reference_text` | `TEXT` | 参考文献原文，非空 |
+| `reference_raw_json` | `JSONB` | 来源提供的结构化参考文献数据，可空 |
+| `created_at` | `TIMESTAMP` | 创建时间，默认 `CURRENT_TIMESTAMP` |
 
-说明：
-- venue_type 扩展支持 "repository"（如 arXiv repository）
-- venue_name 来自 publications[].venue_name
-
-
-================================================================================
-6. paper_publications（论文最终发表信息）
-================================================================================
-| 字段                    | 类型       | 说明                               |
-| --------------------- | -------- | -------------------------------- |
-| pub_id                 | int PK   | 主键，数据库内部自增ID（SERIAL），不需要手动插入    |
-| paper_id               | int FK   | 外键 → papers.paper_id               |
-| venue_id               | int FK   | 外键 → venues.venue_id               |
-| publish_time           | date     | 发表时间（年月日），可空                  |
-| presentation_type      | varchar(50) | 类型：oral / poster / spotlight / null 可空 |
-
-PRIMARY KEY (pub_id)
-UNIQUE (paper_id, venue_id)  -- 确保每篇论文在每个 venue 下只有一条记录
-FOREIGN KEY (paper_id) REFERENCES papers(paper_id) ON DELETE CASCADE
-FOREIGN KEY (venue_id) REFERENCES venues(venue_id) ON DELETE CASCADE
-INDEX idx_pp_paper_id (paper_id)
-INDEX idx_pp_venue_id (venue_id)
-INDEX idx_pp_publish_time (publish_time)
-
-说明：
-- publish_time 来自 publications[].publish_time（字符串格式如 "2020-01-01"）
-- presentation_type 来自 publications[].presentation_type
-
+约束与索引：
+- `PRIMARY KEY (reference_id)`
+- `FOREIGN KEY (paper_id) REFERENCES papers(paper_id) ON DELETE CASCADE`
+- `FOREIGN KEY (paper_source_id) REFERENCES paper_sources(paper_source_id) ON DELETE CASCADE`
+- `INDEX idx_pref_paper_id (paper_id)`
+- `INDEX idx_pref_paper_source_id (paper_source_id)`
 
 ================================================================================
-7. categories（大领域/子领域）
+11. paper_source_artifacts（来源文件追溯表）
 ================================================================================
-| 字段              | 类型      | 说明              |
-| --------------- | ------- | --------------- |
-| cat_id          | int PK   | 主键，数据库内部自增ID（SERIAL），不需要手动插入    |
-| domain          | varchar(50) | 大领域（如 "cs", "math"） |
-| subdomain       | varchar(100) | 子领域（如 "cs.CC", "cs.AI", "math.AG"） |
-| description     | varchar(500) | 描述，可空           |
+功能描述：
+- 记录来源数据文件或页面快照的存储位置与校验信息。
+- 支持原始文件追溯、校验、重放和问题定位。
 
-PRIMARY KEY (cat_id)
-UNIQUE (domain, subdomain)  -- 确保领域-子领域组合唯一
-INDEX idx_categories_domain (domain)
-INDEX idx_categories_subdomain (subdomain)
+字段说明：
+| 字段名 | 类型 | 说明 |
+| --- | --- | --- |
+| `artifact_id` | `BIGSERIAL` PK | Artifact 内部主键 |
+| `paper_source_id` | `BIGINT` FK | 来源记录ID |
+| `artifact_type` | `VARCHAR(64)` | 文件类型，如 `raw_jsonl`、`manifest`、`raw_page`、`pdf` |
+| `storage_backend` | `VARCHAR(32)` | 存储后端，如 `local`、`s3`、`oss` |
+| `storage_uri` | `VARCHAR(1000)` | 可迁移存储 URI |
+| `line_no` | `INTEGER` | 文件内行号，可空 |
+| `byte_offset` | `BIGINT` | 文件内字节偏移，可空 |
+| `sha256` | `VARCHAR(64)` | 文件内容校验值，可空 |
+| `captured_at` | `TIMESTAMP` | 捕获时间，默认 `CURRENT_TIMESTAMP` |
+| `created_at` | `TIMESTAMP` | 创建时间，默认 `CURRENT_TIMESTAMP` |
 
-说明：
-- categories 来自 default_info.categories[] 数组
-- 需要解析如 "cs.CC" 为 domain="cs", subdomain="cs.CC"
+约束与索引：
+- `PRIMARY KEY (artifact_id)`
+- `FOREIGN KEY (paper_source_id) REFERENCES paper_sources(paper_source_id) ON DELETE CASCADE`
+- `INDEX idx_psa_paper_source_id (paper_source_id)`
+- `INDEX idx_psa_storage_backend (storage_backend)`
+- `INDEX idx_psa_artifact_type (artifact_type)`
+- `INDEX idx_psa_sha256 (sha256) WHERE sha256 IS NOT NULL`
 
-
-================================================================================
-8. paper_categories（论文分类 M:N 关联表）
-================================================================================
-| 字段           | 类型 |
-| ------------ | -- |
-| paper_id     | int FK |
-| cat_id       | int FK |
-| is_primary   | boolean | 是否为主分类，默认 FALSE |
-
-PRIMARY KEY (paper_id, cat_id)
-FOREIGN KEY (paper_id) REFERENCES papers(paper_id) ON DELETE CASCADE
-FOREIGN KEY (cat_id) REFERENCES categories(cat_id) ON DELETE CASCADE
-INDEX idx_pc_paper_id (paper_id)
-INDEX idx_pc_cat_id (cat_id)
-INDEX idx_pc_is_primary (is_primary)  -- 用于快速查找主分类
-
-说明：
-- is_primary 标记：如果 cat_id 对应的 subdomain 等于 papers.primary_category，则为 TRUE
-
+补充说明：
+- 推荐使用 `storage_backend + storage_uri + sha256` 组合做文件级追溯。
+- 一条来源记录可对应多个 artifact。
 
 ================================================================================
-9. paper_versions（论文版本管理表）
+关系概览
 ================================================================================
-| 字段              | 类型       | 说明                           |
-| --------------- | -------- | ---------------------------- |
-| version_id       | int PK   | 主键，数据库内部自增ID（SERIAL），不需要手动插入    |
-| paper_id         | int FK   | 外键 → papers.paper_id            |
-| version_num      | int      | 版本号（1, 2, 3...）               |
-| version          | varchar(20) | 版本标识（如 "v1", "v2"）          |
-| version_date      | date     | 版本发布日期                      |
-| created_at        | timestamp | 记录创建时间，默认 CURRENT_TIMESTAMP |
-
-PRIMARY KEY (version_id)
-FOREIGN KEY (paper_id) REFERENCES papers(paper_id) ON DELETE CASCADE
-UNIQUE (paper_id, version_num)  -- 每篇论文的版本号唯一
-INDEX idx_pv_paper_id (paper_id)
-INDEX idx_pv_version_date (version_date)
-
-说明：
-- 数据来自 additional_info.versions[] 数组
-- 支持论文的多版本管理（如 arXiv 的 v1, v2, v3...）
-
+- `papers (1) -> (N) paper_sources`
+- `papers (1) -> (1) paper_author_affiliation`
+- `papers (1) -> (N) paper_categories -> (N) categories`
+- `papers (1) -> (N) paper_keywords`
+- `papers (1) -> (N) meta_update_logs`
+- `papers (1) -> (1) pubmed_additional_info`
+- `paper_sources (1) -> (1) paper_source_metadata`
+- `paper_sources (1) -> (N) paper_references`
+- `paper_sources (1) -> (N) paper_source_artifacts`
+- `papers.canonical_source_id -> paper_sources.paper_source_id`
 
 ================================================================================
-10. paper_citations（论文引用统计表）
+附注：辅助函数
 ================================================================================
-| 字段              | 类型       | 说明                           |
-| --------------- | -------- | ---------------------------- |
-| citation_id      | int PK   | 主键，数据库内部自增ID（SERIAL），不需要手动插入    |
-| paper_id         | int FK   | 外键 → papers.paper_id，唯一        |
-| cited_by_count   | int      | 被引用次数，默认 0                  |
-| update_time      | date     | 统计更新时间                      |
-| created_at       | timestamp | 记录创建时间，默认 CURRENT_TIMESTAMP |
-| updated_at       | timestamp | 记录更新时间，自动更新触发器            |
+当前 `schema.sql` 还包含一个全文检索辅助函数：
+- `fts_rank(title, abstract, query, title_weight, abstract_weight)`
 
-PRIMARY KEY (citation_id)
-UNIQUE (paper_id)  -- 每篇论文只有一条引用统计记录
-FOREIGN KEY (paper_id) REFERENCES papers(paper_id) ON DELETE CASCADE
-INDEX idx_pc_paper_id (paper_id)
-INDEX idx_pc_cited_by_count (cited_by_count)  -- 用于排序热门论文
-INDEX idx_pc_update_time (update_time)
-
-说明：
-- 数据来自 additional_info.cite{} 对象
-- cited_by_count 来自 cite.cited_by_count
-- update_time 来自 cite.update_time
-
-
-================================================================================
-11. meta_update_logs（元数据更新日志）
-================================================================================
-| 字段              | 类型       | 说明                           |
-| --------------- | -------- | ---------------------------- |
-| id               | int PK   | 主键，数据库内部自增ID（SERIAL），不需要手动插入    |
-| paper_id         | int FK   | 外键 → papers.paper_id            |
-| field            | varchar(100) | 哪个字段变了（如 "title", "abstract"） |
-| old_value        | text     | 原值，可空                        |
-| new_value        | text     | 新值，可空                        |
-| update_time      | timestamp | 更新时间，默认 CURRENT_TIMESTAMP    |
-| source           | varchar(50) | 来源（arxiv_api, manual, agent） |
-
-PRIMARY KEY (id)
-FOREIGN KEY (paper_id) REFERENCES papers(paper_id) ON DELETE CASCADE
-INDEX idx_mul_paper_id (paper_id)
-INDEX idx_mul_update_time (update_time)
-INDEX idx_mul_field (field)  -- 用于按字段类型查询
-
-
-================================================================================
-12. fields（研究领域细分类表）
-================================================================================
-| 字段              | 类型       | 说明                           |
-| --------------- | -------- | ---------------------------- |
-| field_id         | int PK   | 主键，数据库内部自增ID（SERIAL），不需要手动插入    |
-| field_name       | varchar(100) | 领域名称（如"强化学习"、"预训练语言模型"），唯一 |
-| field_name_en    | varchar(200) | 英文名称（可选，如"Reinforcement Learning"） |
-| description      | text     | 领域描述（可选）                     |
-| domain           | varchar(50) | 所属大领域（如"CS"）                  |
-| subdomain        | varchar(100) | 所属子领域（如"CS.AI"、"CS.CV"）        |
-| parent_field_id  | int FK   | 父领域ID（可选，支持层级关系）            |
-| is_active        | boolean  | 是否启用（默认 TRUE）                  |
-| created_at       | timestamp | 创建时间，默认 CURRENT_TIMESTAMP        |
-| updated_at       | timestamp | 更新时间，自动更新触发器                |
-
-PRIMARY KEY (field_id)
-UNIQUE (field_name)  -- 确保领域名称唯一
-FOREIGN KEY (parent_field_id) REFERENCES fields(field_id) ON DELETE SET NULL
-INDEX idx_fields_domain (domain)
-INDEX idx_fields_subdomain (subdomain)
-INDEX idx_fields_parent (parent_field_id)
-INDEX idx_fields_is_active (is_active)  -- 用于过滤活跃领域
-
-
-================================================================================
-13. paper_fields（论文-领域关联表）
-================================================================================
-| 字段              | 类型       | 说明                           |
-| --------------- | -------- | ---------------------------- |
-| paper_id         | int FK   | 外键 → papers.paper_id           |
-| field_id         | int FK   | 外键 → fields.field_id           |
-| confidence       | float    | 置信度（0.0-1.0，默认 1.0）          |
-| source           | varchar(50) | 来源（manual, ai_extract, keyword_match, llm_tag） |
-| created_at       | timestamp | 创建时间，默认 CURRENT_TIMESTAMP        |
-
-PRIMARY KEY (paper_id, field_id)
-FOREIGN KEY (paper_id) REFERENCES papers(paper_id) ON DELETE CASCADE
-FOREIGN KEY (field_id) REFERENCES fields(field_id) ON DELETE CASCADE
-CHECK (confidence >= 0.0 AND confidence <= 1.0)  -- 置信度范围约束
-INDEX idx_pf_paper_id (paper_id)
-INDEX idx_pf_field_id (field_id)
-INDEX idx_pf_confidence (confidence)  -- 用于筛选高置信度关联
-
-
-================================================================================
-14. pubmed_additional_info（PubMed额外信息表）
-================================================================================
-| 字段                   | 类型       | 说明                           |
-| -------------------- | -------- | ---------------------------- |
-| paper_id             | int PK, FK | 主键，外键 → papers.paper_id，1:1关系 |
-| additional_info_json | jsonb    | PubMed额外信息JSON数据（非空）        |
-| created_at           | timestamp | 创建时间，默认 CURRENT_TIMESTAMP        |
-| updated_at           | timestamp | 更新时间，自动更新触发器                |
-
-PRIMARY KEY (paper_id)
-FOREIGN KEY (paper_id) REFERENCES papers(paper_id) ON DELETE CASCADE
-INDEX idx_pai_paper_id (paper_id)
-INDEX idx_pai_additional_info_json USING GIN(additional_info_json)  -- GIN索引支持JSONB查询
-
-说明：
-- 用于存储来自PubMed系统的额外元数据信息（JSON格式）
-- 与papers表是1:1关系，每篇论文最多有一条记录
-- 使用JSONB类型存储，支持高效的JSON查询和索引
-- 存储内容包括：medline_citation, pub_model, journal_details, mesh_headings, keyword_list等
-- 级联删除：删除论文时自动删除对应的additional_info记录
-
-
-================================================================================
-E-R 关系图
-================================================================================
-
-papers (1) ──< (1) paper_texts
-              (embedding)
-
-papers (1) ──< (1) paper_author_affiliation
-              (authors JSONB)
-
-papers (1) ──< (N) paper_publications ──> (N) venues
-
-papers (1) ──< (N) paper_categories ──> (N) categories
-
-papers (1) ──< (N) paper_versions
-              (version management)
-
-papers (1) ──< (1) paper_citations
-              (citation statistics)
-
-papers (1) ──< (N) meta_update_logs
-
-papers (1) ──< (N) paper_fields ──> (N) fields
-
-papers (1) ──< (1) pubmed_additional_info
-              (PubMed additional metadata JSONB)
-
-papers (1) ──< (N) paper_keywords
-              (论文关键词，支持多种类型和权重)
-
-fields (1) ──< (N) fields
-        (self-referencing hierarchy)
-
-
-================================================================================
-主要改进说明
-================================================================================
-
-1. **papers 表增强**：
-   - 添加了 doi, journal_ref, comments, primary_category, platform 字段
-   - 添加了相应的索引优化查询性能
-   - 支持全文检索（GIN 索引）
-
-2. **版本管理**：
-   - 新增 paper_versions 表，支持论文多版本管理
-   - 可以追踪论文的版本历史
-
-3. **引用统计**：
-   - 新增 paper_citations 表，独立存储引用统计信息
-   - 便于后续扩展引用关系网络
-
-4. **作者-机构关系优化**：
-   - 使用 JSONB 格式存储作者信息，一个 paper_id 只有一行数据
-   - JSON 格式能更好地体现作者、顺序、机构的对应关系
-   - 使用 GIN 索引支持高效的 JSON 查询
-
-5. **分类关联增强**：
-   - paper_categories 表添加 is_primary 字段，标记主分类
-   - 便于快速查询论文的主分类
-
-6. **venue_type 扩展**：
-   - 支持 "repository" 类型（如 arXiv repository）
-
-7. **索引优化**：
-   - 添加了更多索引提升查询性能
-   - 全文检索索引支持标题和摘要的语义搜索
-
-8. **约束增强**：
-   - 添加了 UNIQUE 约束确保数据唯一性
-   - 添加了 CHECK 约束确保数据有效性
-
-9. **PubMed额外信息支持**：
-   - 新增 pubmed_additional_info 表，专门存储PubMed系统的额外元数据
-   - 使用JSONB类型存储，支持高效的JSON查询和索引
-   - 与papers表1:1关系，便于存储PubMed特有的元数据信息
-
-10. **论文分类和关键词增强**：
-   - papers表新增字段：paper_type（论文类型）、primary_field（主要研究领域）、target_application_domain（目标应用领域）、is_llm_era（LLM时代标记）、short_reasoning（简短理由说明）
-   - 新增 paper_keywords 表，支持结构化的关键词管理
-   - 支持多种关键词类型：task, method, contribution, dataset, metric, library, domain, concept, model
-   - 支持关键词权重和来源追踪
-
-
-================================================================================
-数据映射说明（JSON → 数据库）
-================================================================================
-
-JSON 结构 → 数据库表：
-
-paper_id → papers.paper_id (作为 arxiv_id 或自定义 ID)
-default_info.title → papers.title
-default_info.abstract → papers.abstract
-default_info.authors[] → paper_author_affiliation.authors (JSONB 格式，单行)
-default_info.primary_category → papers.primary_category
-default_info.categories[] → paper_categories (多行) + categories (解析)
-default_info.created_date → papers.created_at
-default_info.updated_date → papers.updated_at
-default_info.year → papers.year
-default_info.doi → papers.doi
-default_info.is_published → papers.is_published
-default_info.publications[] → paper_publications (多行) + venues (解析)
-default_info.pdf_url → papers.pdf_url
-default_info.source_url → papers.source_url
-
-work_id → papers.work_id (业务唯一标识符)
-default_info.identifiers.semantic_scholar → papers.semantic_scholar_id
-default_info.identifiers.pubmed → papers.pubmed_id
-additional_info.platform → papers.platform
-additional_info.arxiv_id → papers.arxiv_id
-additional_info.is_preprint → papers.is_preprint
-additional_info.keywords → papers.keywords
-additional_info.journal_ref → papers.journal_ref
-additional_info.comments → papers.comments
-additional_info.contribution_types[] → papers.contribution_types (JSONB数组)
-additional_info.versions[] → paper_versions (多行)
-additional_info.citations{} → paper_citations (单行)
-additional_info (完整JSON对象) → pubmed_additional_info.additional_info_json (JSONB格式，用于PubMed数据)
+该函数不是表，但用于标题与摘要的加权全文检索打分。
