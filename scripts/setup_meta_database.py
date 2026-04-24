@@ -169,10 +169,10 @@ def create_tables(config_path: Path):
         tables = [row[0] for row in result.fetchall()]
         
         expected_tables = [
-            'papers', 'paper_keywords', 'paper_texts', 'paper_author_affiliation',
-            'venues', 'paper_publications', 'categories', 'paper_categories',
-            'paper_versions', 'paper_citations', 'meta_update_logs',
-            'fields', 'paper_fields', 'pubmed_additional_info'
+            'papers', 'paper_keywords', 'paper_author_affiliation',
+            'categories', 'paper_categories', 'meta_update_logs',
+            'pubmed_additional_info', 'paper_sources', 'paper_source_metadata',
+            'paper_references', 'paper_source_artifacts'
         ]
         
         print(f"\n已创建的表 ({len(tables)} 个):")
@@ -197,7 +197,7 @@ def main():
         '--config-path',
         type=str,
         default=None,
-        help='配置文件路径（默认: 项目根目录下的 src/config/config_backend_server.yaml）'
+        help='配置文件路径（默认: 项目根目录下的 src/config/config_tecent_backend_server.yaml）'
     )
     
     args = parser.parse_args()
@@ -206,7 +206,7 @@ def main():
     if args.config_path:
         config_path = Path(args.config_path)
     else:
-        config_path = Path(__file__).parent.parent / 'src' / 'config' / 'config_backend_server.yaml'
+        config_path = Path(__file__).parent.parent / 'src' / 'config' / 'config_tecent_backend_server.yaml'
     
     if not config_path.exists():
         print(f"❌ 配置文件不存在: {config_path}")

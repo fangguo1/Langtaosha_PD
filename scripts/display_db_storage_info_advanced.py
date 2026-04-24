@@ -29,6 +29,14 @@ except ImportError:
     faiss = None
     np = None
 
+# 导入腾讯云 VectorDB 客户端
+try:
+    from src.docset_hub.storage.vector_db_client import VectorDBClient
+    from src.docset_hub.storage.vector_db import VectorDB
+    TENCENT_VDB_AVAILABLE = True
+except ImportError:
+    TENCENT_VDB_AVAILABLE = False
+
 
 def execute_query(connection, query):
     """执行 SQL 查询并返回结果
@@ -127,31 +135,31 @@ def show_total_papers(connection):
 def show_storage_completeness(connection):
     """显示存储完整性统计"""
     print_section_header("存储完整性统计", "✅")
-    
+
     total = execute_query(connection, "SELECT COUNT(*) FROM papers;")
-    with_metadata = execute_query(connection, "SELECT COUNT(*) FROM papers WHERE title IS NOT NULL AND title != '';")
-    with_abstract = execute_query(connection, "SELECT COUNT(*) FROM papers WHERE abstract IS NOT NULL AND abstract != '';")
+    with_canonical_title = execute_query(connection, "SELECT COUNT(*) FROM papers WHERE canonical_title IS NOT NULL AND canonical_title != '';")
+    with_canonical_abstract = execute_query(connection, "SELECT COUNT(*) FROM papers WHERE canonical_abstract IS NOT NULL AND canonical_abstract != '';")
     with_authors = execute_query(connection, "SELECT COUNT(*) FROM paper_author_affiliation;")
-    with_pdf = execute_query(connection, "SELECT COUNT(*) FROM paper_texts WHERE pdf_path IS NOT NULL AND pdf_path != '';")
-    with_embedding = execute_query(connection, "SELECT COUNT(*) FROM paper_texts WHERE embedding IS NOT NULL;")
-    
+    with_sources = execute_query(connection, "SELECT COUNT(DISTINCT paper_id) FROM paper_sources;")
+    with_metadata = execute_query(connection, "SELECT COUNT(DISTINCT paper_source_id) FROM paper_source_metadata;")
+
     print(f"  总论文数: {format_number(total)}")
     print()
-    
+
     if total and total > 0:
-        metadata_percent = calculate_percent(with_metadata, total)
-        abstract_percent = calculate_percent(with_abstract, total)
+        title_percent = calculate_percent(with_canonical_title, total)
+        abstract_percent = calculate_percent(with_canonical_abstract, total)
         authors_percent = calculate_percent(with_authors, total)
-        pdf_percent = calculate_percent(with_pdf, total)
-        embedding_percent = calculate_percent(with_embedding, total)
-        
+        sources_percent = calculate_percent(with_sources, total)
+        metadata_percent = calculate_percent(with_metadata, total)
+
         print(f"  {'项目':<30s} {'数量':>8s} / {'总数':<8s} ({'百分比':>6s}%)")
         print(f"  {'─' * 30} {'─' * 8} {'─' * 8} {'─' * 8}")
-        print(f"  {'有标题':<30s} {format_number(with_metadata):>8s} / {format_number(total):<8s} ({metadata_percent:>6s}%)")
-        print(f"  {'有摘要':<30s} {format_number(with_abstract):>8s} / {format_number(total):<8s} ({abstract_percent:>6s}%)")
+        print(f"  {'有规范标题':<30s} {format_number(with_canonical_title):>8s} / {format_number(total):<8s} ({title_percent:>6s}%)")
+        print(f"  {'有规范摘要':<30s} {format_number(with_canonical_abstract):>8s} / {format_number(total):<8s} ({abstract_percent:>6s}%)")
         print(f"  {'有作者信息':<30s} {format_number(with_authors):>8s} / {format_number(total):<8s} ({authors_percent:>6s}%)")
-        print(f"  {'有 PDF 路径':<30s} {format_number(with_pdf):>8s} / {format_number(total):<8s} ({pdf_percent:>6s}%)")
-        print(f"  {'有 Embedding':<30s} {format_number(with_embedding):>8s} / {format_number(total):<8s} ({embedding_percent:>6s}%)")
+        print(f"  {'有来源记录':<30s} {format_number(with_sources):>8s} / {format_number(total):<8s} ({sources_percent:>6s}%)")
+        print(f"  {'有元数据沉淀':<30s} {format_number(with_metadata):>8s} / {format_number(total):<8s} ({metadata_percent:>6s}%)")
     else:
         print("  暂无数据")
     print()
@@ -160,46 +168,48 @@ def show_storage_completeness(connection):
 def show_pdf_storage(connection):
     """显示 PDF 存储情况"""
     print_section_header("PDF 存储情况", "📎")
-    
-    with_pdf_url = execute_query(connection, "SELECT COUNT(*) FROM papers WHERE pdf_url IS NOT NULL AND pdf_url != '';")
-    with_pdf_path = execute_query(connection, "SELECT COUNT(*) FROM paper_texts WHERE pdf_path IS NOT NULL AND pdf_path != '';")
-    total = execute_query(connection, "SELECT COUNT(*) FROM papers;")
-    
-    print(f"  有 PDF URL 的论文: {format_number(with_pdf_url)}")
-    print(f"  有 PDF 路径的论文: {format_number(with_pdf_path)}")
-    print(f"  总论文数: {format_number(total)}")
-    
-    if total and total > 0:
-        pdf_url_percent = calculate_percent(with_pdf_url, total)
-        pdf_path_percent = calculate_percent(with_pdf_path, total)
-        print(f"  PDF URL 覆盖率: {pdf_url_percent}%")
-        print(f"  PDF 路径覆盖率: {pdf_path_percent}%")
+
+    with_pdf_url = execute_query(connection, "SELECT COUNT(*) FROM paper_sources WHERE pdf_url IS NOT NULL AND pdf_url != '';")
+    total_sources = execute_query(connection, "SELECT COUNT(*) FROM paper_sources;")
+    total_papers = execute_query(connection, "SELECT COUNT(*) FROM papers;")
+
+    print(f"  有 PDF URL 的来源记录: {format_number(with_pdf_url)}")
+    print(f"  总来源记录数: {format_number(total_sources)}")
+    print(f"  总论文数: {format_number(total_papers)}")
+
+    if total_sources and total_sources > 0:
+        pdf_url_percent = calculate_percent(with_pdf_url, total_sources)
+        print(f"  PDF URL 覆盖率（基于来源记录）: {pdf_url_percent}%")
     print()
 
 
 def show_embedding_storage(connection):
     """显示 Embedding 存储情况"""
-    print_section_header("Embedding 存储情况", "🔢")
-    
-    with_embedding = execute_query(connection, "SELECT COUNT(*) FROM paper_texts WHERE embedding IS NOT NULL;")
-    total = execute_query(connection, "SELECT COUNT(*) FROM papers;")
-    
-    print(f"  有 Embedding 的论文: {format_number(with_embedding)}")
-    print(f"  总论文数: {format_number(total)}")
-    
-    if total and total > 0:
-        embedding_percent = calculate_percent(with_embedding, total)
-        print(f"  Embedding 覆盖率: {embedding_percent}%")
+    print_section_header("来源记录统计", "🔢")
+
+    total_sources = execute_query(connection, "SELECT COUNT(*) FROM paper_sources;")
+    total_papers = execute_query(connection, "SELECT COUNT(*) FROM papers;")
+    with_metadata = execute_query(connection, "SELECT COUNT(*) FROM paper_source_metadata;")
+    with_artifacts = execute_query(connection, "SELECT COUNT(*) FROM paper_source_artifacts;")
+
+    print(f"  总论文数: {format_number(total_papers)}")
+    print(f"  总来源记录数: {format_number(total_sources)}")
+    print(f"  有元数据沉淀的来源: {format_number(with_metadata)}")
+    print(f"  有文件追溯记录的来源: {format_number(with_artifacts)}")
+
+    if total_papers and total_papers > 0:
+        avg_sources_per_paper = total_sources / total_papers if total_sources else 0
+        print(f"  平均每篇论文的来源数: {avg_sources_per_paper:.2f}")
     print()
 
 
 def show_source_statistics(connection):
     """显示按来源统计"""
     print_section_header("按来源统计", "📚")
-    
-    query = "SELECT source, COUNT(*) as count FROM papers GROUP BY source ORDER BY count DESC;"
+
+    query = "SELECT source_name, COUNT(*) as count FROM paper_sources GROUP BY source_name ORDER BY count DESC;"
     results = execute_query(connection, query)
-    
+
     if results:
         print(f"  {'来源':<20s} {'数量':>10s}")
         print(f"  {'─' * 20} {'─' * 10}")
@@ -214,15 +224,22 @@ def show_source_statistics(connection):
 def show_year_statistics(connection):
     """显示按年份统计（TOP 10）"""
     print_section_header("按年份统计", "📅")
-    
-    query = "SELECT year, COUNT(*) as count FROM papers WHERE year IS NOT NULL GROUP BY year ORDER BY year DESC LIMIT 10;"
+
+    query = """
+    SELECT EXTRACT(YEAR FROM published_at) as year, COUNT(*) as count
+    FROM paper_sources
+    WHERE published_at IS NOT NULL
+    GROUP BY EXTRACT(YEAR FROM published_at)
+    ORDER BY year DESC
+    LIMIT 10;
+    """
     results = execute_query(connection, query)
-    
+
     if results:
         print(f"  {'年份':<10s} {'数量':>10s}")
         print(f"  {'─' * 10} {'─' * 10}")
         for year, count in results:
-            year_str = str(year) if year else "未知"
+            year_str = str(int(year)) if year else "未知"
             print(f"  {year_str:<10s} {format_number(count):>10s}")
     else:
         print("  暂无数据")
@@ -367,6 +384,121 @@ def show_vector_db_storage(vector_db_path: Path):
     print()
 
 
+def show_tencent_vector_db_info(config: dict):
+    """显示腾讯云 VectorDB 存储信息
+
+    Args:
+        config: 配置字典，包含 vector_db 配置
+    """
+    print_section_header("腾讯云 VectorDB 存储情况", "☁️")
+
+    if not TENCENT_VDB_AVAILABLE:
+        print("  ⚠️  无法导入腾讯云 VectorDB 客户端库")
+        print()
+        return
+
+    if 'vector_db' not in config:
+        print("  ⚠️  配置文件中未找到 vector_db 配置")
+        print()
+        return
+
+    vector_db_config = config['vector_db']
+
+    # 检查是否是腾讯云模式
+    embedding_source = vector_db_config.get('embedding_source', '')
+    if embedding_source != 'tecent_made':
+        print(f"  ℹ️  当前配置不是腾讯云模式 (embedding_source: {embedding_source})")
+        print()
+
+    try:
+        # 创建客户端
+        client = VectorDBClient(
+            url=vector_db_config['url'],
+            account=vector_db_config['account'],
+            api_key=vector_db_config['api_key']
+        )
+
+        database = vector_db_config.get('database', 'langtaosha_test')
+
+        print(f"  服务地址: {vector_db_config['url']}")
+        print(f"  数据库: {database}")
+        print(f"  Embedding 模型: {vector_db_config.get('embedding_model', 'N/A')}")
+        print(f"  Collection 前缀: {vector_db_config.get('collection_prefix', 'lt_')}")
+        print()
+
+        # 列出所有数据库
+        try:
+            databases = client.list_databases()
+            print(f"  所有数据库: {', '.join(databases) if databases else '无'}")
+            print()
+        except Exception as e:
+            print(f"  ⚠️  获取数据库列表失败: {e}")
+            print()
+
+        # 检查目标数据库是否存在
+        if database not in databases:
+            print(f"  ⚠️  数据库 '{database}' 不存在")
+            print()
+            return
+
+        # 列出所有 collections
+        try:
+            # 使用新方法获取 collection 的完整信息
+            collections_info = client.list_collections_with_info(database)
+
+            if not collections_info:
+                print("  ⚠️  数据库中没有 collection")
+                print()
+                return
+
+            print(f"  共有 {len(collections_info)} 个 Collection:")
+            print()
+
+            # 显示该 database 下所有 collection 的详细信息
+            print(f"  {'Collection':<35s} {'文档数':>10s} {'向量索引数':>12s} {'状态':>10s}")
+            print(f"  {'─' * 35} {'─' * 10} {'─' * 12} {'─' * 10}")
+
+            total_docs = 0
+            total_vectors = 0
+
+            for info in collections_info:
+                try:
+                    collection = info.get('collection', '')
+                    doc_count = info.get('documentCount', 0)
+                    index_status = info.get('indexStatus', {}).get('status', 'unknown')
+
+                    # 获取向量索引数量
+                    vector_count = 0
+                    indexes = info.get('indexes', [])
+                    for idx in indexes:
+                        if idx.get('fieldType') == 'vector':
+                            vector_count = idx.get('indexedCount', 0)
+                            break
+
+                    total_docs += doc_count
+                    total_vectors += vector_count
+                    print(f"  {collection:<35s} {format_number(doc_count):>10s} {format_number(vector_count):>12s} {index_status:>10s}")
+
+                except Exception as e:
+                    print(f"  {info.get('collection', 'unknown'):<35s} {'ERROR':>10s} {'─':>12s} {'─':>10s}")
+
+            print()
+            print(f"  {'总计':<35s} {format_number(total_docs):>10s} {format_number(total_vectors):>12s}")
+            print()
+
+            # 显示统计信息
+            print(f"  Collection 统计:")
+            print(f"  总 Collection 数: {len(collections_info)}")
+
+        except Exception as e:
+            print(f"  ⚠️  获取 collection 列表失败: {e}")
+
+    except Exception as e:
+        print(f"  ❌ 获取腾讯云 VectorDB 信息失败: {e}")
+
+    print()
+
+
 def format_file_size(size_bytes: int) -> str:
     """格式化文件大小
     
@@ -390,8 +522,7 @@ def format_file_size(size_bytes: int) -> str:
     return f"{size:.2f} {units[unit_index]}"
 
 
-#python3 display_db_storage_info_advanced.py --config-path /home/wangyuanshi/remote_10.0.1.226/config/config_storage_server.yaml
-#python3 scripts/display_db_storage_info_advanced.py --config-path local_data/config_backend_server_wangyuanshi.yaml 
+#python3 scripts/display_db_storage_info_advanced.py --config-path src/config/config_tecent_backend_server_mimic.yaml
 def main():
     """主函数"""
     parser = argparse.ArgumentParser(
@@ -404,6 +535,14 @@ def main():
         type=str,
         default=None,
         help='配置文件路径（默认: 项目根目录下的 config/config.yaml）'
+    )
+    
+    parser.add_argument(
+        '--db-connect-timeout',
+        type=int,
+        default=5,
+        metavar='SEC',
+        help='连接 metadata_db 时的 TCP 超时秒数（libpq connect_timeout，默认 10）',
     )
     
     args = parser.parse_args()
@@ -441,7 +580,10 @@ def main():
     if 'metadata_db' in config:
         print("🔌 正在连接 metadata_db...")
         try:
-            engine = get_metadata_db_engine_from_config(config)
+            db_timeout = args.db_connect_timeout if args.db_connect_timeout > 0 else None
+            engine = get_metadata_db_engine_from_config(
+                config, connect_timeout=db_timeout
+            )
             connection = engine.connect()
             
             # 测试连接
@@ -474,15 +616,17 @@ def main():
             show_source_statistics(connection)
             show_year_statistics(connection)
             show_table_sizes(connection)
-        
-        # 显示向量数据库存储情况
+
+        # 显示腾讯云 VectorDB 存储情况
+        show_tencent_vector_db_info(config)
+
+        # 显示本地 FAISS 向量数据库存储情况
         vector_db_path = get_vector_db_path_from_config(config)
         if vector_db_path:
             show_vector_db_storage(vector_db_path)
         else:
-            print_section_header("向量数据库存储情况", "🔍")
-            print("  ⚠️  配置文件中未找到 vector_db 或 vector 配置")
-            print()
+            # 如果没有本地 vector_db 配置，就不显示
+            pass
         
         # 显示结束分隔线
         print("━" * 60)
@@ -497,4 +641,3 @@ def main():
 
 if __name__ == '__main__':
     sys.exit(main())
-
