@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""bioRxiv history 回填脚本（阶段 5/6）
+"""按 records_root + source_name 回填原始记录（阶段 5/6）
 
 两阶段流程：
 1) PG 入库（insert-only）: 遍历 local_data/biorxiv_history/records 下 JSONL，调用 index_dict。
@@ -7,13 +7,13 @@
 
 示例：
     # 阶段 6：先跑 10 条做联调
-    python scripts/backfill_biorxiv_history.py \
+    python scripts/backfill_source_records.py \
         --config-path src/config/config_tecent_backend_server_mimic.yaml \
         --max-records 10 \
         --limit 10
 
     # 只做向量回填（失败 + pending），每批 100
-    python scripts/backfill_biorxiv_history.py \
+    python scripts/backfill_source_records.py \
         --stage vector \
         --limit 100 \
         --max-retries 5

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """按 local_data 三个目录顺序回填入库。
 
-会分别调用 3 次 `scripts/backfill_biorxiv_history.py`：
+会分别调用 3 次 `scripts/backfill_source_records.py`：
 1) local_data/biorxiv_daily        -> source_name=biorxiv_daily
 2) local_data/biorxiv_history/records -> source_name=biorxiv_history
 3) local_data/langtaosha           -> source_name=langtaosha
@@ -27,7 +27,7 @@ from typing import List
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-BACKFILL_SCRIPT = PROJECT_ROOT / "scripts" / "backfill_biorxiv_history.py"
+BACKFILL_SCRIPT = PROJECT_ROOT / "scripts" / "backfill_source_records.py"
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "src" / "config" / "config_tecent_backend_server_use.yaml"
 
 
@@ -60,7 +60,7 @@ TARGETS: List[BackfillTarget] = [
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="按三个 local_data 目录依次调用 backfill_biorxiv_history.py 完成入库"
+        description="按三个 local_data 目录依次调用 backfill_source_records.py 完成入库"
     )
     parser.add_argument(
         "--config-path",
