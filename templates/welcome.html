@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Langtaosha Smart Search Demo</title>
+  <style>
+    :root {
+      --bg: #f4f4f2;
+      --card: #ffffff;
+      --text: #181818;
+      --muted: #555555;
+      --primary: #c8b15a;
+      --primary-dark: #a48f3f;
+      --border: #d8d8d4;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: linear-gradient(160deg, #f6f6f4 0%, #f1f1ee 100%);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    .container {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 40px 16px 60px;
+    }
+
+    .hero {
+      text-align: center;
+      margin-bottom: 28px;
+    }
+
+    .hero-brand {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+
+    .hero-brand img {
+      width: 64px;
+      height: 64px;
+      object-fit: contain;
+      border-radius: 10px;
+      background: #111;
+      padding: 6px;
+    }
+
+    .logo-fallback {
+      display: none;
+      width: 64px;
+      height: 64px;
+      border-radius: 10px;
+      background: #111;
+      color: #c8b15a;
+      font-weight: 800;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+    }
+
+    .hero h1 {
+      margin: 0;
+      font-size: 50px;
+      line-height: 1.2;
+      font-weight: 900;
+      letter-spacing: 0.3px;
+    }
+
+    .search-box {
+      max-width: 760px;
+      margin: 0 auto;
+      display: flex;
+      gap: 10px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 10px;
+      box-shadow: 0 8px 26px rgba(15, 23, 42, 0.06);
+    }
+
+    .search-box input {
+      flex: 1;
+      border: 0;
+      outline: none;
+      font-size: 16px;
+      padding: 10px 12px;
+      background: transparent;
+    }
+
+    .search-box button {
+      border: 0;
+      border-radius: 10px;
+      background: var(--primary);
+      color: #1c1c1c;
+      padding: 10px 18px;
+      font-size: 15px;
+      cursor: pointer;
+      font-weight: 700;
+    }
+
+    .search-box button:hover {
+      background: var(--primary-dark);
+    }
+
+    .section {
+      margin-top: 24px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+    }
+
+    .section h2 {
+      margin: 0 0 12px;
+      font-size: 22px;
+      font-weight: 700;
+    }
+
+    .muted {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .daily-list {
+      display: grid;
+      gap: 12px;
+      margin-top: 10px;
+      max-height: 620px;
+      overflow-y: auto;
+      padding-right: 6px;
+    }
+
+    .item {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      background: #fcfdff;
+    }
+
+    .title {
+      margin: 0 0 8px;
+      font-size: 18px;
+      font-weight: 700;
+      color: #1b1b1b;
+      line-height: 1.35;
+    }
+
+    .meta {
+      margin: 4px 0;
+      color: #334155;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .meta a {
+      overflow-wrap: anywhere;
+      word-break: break-all;
+    }
+
+    @media (max-width: 700px) {
+      .hero-brand {
+        flex-direction: column;
+        gap: 10px;
+      }
+      .hero h1 { font-size: 34px; }
+      .hero-brand img {
+        width: 56px;
+        height: 56px;
+      }
+      .search-box { flex-direction: column; }
+      .search-box button { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <section class="hero">
+      <div class="hero-brand">
+        <img src="/static/image.png" alt="LTS logo" onerror="this.style.display='none';document.getElementById('logoFallback').style.display='flex';" />
+        <div id="logoFallback" class="logo-fallback">LTS</div>
+        <h1>Langtaosha Smart Search Demo</h1>
+      </div>
+      <form class="search-box" action="/search" method="get">
+        <input name="q" type="text" placeholder="Search papers..." required />
+        <button type="submit">Search</button>
+      </form>
+    </section>
+
+    <section class="section">
+      <h2>Recent New</h2>
+      <div id="dailyStatus" class="muted">Loading latest papers...</div>
+      <div id="dailyList" class="daily-list"></div>
+    </section>
+  </div>
+
+  <script>
+    const statusEl = document.getElementById("dailyStatus");
+    const listEl = document.getElementById("dailyList");
+
+    function escapeHtml(value) {
+      return (value || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function renderItem(item) {
+      const title = escapeHtml(item.title || "(No title)");
+      const authors = escapeHtml(item.authors || "Unknown");
+      const onlineAt = escapeHtml(item.online_date || formatDate(item.online_at));
+      const source = escapeHtml(item.source || "-");
+      const link = item.link ? escapeHtml(item.link) : "";
+      const linkHtml = link
+        ? `<a href="${link}" target="_blank" rel="noopener noreferrer">${link}</a>`
+        : "-";
+
+      return `
+        <article class="item">
+          <h3 class="title">${title}</h3>
+          <p class="meta"><strong>Authors:</strong> ${authors}</p>
+          <p class="meta"><strong>Online At:</strong> ${onlineAt}</p>
+          <p class="meta"><strong>Source:</strong> ${source}</p>
+          <p class="meta"><strong>Link:</strong> ${linkHtml}</p>
+        </article>
+      `;
+    }
+
+    function formatDate(value) {
+      if (!value) return "-";
+      const s = String(value);
+      const m = s.match(/^(\\d{4})-(\\d{2})-(\\d{2})/);
+      if (!m) return s;
+      return `${m[1]}-${m[2]}-${m[3]}`;
+    }
+
+    async function loadDailyNew() {
+      try {
+        const resp = await fetch("/api/scholar/daily_new?limit=10");
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+          throw new Error(data.error || "Failed to load daily new papers");
+        }
+
+        const results = data.results || [];
+        statusEl.textContent = `Latest papers: ${results.length}`;
+
+        if (!results.length) {
+          listEl.innerHTML = "<div class='item'>No recent papers found.</div>";
+          return;
+        }
+
+        listEl.innerHTML = results.map(renderItem).join("");
+      } catch (err) {
+        statusEl.textContent = `Error: ${err.message}`;
+      }
+    }
+
+    loadDailyNew();
+  </script>
+</body>
+</html>
