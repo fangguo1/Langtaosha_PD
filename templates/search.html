@@ -85,6 +85,33 @@
       min-height: 22px;
     }
 
+    .query-notice {
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin: 10px 0 12px;
+      padding: 10px 12px;
+      background: #fffdf0;
+      border: 1px solid #e6d58a;
+      border-radius: 8px;
+      color: #3b3212;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .query-notice button {
+      flex: 0 0 auto;
+      border: 1px solid #b9a34c;
+      border-radius: 8px;
+      background: #ffffff;
+      color: #3b3212;
+      padding: 7px 10px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
     .filter-bar {
       display: flex;
       flex-wrap: wrap;
@@ -182,6 +209,8 @@
       h1 { font-size: 24px; }
       .search-box { flex-direction: column; }
       .search-box button { width: 100%; }
+      .query-notice { align-items: stretch; flex-direction: column; }
+      .query-notice button { width: 100%; }
     }
   </style>
 </head>
@@ -195,6 +224,7 @@
     </form>
 
     <div id="status" class="status"></div>
+    <div id="queryNotice" class="query-notice"></div>
 
     <div id="filterBar" class="filter-bar" style="display:none;">
       <div class="filter-group">
@@ -216,6 +246,7 @@
     const queryInput = document.getElementById("queryInput");
     const searchBtn = document.getElementById("searchBtn");
     const statusEl = document.getElementById("status");
+    const queryNoticeEl = document.getElementById("queryNotice");
     const filterBarEl = document.getElementById("filterBar");
     const sourceFiltersEl = document.getElementById("sourceFilters");
     const yearFiltersEl = document.getElementById("yearFilters");
@@ -363,8 +394,39 @@
       resultsEl.innerHTML = filtered.map(renderItem).join("");
     }
 
-    async function searchPapers(query) {
-      const url = `/api/scholar/search?query=${encodeURIComponent(query)}&top_k=100`;
+    function clearQueryNotice() {
+      queryNoticeEl.style.display = "none";
+      queryNoticeEl.innerHTML = "";
+    }
+
+    function renderQueryNotice(notice) {
+      clearQueryNotice();
+      if (!notice || !notice.message) return;
+
+      const message = document.createElement("span");
+      message.textContent = notice.message;
+      queryNoticeEl.appendChild(message);
+
+      if (notice.fallback_mode && notice.fallback_query && notice.action_label) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.textContent = notice.action_label;
+        btn.addEventListener("click", () => {
+          runSearch(notice.fallback_query, notice.fallback_mode);
+        });
+        queryNoticeEl.appendChild(btn);
+      }
+
+      queryNoticeEl.style.display = "flex";
+    }
+
+    async function searchPapers(query, mode = "smart") {
+      const params = new URLSearchParams({
+        query,
+        top_k: "100",
+        mode,
+      });
+      const url = `/api/scholar/search?${params.toString()}`;
       const resp = await fetch(url);
       const data = await resp.json();
       if (!resp.ok || !data.success) {
@@ -373,9 +435,7 @@
       return data;
     }
 
-    form.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const query = queryInput.value.trim();
+    async function runSearch(query, mode = "smart") {
       if (!query) {
         statusEl.textContent = "请输入 query";
         return;
@@ -383,14 +443,16 @@
 
       searchBtn.disabled = true;
       statusEl.textContent = "正在搜索...";
+      clearQueryNotice();
       filterBarEl.style.display = "none";
       resultsEl.innerHTML = "";
 
       try {
-        const data = await searchPapers(query);
+        const data = await searchPapers(query, mode);
         allResults = data.results || [];
         selectedSource = "all";
         selectedYear = "all";
+        renderQueryNotice(data.notice);
 
         if (!allResults.length) {
           resultsEl.innerHTML = "<div class='paper'>暂无结果</div>";
@@ -404,11 +466,17 @@
       } finally {
         searchBtn.disabled = false;
       }
+    }
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const query = queryInput.value.trim();
+      runSearch(query, "smart");
     });
 
     if (initialQuery && typeof initialQuery === "string") {
       queryInput.value = initialQuery;
-      form.dispatchEvent(new Event("submit"));
+      runSearch(initialQuery, "smart");
     }
   </script>
 </body>

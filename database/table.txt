@@ -78,17 +78,25 @@
 | `keyword_type` | `VARCHAR(50)` | 关键词类型 |
 | `keyword` | `VARCHAR(200)` | 关键词内容 |
 | `weight` | `REAL` | 权重/置信度，默认 `1.0`，取值范围 `0.0-1.0` |
-| `source` | `VARCHAR(50)` | 来源，如 `manual`、`ai_extract`、`llm_tag` |
+| `source` | `VARCHAR(50)` | 关键词来源，`NOT NULL DEFAULT 'paper_metadata'`；如 `paper_metadata`、`manual`、`ai_extract`、`keyword_match`、`llm_tag`、`scispacy-en_core_sci_lg-generated` |
 | `created_at` | `TIMESTAMP` | 创建时间，默认 `CURRENT_TIMESTAMP` |
 
 约束与索引：
-- `PRIMARY KEY (paper_id, keyword_type, keyword)`
+- `PRIMARY KEY (paper_id, keyword_type, keyword, source)`
 - `FOREIGN KEY (paper_id) REFERENCES papers(paper_id) ON DELETE CASCADE`
 - `CHECK (weight >= 0.0 AND weight <= 1.0)`
 - `INDEX idx_pk_paper_id (paper_id)`
 - `INDEX idx_pk_keyword_type (keyword_type)`
 - `INDEX idx_pk_keyword (keyword)`
+- `INDEX idx_pk_source (source)`
+- `INDEX idx_pk_source_keyword (source, keyword)`
+- `INDEX idx_pk_lower_keyword (lower(keyword))`
+- `UNIQUE INDEX idx_pk_keyword_case_insensitive_unique (paper_id, lower(keyword_type), lower(keyword), source)`
 - `INDEX idx_pk_paper_id_keyword_type (paper_id, keyword_type)`
+
+关键词身份约定：
+- 同一 `paper_id + keyword_type + keyword + source` 是主键维度，允许同一关键词来自多个来源。
+- 同一 `paper_id + lower(keyword_type) + lower(keyword) + source` 必须唯一，避免同一来源内出现 `Machine Learning` / `machine learning` 这类大小写重复。
 
 关键词类型约定：
 - `task`

@@ -1,5 +1,7 @@
 """元数据库操作类"""
 import json
+import re
+from difflib import SequenceMatcher
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 from pathlib import Path
@@ -42,6 +44,74 @@ class MetadataDB:
     # =========================================================================
     # 新架构方法 - 多源支持
     # =========================================================================
+
+    GENERATED_KEYWORD_SOURCE = "scispacy-en_core_sci_lg-generated"
+    ALLOWED_GENERATED_KEYWORD_TYPES = {
+        "domain",
+        "concept",
+        "method",
+        "task",
+        "disease",
+        "gene",
+        "protein",
+        "model",
+        "dataset",
+        "metric",
+        "organism",
+        "chemical",
+    }
+
+    @staticmethod
+    def normalize_author_name(name: str) -> str:
+        """Normalize author names for matching and scoring."""
+        if not name:
+            return ""
+        return " ".join(
+            name.lower()
+            .replace(",", " ")
+            .replace(".", " ")
+            .split()
+        )
+
+    @classmethod
+    def author_match_score(cls, query: str, author_name: str) -> float:
+        """Score query against an author candidate in the 0.0-1.0 range."""
+        q = cls.normalize_author_name(query)
+        a = cls.normalize_author_name(author_name)
+
+        if not q or not a:
+            return 0.0
+        if q == a:
+            return 1.0
+        if q in a:
+            return min(0.95, 0.75 + 0.20 * len(q) / max(len(a), 1))
+
+        try:
+            from rapidfuzz import fuzz
+            return float(fuzz.WRatio(q, a)) / 100.0
+        except Exception:
+            return SequenceMatcher(None, q, a).ratio()
+
+    @staticmethod
+    def _normalize_keyword(keyword: str) -> str:
+        """Normalize generated keyword text before DB insertion."""
+        return re.sub(r"\s+", " ", (keyword or "").strip())
+
+    @staticmethod
+    def _source_filter_sql(
+        source_list: Optional[List[str]],
+        params: Dict[str, Any],
+        table_alias: str = "ps",
+    ) -> str:
+        """Build a SQLAlchemy text() compatible source_name IN filter."""
+        if not source_list:
+            return ""
+        placeholders = []
+        for idx, source_name in enumerate(source_list):
+            param_name = f"source_filter_{idx}"
+            placeholders.append(f":{param_name}")
+            params[param_name] = source_name
+        return f" AND {table_alias}.source_name IN ({', '.join(placeholders)})"
 
     @staticmethod
     def _build_write_result(
@@ -970,25 +1040,271 @@ class MetadataDB:
         """
         keywords_data = db_payload.get('paper_keywords', [])
         for keyword_data in keywords_data:
-            conn.execute(
-                text("""
-                    INSERT INTO paper_keywords (
-                        paper_id, keyword_type, keyword, weight, source
-                    ) VALUES (
-                        :paper_id, :keyword_type, :keyword, :weight, :source
-                    )
-                    ON CONFLICT (paper_id, keyword_type, keyword) DO UPDATE SET
-                        weight = EXCLUDED.weight,
-                        source = EXCLUDED.source
-                """),
+            keyword = self._normalize_keyword(keyword_data.get('keyword'))
+            keyword_type = keyword_data.get('keyword_type')
+            source = keyword_data.get('source') or "paper_metadata"
+            if not keyword or not keyword_type:
+                continue
+            self._upsert_keyword_case_insensitive(
+                conn=conn,
+                paper_id=paper_id,
+                keyword_type=keyword_type,
+                keyword=keyword,
+                weight=keyword_data.get('weight', 1.0),
+                source=source,
+            )
+
+    def _upsert_keyword_case_insensitive(
+        self,
+        conn: Connection,
+        paper_id: int,
+        keyword_type: str,
+        keyword: str,
+        weight: float,
+        source: str,
+    ) -> str:
+        """Upsert keyword rows case-insensitively within paper/type/source.
+
+        PostgreSQL text primary keys are case-sensitive, so we first update any
+        existing lower(keyword) match. This keeps the original display casing
+        of the first row while preventing CRISPR/crispr duplicate inserts.
+        """
+        update_result = conn.execute(
+            text("""
+                UPDATE paper_keywords
+                SET weight = :weight
+                WHERE paper_id = :paper_id
+                  AND lower(keyword_type) = lower(:keyword_type)
+                  AND lower(keyword) = lower(:keyword)
+                  AND source = :source
+            """),
+            {
+                "paper_id": paper_id,
+                "keyword_type": keyword_type,
+                "keyword": keyword,
+                "weight": weight,
+                "source": source,
+            },
+        )
+        if update_result.rowcount:
+            return "updated"
+
+        inserted = conn.execute(
+            text("""
+                INSERT INTO paper_keywords (
+                    paper_id, keyword_type, keyword, weight, source
+                ) VALUES (
+                    :paper_id, :keyword_type, :keyword, :weight, :source
+                )
+                ON CONFLICT (paper_id, keyword_type, keyword, source)
+                DO UPDATE SET weight = EXCLUDED.weight
+                RETURNING (xmax = 0) AS inserted
+            """),
+            {
+                "paper_id": paper_id,
+                "keyword_type": keyword_type,
+                "keyword": keyword,
+                "weight": weight,
+                "source": source,
+            },
+        ).fetchone()
+        return "inserted" if inserted and inserted[0] else "updated"
+
+    def upsert_generated_keywords(
+        self,
+        paper_id: int,
+        keywords: List[Dict[str, Any]],
+        source: str = GENERATED_KEYWORD_SOURCE,
+        allowed_types: Optional[set] = None,
+    ) -> Dict[str, Any]:
+        """Upsert model-generated keywords into paper_keywords.
+
+        The table primary key is expected to be
+        (paper_id, keyword_type, keyword, source), so generated keywords do not
+        overwrite metadata/native keywords from other sources.
+        """
+        if not paper_id:
+            raise ValueError("paper_id is required")
+
+        allowed = allowed_types or self.ALLOWED_GENERATED_KEYWORD_TYPES
+        result = {
+            "success": True,
+            "paper_id": paper_id,
+            "source": source,
+            "inserted": 0,
+            "updated": 0,
+            "skipped": 0,
+            "errors": [],
+        }
+
+        seen = set()
+        normalized_rows = []
+        for item in keywords or []:
+            keyword_type = (item.get("keyword_type") or item.get("type") or "").strip()
+            keyword = self._normalize_keyword(item.get("keyword"))
+            if not keyword_type or not keyword:
+                result["skipped"] += 1
+                continue
+            if keyword_type not in allowed:
+                result["skipped"] += 1
+                result["errors"].append(f"unknown keyword_type: {keyword_type}")
+                continue
+
+            try:
+                weight = float(item.get("weight", 1.0))
+            except (TypeError, ValueError):
+                weight = 1.0
+            weight = max(0.0, min(1.0, weight))
+
+            dedupe_key = (keyword_type.lower(), keyword.lower(), source.lower())
+            if dedupe_key in seen:
+                result["skipped"] += 1
+                continue
+            seen.add(dedupe_key)
+            normalized_rows.append(
                 {
-                    "paper_id": paper_id,
-                    "keyword_type": keyword_data.get('keyword_type'),
-                    "keyword": keyword_data.get('keyword'),
-                    "weight": keyword_data.get('weight', 1.0),
-                    "source": keyword_data.get('source')
+                    "keyword_type": keyword_type,
+                    "keyword": keyword,
+                    "weight": weight,
+                    "source": source,
                 }
             )
+
+        if not normalized_rows:
+            return result
+
+        with self.engine.connect() as conn:
+            try:
+                exists = conn.execute(
+                    text("SELECT 1 FROM papers WHERE paper_id = :paper_id"),
+                    {"paper_id": paper_id}
+                ).fetchone()
+                if not exists:
+                    raise ValueError(f"paper_id does not exist: {paper_id}")
+
+                for row in normalized_rows:
+                    action = self._upsert_keyword_case_insensitive(
+                        conn=conn,
+                        paper_id=paper_id,
+                        keyword_type=row["keyword_type"],
+                        keyword=row["keyword"],
+                        weight=row["weight"],
+                        source=row["source"],
+                    )
+                    if action == "inserted":
+                        result["inserted"] += 1
+                    else:
+                        result["updated"] += 1
+
+                conn.commit()
+                return result
+            except Exception:
+                conn.rollback()
+                raise
+
+    def has_keywords_from_source(
+        self,
+        paper_id: int,
+        source: str = GENERATED_KEYWORD_SOURCE,
+    ) -> bool:
+        """Return whether a paper already has keywords from the given source."""
+        with self.engine.connect() as conn:
+            row = conn.execute(
+                text("""
+                    SELECT 1
+                    FROM paper_keywords
+                    WHERE paper_id = :paper_id
+                      AND source = :source
+                    LIMIT 1
+                """),
+                {"paper_id": paper_id, "source": source}
+            ).fetchone()
+            return row is not None
+
+    def suggest_query_terms(
+        self,
+        query: str,
+        limit: int = 20,
+        sources: Optional[List[str]] = None,
+        min_weight: float = 0.0,
+    ) -> List[Dict[str, Any]]:
+        """Return keyword candidates for query correction from paper_keywords."""
+        normalized_query = self._normalize_keyword(query)
+        if not normalized_query:
+            return []
+
+        tokens = [
+            token.lower()
+            for token in re.findall(r"[A-Za-z0-9][A-Za-z0-9+_-]*", normalized_query)
+            if len(token) >= 3
+        ]
+        if not tokens:
+            return []
+
+        source_values = sources or [
+            "scispacy-en_core_sci_lg-generated",
+            "scispacy-en_ner_bionlp13cg_md-generated",
+            "scispacy-en_core_sci_lg-generated-test",
+            "scispacy-en_ner_bionlp13cg_md-generated-test",
+        ]
+        params: Dict[str, Any] = {
+            "limit": max(limit * 5, 50),
+            "min_weight": min_weight,
+        }
+
+        source_placeholders = []
+        for idx, source in enumerate(source_values):
+            param_name = f"source_{idx}"
+            source_placeholders.append(f":{param_name}")
+            params[param_name] = source
+
+        token_conditions = []
+        for idx, token in enumerate(sorted(tokens, key=len, reverse=True)[:3]):
+            param_name = f"token_{idx}"
+            token_conditions.append(f"lower(keyword) LIKE :{param_name}")
+            params[param_name] = f"%{token}%"
+
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                text(f"""
+                    WITH candidates AS (
+                        SELECT
+                            lower(keyword) AS normalized_keyword,
+                            MIN(keyword) AS display_keyword,
+                            keyword_type,
+                            source,
+                            paper_id,
+                            MAX(COALESCE(weight, 1.0)) AS paper_weight
+                        FROM paper_keywords
+                        WHERE source IN ({", ".join(source_placeholders)})
+                          AND COALESCE(weight, 1.0) >= :min_weight
+                          AND ({" OR ".join(token_conditions)})
+                        GROUP BY lower(keyword), keyword_type, source, paper_id
+                    )
+                    SELECT
+                        MIN(display_keyword) AS keyword,
+                        keyword_type,
+                        source,
+                        COUNT(DISTINCT paper_id) AS doc_count,
+                        AVG(paper_weight) AS avg_weight
+                    FROM candidates
+                    GROUP BY normalized_keyword, keyword_type, source
+                    ORDER BY doc_count DESC, avg_weight DESC, lower(MIN(display_keyword)) ASC
+                    LIMIT :limit
+                """),
+                params,
+            ).fetchall()
+
+        return [
+            {
+                "keyword": row[0],
+                "keyword_type": row[1],
+                "source": row[2],
+                "doc_count": int(row[3] or 0),
+                "avg_weight": float(row[4] or 0.0),
+            }
+            for row in rows
+        ]
 
     def _insert_references_from_payload(
         self,
@@ -1212,6 +1528,138 @@ class MetadataDB:
             Optional[Dict]: 完整论文数据
         """
         return self.get_paper_info_by_paper_id(paper_id)
+
+    def search_by_author(
+        self,
+        author_name: str,
+        limit: int = 100,
+        source_list: Optional[List[str]] = None,
+        fuzzy: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """Search papers by author name from paper_author_affiliation.authors.
+
+        MVP implementation expands the JSONB authors array and matches only
+        authors[].name. It intentionally avoids authors::text matching so that
+        affiliations or JSON field names cannot produce false positives.
+        """
+        normalized = (author_name or "").strip()
+        if not normalized:
+            return []
+
+        params: Dict[str, Any] = {
+            "author_pattern": f"%{normalized}%" if fuzzy else normalized,
+            "limit": limit,
+        }
+        source_filter = self._source_filter_sql(source_list, params, table_alias="ps")
+        source_join = "JOIN paper_sources ps ON ps.paper_id = p.paper_id"
+
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                text(f"""
+                    SELECT
+                        p.paper_id,
+                        MAX(COALESCE(p.online_at, ps.online_at)) AS sort_online_at
+                    FROM papers p
+                    JOIN paper_author_affiliation paa ON paa.paper_id = p.paper_id
+                    {source_join}
+                    WHERE EXISTS (
+                        SELECT 1
+                        FROM jsonb_array_elements(paa.authors) AS author
+                        WHERE author->>'name' IS NOT NULL
+                          AND lower(author->>'name') {"ILIKE" if fuzzy else "="} lower(:author_pattern)
+                    )
+                    {source_filter}
+                    GROUP BY p.paper_id
+                    ORDER BY sort_online_at DESC NULLS LAST, p.paper_id DESC
+                    LIMIT :limit
+                """),
+                params
+            ).fetchall()
+
+        results = []
+        for row in rows:
+            paper_info = self.get_paper_info_by_paper_id(row[0])
+            if paper_info:
+                results.append(paper_info)
+        return results
+
+    def suggest_author_names(
+        self,
+        query: str,
+        limit: int = 5,
+    ) -> List[Dict[str, Any]]:
+        """Return ranked author-name candidates from the current JSONB author pool."""
+        normalized_query = self.normalize_author_name(query)
+        if not normalized_query:
+            return []
+
+        tokens = [token for token in normalized_query.split() if len(token) >= 2]
+        if not tokens:
+            return []
+
+        recall_tokens = sorted(tokens, key=len, reverse=True)[:2]
+        conditions = []
+        params: Dict[str, Any] = {
+            "candidate_limit": max(limit * 20, 50),
+        }
+        for idx, token in enumerate(recall_tokens):
+            param_name = f"pattern_{idx}"
+            conditions.append(f"lower(author_name) ILIKE lower(:{param_name})")
+            params[param_name] = f"%{token}%"
+
+        where_clause = " OR ".join(conditions)
+
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                text(f"""
+                    WITH authors AS (
+                        SELECT
+                            author->>'name' AS author_name,
+                            paa.paper_id
+                        FROM paper_author_affiliation paa,
+                             jsonb_array_elements(paa.authors) AS author
+                        WHERE author->>'name' IS NOT NULL
+                          AND btrim(author->>'name') != ''
+                    )
+                    SELECT
+                        author_name,
+                        COUNT(DISTINCT paper_id) AS paper_count
+                    FROM authors
+                    WHERE {where_clause}
+                    GROUP BY author_name
+                    ORDER BY paper_count DESC, author_name ASC
+                    LIMIT :candidate_limit
+                """),
+                params
+            ).fetchall()
+
+        best_by_normalized: Dict[str, Dict[str, Any]] = {}
+        for row in rows:
+            name = row[0]
+            normalized_name = self.normalize_author_name(name)
+            score = self.author_match_score(normalized_query, name)
+            candidate = {
+                "name": name,
+                "normalized_name": normalized_name,
+                "score": score,
+                "paper_count": int(row[1] or 0),
+            }
+            existing = best_by_normalized.get(normalized_name)
+            if (
+                existing is None
+                or candidate["score"] > existing["score"]
+                or (
+                    candidate["score"] == existing["score"]
+                    and candidate["paper_count"] > existing["paper_count"]
+                )
+            ):
+                best_by_normalized[normalized_name] = candidate
+
+        candidates = sorted(
+            best_by_normalized.values(),
+            key=lambda item: (-item["score"], -item["paper_count"], item["name"].lower())
+        )
+        return candidates[:limit]
 
     # =========================================================================
     # Embedding 状态管理（简化三态：pending/succeeded/failed）

@@ -51,6 +51,8 @@ from config import init_config, get_default_sources
 from ..metadata.transformer import MetadataTransformer, TransformResult
 from ..storage.metadata_db import MetadataDB
 from ..storage.vector_db import VectorDB, SearchResult
+from .keyword_enrichment import KeywordEnrichmentService
+from .query_understanding import QueryUnderstandingService
 
 
 class PaperIndexer:
@@ -71,7 +73,8 @@ class PaperIndexer:
     def __init__(
         self,
         config_path: Path,
-        enable_vectorization: bool = True
+        enable_vectorization: bool = True,
+        enable_keyword_enrichment: bool = True
     ):
         """初始化论文索引器
 
@@ -89,6 +92,7 @@ class PaperIndexer:
 
         self.config_path = config_path
         self.enable_vectorization = enable_vectorization
+        self.enable_keyword_enrichment = enable_keyword_enrichment
 
         # 读取 default_sources
         self.default_sources = get_default_sources()
@@ -97,11 +101,18 @@ class PaperIndexer:
         self.transformer = MetadataTransformer()
         self.metadata_db = MetadataDB(config_path=config_path)
         self.vector_db = VectorDB(config_path=config_path) if enable_vectorization else None
+        self.keyword_enrichment = (
+            KeywordEnrichmentService(config_path=config_path)
+            if enable_keyword_enrichment
+            else None
+        )
+        self.query_understanding = QueryUnderstandingService(self.metadata_db)
 
         logging.info(
             f"✅ PaperIndexer 初始化完成: "
             f"default_sources={self.default_sources}, "
-            f"enable_vectorization={enable_vectorization}"
+            f"enable_vectorization={enable_vectorization}, "
+            f"enable_keyword_enrichment={enable_keyword_enrichment}"
         )
 
     # =========================================================================
@@ -176,6 +187,11 @@ class PaperIndexer:
                 db_result=db_result
             )
 
+            keyword_enrichment_result = self._handle_keyword_enrichment(
+                db_payload=transform_result.db_payload,
+                db_result=db_result
+            )
+
             # 5. 返回统一结果
             return {
                 "success": True,
@@ -184,7 +200,8 @@ class PaperIndexer:
                 "paper_id": db_result.get("paper_id"),
                 "mode": effective_mode,
                 "metadata": db_result,
-                "vectorization": vector_result
+                "vectorization": vector_result,
+                "keyword_enrichment": keyword_enrichment_result
             }
 
         except Exception as e:
@@ -254,6 +271,11 @@ class PaperIndexer:
                 db_result=db_result
             )
 
+            keyword_enrichment_result = self._handle_keyword_enrichment(
+                db_payload=transform_result.db_payload,
+                db_result=db_result
+            )
+
             # 5. 返回统一结果
             return {
                 "success": True,
@@ -262,7 +284,8 @@ class PaperIndexer:
                 "paper_id": db_result.get("paper_id"),
                 "mode": effective_mode,
                 "metadata": db_result,
-                "vectorization": vector_result
+                "vectorization": vector_result,
+                "keyword_enrichment": keyword_enrichment_result
             }
 
         except Exception as e:
@@ -335,6 +358,62 @@ class PaperIndexer:
         except Exception as e:
             logging.error(f"search 失败: {str(e)}", exc_info=True)
             raise e
+
+    def smart_search(
+        self,
+        query: str,
+        source_list: Optional[List[str]] = None,
+        top_k: int = 10,
+        hydrate: bool = True,
+    ) -> Dict[str, Any]:
+        """Search with query understanding and route selection.
+
+        Author-name queries are routed to MetadataDB.search_by_author().
+        Semantic queries keep using vector search, optionally with a high
+        confidence corrected query from paper_keywords candidates.
+        """
+        understanding = self.query_understanding.analyze(query)
+        understanding_payload = understanding.to_dict()
+
+        if understanding.route == "none":
+            return {
+                "success": False,
+                "query": query,
+                "search_query": None,
+                "query_understanding": understanding_payload,
+                "results": [],
+            }
+
+        resolved_source_list = self._resolve_source_list(source_list)
+        if understanding.route == "metadata_author":
+            results = self.metadata_db.search_by_author(
+                author_name=understanding.matched_author or understanding.normalized_query,
+                limit=top_k,
+                source_list=resolved_source_list,
+                fuzzy=True,
+            )
+            return {
+                "success": True,
+                "query": query,
+                "search_query": understanding.matched_author or understanding.normalized_query,
+                "query_understanding": understanding_payload,
+                "results": results,
+            }
+
+        search_query = understanding.corrected_query or understanding.normalized_query
+        results = self.search(
+            query=search_query,
+            source_list=resolved_source_list,
+            top_k=top_k,
+            hydrate=hydrate,
+        )
+        return {
+            "success": True,
+            "query": query,
+            "search_query": search_query,
+            "query_understanding": understanding_payload,
+            "results": results,
+        }
 
     def delete(
         self,
@@ -646,6 +725,121 @@ class PaperIndexer:
             )
 
         return vector_result
+
+    def _handle_keyword_enrichment(
+        self,
+        db_payload: Dict[str, Any],
+        db_result: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Run optional keyword enrichment after metadata persistence."""
+        enable_keyword_enrichment = getattr(self, "enable_keyword_enrichment", False)
+        keyword_enrichment = getattr(self, "keyword_enrichment", None)
+        if not enable_keyword_enrichment or not keyword_enrichment:
+            return {
+                "enabled": enable_keyword_enrichment,
+                "success": False,
+                "skipped": True,
+                "message": "关键词扩充未启用"
+            }
+
+        paper_id = db_result.get("paper_id")
+        if paper_id is None:
+            return {
+                "enabled": True,
+                "success": False,
+                "skipped": True,
+                "message": "跳过关键词扩充：paper_id 为空"
+            }
+
+        status_code = db_result.get("status_code")
+        canonical_changed = bool(db_result.get("canonical_changed", False))
+        sources = list(getattr(keyword_enrichment, "sources", None) or [keyword_enrichment.source])
+
+        should_enrich = False
+        if status_code == "INSERT_NEW_PAPER":
+            should_enrich = True
+        elif status_code == "INSERT_APPEND_SOURCE":
+            should_enrich = canonical_changed
+        elif status_code == "INSERT_UPDATE_SAME_SOURCE":
+            should_enrich = True
+        elif status_code == "INSERT_SKIP_SAME_SOURCE":
+            should_enrich = not all(
+                self.metadata_db.has_keywords_from_source(
+                    paper_id=paper_id,
+                    source=source
+                )
+                for source in sources
+            )
+
+        if not should_enrich:
+            return {
+                "enabled": True,
+                "success": False,
+                "skipped": True,
+                "sources": sources,
+                "message": f"跳过关键词扩充：status_code={status_code}"
+            }
+
+        papers_data = db_payload.get("papers", {})
+        sources_data = db_payload.get("paper_sources", {})
+        title = papers_data.get("canonical_title") or sources_data.get("title")
+        abstract = papers_data.get("canonical_abstract") or sources_data.get("abstract")
+
+        try:
+            extraction = keyword_enrichment.extract_keywords(title=title, abstract=abstract)
+            if not extraction.success:
+                return {
+                    "enabled": True,
+                    "success": False,
+                    "skipped": extraction.skipped,
+                    "source": extraction.source,
+                    "sources": sources,
+                    "model_name": extraction.model_name,
+                    "error": extraction.error,
+                    "skip_reason": extraction.skip_reason,
+                    "model_results": extraction.model_results,
+                }
+
+            grouped_keywords: Dict[str, List[Dict[str, Any]]] = {}
+            for keyword in extraction.keywords:
+                keyword_source = keyword.get("source") or extraction.source
+                grouped_keywords.setdefault(keyword_source, []).append(keyword)
+
+            write_results = {}
+            totals = {"inserted": 0, "updated": 0, "skipped": 0}
+            for keyword_source, keywords in grouped_keywords.items():
+                write_result = self.metadata_db.upsert_generated_keywords(
+                    paper_id=paper_id,
+                    keywords=keywords,
+                    source=keyword_source,
+                )
+                write_results[keyword_source] = write_result
+                totals["inserted"] += write_result.get("inserted", 0)
+                totals["updated"] += write_result.get("updated", 0)
+                totals["skipped"] += write_result.get("skipped", 0)
+
+            return {
+                "enabled": True,
+                "success": True,
+                "source": extraction.source,
+                "sources": list(grouped_keywords),
+                "model_name": extraction.model_name,
+                "inserted": totals["inserted"],
+                "updated": totals["updated"],
+                "skipped": totals["skipped"],
+                "keyword_count": len(extraction.keywords),
+                "model_results": extraction.model_results,
+                "write_results": write_results,
+            }
+        except Exception as e:
+            logging.error("keyword enrichment failed: %s", e, exc_info=True)
+            return {
+                "enabled": True,
+                "success": False,
+                "skipped": False,
+                "sources": sources,
+                "error": str(e),
+            }
 
     def _build_index_text(self, db_payload: Dict[str, Any]) -> Dict[str, Any]:
         """构造向量化文本

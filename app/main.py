@@ -20,8 +20,13 @@ from src.docset_hub.indexing import PaperIndexer
 
 def _resolve_config_path() -> Path:
     """优先使用环境变量，否则使用腾讯后端配置。"""
-    default_cfg = ROOT / "src" / "config" / "config_tecent_backend_server_use.yaml"
-    return Path(os.environ.get("PD_TEST_CONFIG", str(default_cfg)))
+    default_cfg = ROOT / "src" / "config" / "config_tecent_backend_server_mimic.yaml"
+    return Path(
+        os.environ.get(
+            "PD_BACKEND_CONFIG",
+            os.environ.get("PD_TEST_CONFIG", str(default_cfg)),
+        )
+    )
 
 
 CONFIG_PATH = _resolve_config_path()
@@ -139,7 +144,7 @@ def _format_date_ymd(value: Any) -> Optional[str]:
 
 
 def _map_search_item(item: Dict[str, Any]) -> Dict[str, Any]:
-    metadata = item.get("metadata") or {}
+    metadata = item.get("metadata") or item
     doi = _extract_doi(metadata)
     preferred_source = _get_preferred_source(metadata)
     raw_source_name = preferred_source.get("source_name") or item.get("source_name")
@@ -158,6 +163,48 @@ def _map_search_item(item: Dict[str, Any]) -> Dict[str, Any]:
         "source_key": _normalize_source_key(raw_source_name),
         "link": _extract_paper_link(metadata, doi),
     }
+
+
+def _build_query_notice(
+    query: str,
+    search_query: Optional[str],
+    understanding: Optional[Dict[str, Any]],
+    search_mode: str,
+) -> Optional[Dict[str, Any]]:
+    if search_mode == "vector":
+        return {
+            "type": "vector",
+            "message": "已按原 query 执行向量检索。",
+        }
+
+    if not understanding:
+        return None
+
+    intent = understanding.get("intent")
+    route = understanding.get("route")
+    matched_author = understanding.get("matched_author") or search_query
+    corrected_query = understanding.get("corrected_query")
+    normalized_query = understanding.get("normalized_query") or query
+
+    if intent == "author_name" and route == "metadata_author" and matched_author:
+        return {
+            "type": "author_name",
+            "message": f"已识别为作者名，正在根据作者 {matched_author} 完成搜索。",
+            "action_label": "改用向量检索",
+            "fallback_mode": "vector",
+            "fallback_query": query,
+        }
+
+    if corrected_query and corrected_query != normalized_query:
+        return {
+            "type": "query_correction",
+            "message": f"已识别到可能的拼写错误，实际搜索 query 为: {corrected_query}",
+            "action_label": "使用原 query 检索",
+            "fallback_mode": "vector",
+            "fallback_query": query,
+        }
+
+    return None
 
 
 def _get_daily_new_papers(limit: int = 10) -> List[Dict[str, Any]]:
@@ -248,18 +295,56 @@ def api_scholar_search():
     if source_list_raw:
         source_list = [x.strip() for x in source_list_raw.split(",") if x.strip()]
 
+    search_mode = (request.args.get("mode") or "smart").strip().lower()
+    if search_mode not in {"smart", "vector"}:
+        return jsonify({"success": False, "error": "mode 只能是 smart 或 vector"}), 400
+
     try:
-        results = indexer.search(
-            query=query,
-            source_list=source_list,
-            top_k=top_k,
-            hydrate=True,
-        )
+        if search_mode == "vector":
+            results = indexer.search(
+                query=query,
+                source_list=source_list,
+                top_k=top_k,
+                hydrate=True,
+            )
+            search_query = query
+            understanding = {
+                "original_query": query,
+                "normalized_query": query,
+                "intent": "semantic_search",
+                "route": "vector",
+                "corrected_query": None,
+                "matched_author": None,
+                "confidence": 0.0,
+                "candidates": [],
+                "corrections": [],
+                "reason": "forced_vector_search",
+            }
+        else:
+            smart_result = indexer.smart_search(
+                query=query,
+                source_list=source_list,
+                top_k=top_k,
+                hydrate=True,
+            )
+            results = smart_result.get("results") or []
+            search_query = smart_result.get("search_query")
+            understanding = smart_result.get("query_understanding")
+
         mapped_results = [_map_search_item(item) for item in results]
         return jsonify(
             {
                 "success": True,
                 "query": query,
+                "search_query": search_query,
+                "search_mode": search_mode,
+                "query_understanding": understanding,
+                "notice": _build_query_notice(
+                    query=query,
+                    search_query=search_query,
+                    understanding=understanding,
+                    search_mode=search_mode,
+                ),
                 "count": len(mapped_results),
                 "results": mapped_results,
             }

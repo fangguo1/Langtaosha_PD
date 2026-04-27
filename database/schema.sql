@@ -83,9 +83,9 @@ CREATE TABLE IF NOT EXISTS paper_keywords (
     keyword_type VARCHAR(50) NOT NULL,  -- task, method, contribution, dataset, metric, library, domain, concept, model
     keyword VARCHAR(200) NOT NULL,
     weight REAL DEFAULT 1.0 CHECK (weight >= 0.0 AND weight <= 1.0),  -- 权重/置信度 (0.0-1.0)
-    source VARCHAR(50),  -- manual, ai_extract, keyword_match, llm_tag, paper_metadata
+    source VARCHAR(50) NOT NULL DEFAULT 'paper_metadata',  -- manual, ai_extract, keyword_match, llm_tag, paper_metadata
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (paper_id, keyword_type, keyword)
+    PRIMARY KEY (paper_id, keyword_type, keyword, source)
 );
 
 COMMENT ON TABLE paper_keywords IS '论文关键词表：存储论文的结构化关键词，支持 task/method/dataset 等多种类型，并记录来源与置信度权重。';
@@ -93,6 +93,11 @@ COMMENT ON TABLE paper_keywords IS '论文关键词表：存储论文的结构�
 CREATE INDEX IF NOT EXISTS idx_pk_paper_id ON paper_keywords(paper_id);
 CREATE INDEX IF NOT EXISTS idx_pk_keyword_type ON paper_keywords(keyword_type);
 CREATE INDEX IF NOT EXISTS idx_pk_keyword ON paper_keywords(keyword);
+CREATE INDEX IF NOT EXISTS idx_pk_source ON paper_keywords(source);
+CREATE INDEX IF NOT EXISTS idx_pk_source_keyword ON paper_keywords(source, keyword);
+CREATE INDEX IF NOT EXISTS idx_pk_lower_keyword ON paper_keywords(lower(keyword));
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pk_keyword_case_insensitive_unique
+ON paper_keywords(paper_id, lower(keyword_type), lower(keyword), source);
 CREATE INDEX IF NOT EXISTS idx_pk_paper_id_keyword_type ON paper_keywords(paper_id, keyword_type);
 
 

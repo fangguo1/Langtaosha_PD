@@ -1,8 +1,8 @@
 # MetadataDB - 元数据库操作类
 
-**位置**: `src/docset_hub/storage/metadata_db.py`  
-**版本**: v2.0 (新架构 - 多源支持)  
-**更新日期**: 2026-04-21
+**位置**: `src/docset_hub/storage/metadata_db.py`
+**版本**: v2.2 (作者检索 / Query Understanding / case-insensitive keywords 已接入)
+**更新日期**: 2026-04-27
 
 ---
 
@@ -17,6 +17,11 @@
 - ✅ **同 source 覆盖策略**: 基于 `version` + `online_at` 决定覆盖或跳过
 - ✅ **Canonical 选择**: 自动或手动选择"最佳版本"
 - ✅ **灵活的 Upsert**: 插入、更新、插入或更新三种操作模式
+- ✅ **作者检索**: 基于 `paper_author_affiliation.authors[].name` 做作者论文检索和候选推荐
+- ✅ **多来源关键词**: `paper_keywords` 支持同一 keyword 保留多个 `source`
+- ✅ **大小写不敏感 keyword 入库**: 同一 `paper_id + keyword_type + source` 下大小写变体不会重复入库
+- ✅ **Generated Keywords 写入**: 支持 scispaCy 生成关键词的幂等 upsert
+- ✅ **Query Term 候选**: 为 `QueryCorrector` 从 generated keywords 中召回纠错候选词
 
 ---
 
@@ -30,11 +35,11 @@ def insert_paper(
     upsert_key: Dict[str, Any]
 ) -> int:
     """确保论文存在（如果已存在则按同 source 策略覆盖或跳过）
-    
+
     语义:
         - same_source 命中：比较 version/online_at，决定覆盖或跳过
         - cross_source/no_match：插入新的 source 记录（必要时新建 paper）
-    
+
     返回: paper_id (现有或新建的)
     """
 ```
@@ -69,11 +74,11 @@ def update_paper(
     auto_select_canonical: bool = True
 ) -> Optional[int]:
     """更新已存在的论文
-    
+
     语义:
         - 仅 same_source 命中时更新
         - 非 same_source（cross_source/no_match）返回 None
-    
+
     返回: 更新的 paper_id，如果不存在则返回 None
     """
 ```
@@ -105,11 +110,11 @@ def upsert_paper(
     auto_select_canonical: bool = True
 ) -> int:
     """插入或更新论文
-    
+
     语义:
         - same_source 命中：强制更新
         - cross_source/no_match：插入（必要时新建 paper）
-    
+
     返回: 插入或更新的 paper_id
     """
 ```
@@ -200,6 +205,118 @@ results = metadata_db.search_by_condition(
     limit=20
 )
 ```
+
+---
+
+### search_by_author
+
+```python
+def search_by_author(
+    author_name: str,
+    limit: int = 100,
+    source_list: Optional[List[str]] = None,
+    fuzzy: bool = True,
+) -> List[Dict[str, Any]]:
+    """从 paper_author_affiliation.authors JSONB 中按作者姓名检索论文"""
+```
+
+`search_by_author()` 是 Query Understanding 作者路由的 metadata 检索入口。当前 MVP 不新建作者规范化表，而是实时展开：
+
+```text
+paper_author_affiliation.authors[].name
+```
+
+执行特点：
+
+- 只匹配 `authors[].name`，避免 `authors::text ILIKE` 误命中 affiliation 或 JSON 字段名
+- `fuzzy=True` 时使用 `ILIKE %author_name%`
+- 支持 `source_list` 过滤，适配多 source 搜索场景
+- 返回完整 paper info，结构与 `get_paper_info_by_paper_id()` 一致
+- 多篇命中按 `online_at DESC NULLS LAST, paper_id DESC` 排序
+
+**示例**:
+
+```python
+papers = metadata_db.search_by_author(
+    author_name="Alice Zhang",
+    source_list=["biorxiv_daily"],
+    limit=20,
+)
+```
+
+---
+
+### suggest_author_names
+
+```python
+def suggest_author_names(
+    query: str,
+    limit: int = 5,
+) -> List[Dict[str, Any]]:
+    """从作者 JSONB 中返回带分数和 paper_count 的作者候选"""
+```
+
+`suggest_author_names()` 供 `AuthorMatcher` 使用。它先用 query token 做 SQL 初筛，再在 Python 层进行 normalized author score 排序。
+
+返回示例：
+
+```python
+[
+    {
+        "name": "Alice Zhang",
+        "normalized_name": "alice zhang",
+        "score": 1.0,
+        "paper_count": 3,
+    }
+]
+```
+
+作者名归一化规则：
+
+```text
+lowercase -> comma/dot 转空格 -> collapse spaces
+```
+
+排序规则：
+
+1. `score DESC`
+2. `paper_count DESC`
+3. `name ASC`
+
+---
+
+### suggest_query_terms
+
+```python
+def suggest_query_terms(
+    query: str,
+    limit: int = 20,
+    sources: Optional[List[str]] = None,
+    min_weight: float = 0.0,
+) -> List[Dict[str, Any]]:
+    """从 paper_keywords 返回 query correction 候选词"""
+```
+
+`suggest_query_terms()` 是 `QueryCorrector` 的候选词来源。默认优先使用 scispaCy generated sources：
+
+- `scispacy-en_core_sci_lg-generated`
+- `scispacy-en_ner_bionlp13cg_md-generated`
+- `scispacy-en_core_sci_lg-generated-test`
+- `scispacy-en_ner_bionlp13cg_md-generated-test`
+
+返回字段：
+
+```python
+{
+    "keyword": "machine learning",
+    "keyword_type": "method",
+    "source": "scispacy-en_core_sci_lg-generated",
+    "doc_count": 12,
+    "avg_weight": 0.91,
+}
+```
+
+注意：作者候选和 query term 候选是两套来源，作者来自 `paper_author_affiliation.authors[].name`，主题纠错候选来自 `paper_keywords`。
 
 ---
 
@@ -315,6 +432,67 @@ def get_papers_by_work_ids(
 
 ---
 
+### 🧬 Generated Keywords 相关方法
+
+#### upsert_generated_keywords
+
+```python
+def upsert_generated_keywords(
+    paper_id: int,
+    keywords: List[Dict[str, Any]],
+    source: str = "scispacy-en_core_sci_lg-generated",
+    allowed_types: Optional[set] = None,
+) -> Dict[str, Any]:
+    """幂等写入模型生成的结构化关键词"""
+```
+
+该方法由 `PaperIndexer` 的 keyword enrichment 流程和 backfill 脚本调用，用于把 scispaCy 生成结果写入 `paper_keywords`。
+
+写入规则：
+
+- 先校验 `paper_id` 必须存在
+- `keyword_type` 必须属于白名单
+- 空 keyword 会被跳过
+- `weight` 会限制在 `0.0-1.0`
+- 同一批次内按 `(keyword_type, lower(keyword), lower(source))` 去重
+- 入库时先按 `paper_id + lower(keyword_type) + lower(keyword) + source` 查找已有行，命中则更新同一行的 `weight`
+- 使用 `(paper_id, keyword_type, keyword, source)` 和大小写不敏感唯一索引共同保证幂等，不覆盖其他来源的同名 keyword
+
+返回示例：
+
+```python
+{
+    "success": True,
+    "paper_id": 123,
+    "source": "scispacy-en_core_sci_lg-generated",
+    "inserted": 8,
+    "updated": 2,
+    "skipped": 1,
+    "errors": [],
+}
+```
+
+允许的 generated keyword types：
+
+```text
+domain, concept, method, task, disease, gene, protein,
+model, dataset, metric, organism, chemical
+```
+
+#### has_keywords_from_source
+
+```python
+def has_keywords_from_source(
+    paper_id: int,
+    source: str = "scispacy-en_core_sci_lg-generated",
+) -> bool:
+    """判断某篇 paper 是否已有指定来源的关键词"""
+```
+
+`PaperIndexer` 在 `INSERT_SKIP_SAME_SOURCE` 场景下使用该方法判断是否需要补齐缺失的 generated keyword source。
+
+---
+
 ---
 
 ## 🛠️ 辅助方法（内部使用）
@@ -358,7 +536,7 @@ def _resolve_and_apply(
 ```python
 def _set_canonical_source_by_online_at(conn, paper_id: int) -> None:
     """根据 online_at 时间法则设置 canonical_source
-    
+
     法则: 选择 online_at 最晚的 source 作为 canonical
     """
 
@@ -416,7 +594,59 @@ paper_source_metadata (原始元数据)
 ├── raw_metadata_json (原始 JSON)
 ├── normalized_json (规范化 JSON)
 └── ...
+
+paper_author_affiliation (作者与机构 JSONB)
+├── paper_id (外键 → papers)
+├── authors JSONB
+│   └── [{"name": "Alice Zhang", "sequence": 1, "affiliations": []}]
+└── ...
+
+paper_keywords (关键词)
+├── paper_id (外键 → papers)
+├── keyword_type
+├── keyword
+├── weight
+├── source
+└── PRIMARY KEY (paper_id, keyword_type, keyword, source)
 ```
+
+### paper_keywords 多来源语义
+
+`paper_keywords` 当前主键包含 `source`：
+
+```sql
+PRIMARY KEY (paper_id, keyword_type, keyword, source)
+```
+
+这允许同一篇 paper 的同一个 keyword 同时保留多个来源，例如：
+
+```text
+(123, "concept", "CRISPR", "biorxiv")
+(123, "concept", "CRISPR", "scispacy-en_core_sci_lg-generated")
+```
+
+同一 `paper_id + keyword_type + source` 内，keyword 入库语义是大小写不敏感的：`CRISPR` 与 `crispr` 会被视为同一个 keyword。系统保留首次入库行的展示大小写，并在后续大小写变体写入时更新同一行的 `weight`。
+
+实现方式：
+
+- `MetadataDB._insert_keywords_from_payload()` 和 `MetadataDB.upsert_generated_keywords()` 都调用大小写不敏感 upsert helper。
+- migration `20260427_paper_keywords_case_insensitive.sql` 会先合并历史大小写重复行，再建立表达式唯一索引。
+- 唯一索引维度为：
+
+```sql
+paper_id, lower(keyword_type), lower(keyword), source
+```
+
+注意：这不会强制把展示文本转为小写。展示大小写由首次保留的 keyword 行决定；Query Understanding 在生成 `corrected_query` 时会按用户输入短语的大小写风格进行适配。
+
+相关 migration：
+
+```text
+database/migrations/20260426_paper_keywords_multisource.sql
+database/migrations/20260427_paper_keywords_case_insensitive.sql
+```
+
+`MetadataDB._insert_keywords_from_payload()` 对原始 metadata keyword 会兜底写入 `source="paper_metadata"`；`upsert_generated_keywords()` 则由调用方传入 scispaCy generated source。
 
 ### 🆔 ID 关系总览
 
@@ -662,6 +892,47 @@ papers = metadata_db.get_papers_by_work_ids(work_ids)
 
 ---
 
+### 示例 6: 作者检索和候选推荐
+
+```python
+papers = metadata_db.search_by_author(
+    author_name="Alice Zhang",
+    source_list=["biorxiv_daily"],
+    limit=10,
+)
+
+suggestions = metadata_db.suggest_author_names("Alce Zhang", limit=5)
+for item in suggestions:
+    print(item["name"], item["score"], item["paper_count"])
+```
+
+---
+
+### 示例 7: 写入 scispaCy generated keywords
+
+```python
+result = metadata_db.upsert_generated_keywords(
+    paper_id=paper_id,
+    source="scispacy-en_core_sci_lg-generated",
+    keywords=[
+        {
+            "keyword_type": "method",
+            "keyword": "single-cell RNA sequencing",
+            "weight": 0.92,
+        },
+        {
+            "keyword_type": "disease",
+            "keyword": "glioblastoma",
+            "weight": 0.88,
+        },
+    ],
+)
+
+print(result["inserted"], result["updated"], result["skipped"])
+```
+
+---
+
 ## ⚠️ 重要注意事项
 
 ### 1. 必须使用 MetadataTransformer
@@ -680,7 +951,21 @@ paper_id = metadata_db.insert_paper(raw_data)
 
 ---
 
-### 2. 操作语义区别
+### 2. paper_keywords 必须带 source
+
+`paper_keywords` 的唯一性包含 `source`，并且 keyword identity 对大小写不敏感。所有写入路径都必须提供非空 `source`：
+
+- 原始 metadata keyword：使用 payload 中的 `source`，缺失时兜底为 `paper_metadata`
+- scispaCy generated keyword：由 `KeywordEnrichmentService` / backfill 脚本传入模型来源
+- 测试 generated keyword：使用 `scispacy-en_core_sci_lg-generated-test` 或 `scispacy-en_ner_bionlp13cg_md-generated-test`
+
+同一 keyword 来自不同来源时应共存，不应互相覆盖。
+
+同一来源内的大小写变体不应共存，例如同一 paper 的 `CRISPR` 与 `crispr` 应更新同一行。
+
+---
+
+### 3. 操作语义区别
 
 | 操作 | 存在时的行为 | 不存在时的行为 | 幂等性 |
 |------|-------------|---------------|--------|
@@ -690,7 +975,7 @@ paper_id = metadata_db.insert_paper(raw_data)
 
 ---
 
-### 2.1 操作状态表
+### 3.1 操作状态表
 
 > 建议在 `resolve + apply` 后输出状态码（而不只返回 `paper_id`），用于明确实际执行结果。
 
@@ -710,7 +995,7 @@ paper_id = metadata_db.insert_paper(raw_data)
 
 ---
 
-### 2.2 操作返回值（结构化）
+### 3.2 操作返回值（结构化）
 
 `insert_paper` / `update_paper` / `upsert_paper` 建议统一返回结构化结果（而非仅 `paper_id`）：
 
@@ -745,7 +1030,7 @@ paper_id = metadata_db.insert_paper(raw_data)
 |------|------|
 | `ok` | 是否成功执行到业务返回（异常会直接抛出） |
 | `mode` | 调用模式：`insert / update / upsert` |
-| `status_code` | 操作状态码（见 2.1 操作状态表） |
+| `status_code` | 操作状态码（见 3.1 操作状态表） |
 | `paper_id` | 目标论文 ID；`update` 非同源拒绝时可能为 `None` |
 | `paper_source_id` | 命中的同源 source 或新插入 source 的 ID |
 | `resolve.match_type` | 命中类型：`same_source / cross_source / no_match` |
@@ -760,7 +1045,7 @@ paper_id = metadata_db.insert_paper(raw_data)
 
 ---
 
-### 3. Canonical Source 选择规则
+### 4. Canonical Source 选择规则
 
 **自动选择（基于 online_at）**:
 - 选择 `online_at` 时间最晚的 source 作为 canonical
@@ -802,16 +1087,22 @@ get_or_create_field(conn, field_name, field_name_en) -> int
 - **迁移报告**: [metadata_db_migration_completion_report_0415.md](../../docs/metadata_db_migration_completion_report_0415.md)
 - **Transformer 文档**: [transformer.py](../metadata/transformer.py)
 - **数据库 Schema**: [database_schema.md](../../docs/database_schema.md)
+- **paper_keywords 多来源 migration**: `database/migrations/20260426_paper_keywords_multisource.sql`
+- **paper_keywords 大小写不敏感 migration**: `database/migrations/20260427_paper_keywords_case_insensitive.sql`
+- **PaperIndexer 文档**: `docs/core/shared/docset_hub/indexing/PAPER_INDEXER_README.md`
+- **关键词 backfill 脚本**: `scripts/backfill_generated_keywords.py`
 
 ---
 
 ## 📞 支持
 
 如有问题，请参考：
-1. 测试用例: `tests/db/test_metadata_db.py`
-2. 迁移文档: `docs/metadata_db_migration_plan_0414.md`
-3. Issues: [GitHub Issues](https://github.com/your-repo/issues)
+1. 作者检索测试: `tests/storage/test_metadata_db_author_search.py`
+2. Generated keywords 测试: `tests/storage/test_generated_keywords.py`
+3. 多来源关键词测试: `tests/storage/test_paper_keywords_multisource.py`
+4. 迁移文档: `docs/metadata_db_migration_plan_0414.md`
+5. Issues: [GitHub Issues](https://github.com/your-repo/issues)
 
 ---
 
-**最后更新**: 2026-04-21
+**最后更新**: 2026-04-27
