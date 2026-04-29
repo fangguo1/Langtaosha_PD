@@ -1227,6 +1227,10 @@ class MetadataDB:
         limit: int = 20,
         sources: Optional[List[str]] = None,
         min_weight: float = 0.0,
+        enable_trigram: bool = True,
+        trigram_threshold: float = 0.35,
+        token_trigram_threshold: float = 0.35,
+        candidate_pool_limit: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         """Return keyword candidates for query correction from paper_keywords."""
         normalized_query = self._normalize_keyword(query)
@@ -1240,6 +1244,7 @@ class MetadataDB:
         ]
         if not tokens:
             return []
+        sorted_tokens = sorted(tokens, key=len, reverse=True)[:3]
 
         source_values = sources or [
             "scispacy-en_core_sci_lg-generated",
@@ -1248,8 +1253,14 @@ class MetadataDB:
             "scispacy-en_ner_bionlp13cg_md-generated-test",
         ]
         params: Dict[str, Any] = {
-            "limit": max(limit * 5, 50),
+            "final_limit": limit if candidate_pool_limit is not None else max(limit * 5, 50),
+            "route_limit": candidate_pool_limit if candidate_pool_limit is not None else max(limit * 10, 100),
             "min_weight": min_weight,
+            "normalized_query": normalized_query.lower(),
+            "trigram_threshold": trigram_threshold,
+            "token_trigram_threshold": token_trigram_threshold,
+            "trigram_threshold_text": str(trigram_threshold),
+            "token_trigram_threshold_text": str(token_trigram_threshold),
         }
 
         source_placeholders = []
@@ -1259,38 +1270,151 @@ class MetadataDB:
             params[param_name] = source
 
         token_conditions = []
-        for idx, token in enumerate(sorted(tokens, key=len, reverse=True)[:3]):
+        for idx, token in enumerate(sorted_tokens):
             param_name = f"token_{idx}"
             token_conditions.append(f"lower(keyword) LIKE :{param_name}")
             params[param_name] = f"%{token}%"
 
+        prefix_conditions = []
+        for idx, token in enumerate(sorted_tokens):
+            if len(token) < 5:
+                continue
+            param_name = f"prefix_{idx}"
+            prefix_conditions.append(f"lower(keyword) LIKE :{param_name}")
+            params[param_name] = f"%{token[:4]}%"
+
+        trigram_conditions = []
+        trigram_score_terms = []
+        use_trigram = bool(enable_trigram and self._has_pg_trgm())
+        if use_trigram:
+            trigram_conditions.append(
+                "lower(keyword) % :normalized_query"
+            )
+            trigram_score_terms.append(
+                "CASE WHEN lower(keyword) % :normalized_query "
+                "THEN similarity(lower(keyword), :normalized_query) ELSE 0 END"
+            )
+            for idx, token in enumerate(sorted_tokens):
+                if len(token) < 5:
+                    continue
+                param_name = f"trigram_token_{idx}"
+                trigram_conditions.append(
+                    f":{param_name} <% lower(keyword)"
+                )
+                trigram_score_terms.append(
+                    f"CASE WHEN :{param_name} <% lower(keyword) "
+                    f"THEN word_similarity(:{param_name}, lower(keyword)) ELSE 0 END"
+                )
+                params[param_name] = token
+
+        route_queries = []
+        if token_conditions:
+            route_queries.append(
+                f"""
+                (
+                    SELECT
+                        lower(keyword) AS normalized_keyword,
+                        keyword_type,
+                        source,
+                        paper_id,
+                        keyword AS display_keyword,
+                        COALESCE(weight, 1.0) AS paper_weight,
+                        4.0 AS match_score
+                    FROM paper_keywords
+                    WHERE source IN ({", ".join(source_placeholders)})
+                      AND COALESCE(weight, 1.0) >= :min_weight
+                      AND ({" OR ".join(token_conditions)})
+                    ORDER BY COALESCE(weight, 1.0) DESC, lower(keyword) ASC
+                    LIMIT :route_limit
+                )
+                """
+            )
+        if prefix_conditions:
+            route_queries.append(
+                f"""
+                (
+                    SELECT
+                        lower(keyword) AS normalized_keyword,
+                        keyword_type,
+                        source,
+                        paper_id,
+                        keyword AS display_keyword,
+                        COALESCE(weight, 1.0) AS paper_weight,
+                        2.0 AS match_score
+                    FROM paper_keywords
+                    WHERE source IN ({", ".join(source_placeholders)})
+                      AND COALESCE(weight, 1.0) >= :min_weight
+                      AND ({" OR ".join(prefix_conditions)})
+                    ORDER BY COALESCE(weight, 1.0) DESC, lower(keyword) ASC
+                    LIMIT :route_limit
+                )
+                """
+            )
+        if trigram_conditions:
+            route_queries.append(
+                f"""
+                (
+                    SELECT
+                        lower(keyword) AS normalized_keyword,
+                        keyword_type,
+                        source,
+                        paper_id,
+                        keyword AS display_keyword,
+                        COALESCE(weight, 1.0) AS paper_weight,
+                        GREATEST({", ".join(trigram_score_terms)}) AS match_score
+                    FROM paper_keywords, settings
+                    WHERE source IN ({", ".join(source_placeholders)})
+                      AND COALESCE(weight, 1.0) >= :min_weight
+                      AND ({" OR ".join(trigram_conditions)})
+                    ORDER BY GREATEST({", ".join(trigram_score_terms)}) DESC,
+                             COALESCE(weight, 1.0) DESC,
+                             lower(keyword) ASC
+                    LIMIT :route_limit
+                )
+                """
+            )
+
+        route_union_sql = "\nUNION ALL\n".join(route_queries)
+        settings_cte = ""
+        if use_trigram:
+            settings_cte = """
+                    settings AS (
+                        SELECT
+                            set_config('pg_trgm.similarity_threshold', :trigram_threshold_text, true),
+                            set_config('pg_trgm.word_similarity_threshold', :token_trigram_threshold_text, true)
+                    ),
+            """
+
         with self.engine.connect() as conn:
             rows = conn.execute(
                 text(f"""
-                    WITH candidates AS (
+                    WITH {settings_cte}
+                    raw_candidates AS (
+                        {route_union_sql}
+                    ),
+                    candidates AS (
                         SELECT
-                            lower(keyword) AS normalized_keyword,
-                            MIN(keyword) AS display_keyword,
+                            normalized_keyword,
+                            MIN(display_keyword) AS display_keyword,
                             keyword_type,
                             source,
                             paper_id,
-                            MAX(COALESCE(weight, 1.0)) AS paper_weight
-                        FROM paper_keywords
-                        WHERE source IN ({", ".join(source_placeholders)})
-                          AND COALESCE(weight, 1.0) >= :min_weight
-                          AND ({" OR ".join(token_conditions)})
-                        GROUP BY lower(keyword), keyword_type, source, paper_id
+                            MAX(paper_weight) AS paper_weight,
+                            MAX(match_score) AS match_score
+                        FROM raw_candidates
+                        GROUP BY normalized_keyword, keyword_type, source, paper_id
                     )
                     SELECT
                         MIN(display_keyword) AS keyword,
                         keyword_type,
                         source,
                         COUNT(DISTINCT paper_id) AS doc_count,
-                        AVG(paper_weight) AS avg_weight
+                        AVG(paper_weight) AS avg_weight,
+                        MAX(match_score) AS match_score
                     FROM candidates
                     GROUP BY normalized_keyword, keyword_type, source
-                    ORDER BY doc_count DESC, avg_weight DESC, lower(MIN(display_keyword)) ASC
-                    LIMIT :limit
+                    ORDER BY match_score DESC, doc_count DESC, avg_weight DESC, lower(MIN(display_keyword)) ASC
+                    LIMIT :final_limit
                 """),
                 params,
             ).fetchall()
@@ -1305,6 +1429,25 @@ class MetadataDB:
             }
             for row in rows
         ]
+
+    def _has_pg_trgm(self) -> bool:
+        """Return whether pg_trgm is available for fuzzy keyword recall."""
+        cached = getattr(self, "_pg_trgm_available", None)
+        if cached is not None:
+            return bool(cached)
+
+        try:
+            with self.engine.connect() as conn:
+                available = bool(
+                    conn.execute(
+                        text("SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm')")
+                    ).scalar()
+                )
+        except Exception:
+            available = False
+
+        self._pg_trgm_available = available
+        return available
 
     def _insert_references_from_payload(
         self,
@@ -1601,13 +1744,26 @@ class MetadataDB:
         conditions = []
         params: Dict[str, Any] = {
             "candidate_limit": max(limit * 20, 50),
+            "raw_query": query,
+            "normalized_query": normalized_query,
         }
+        token_match_parts = []
         for idx, token in enumerate(recall_tokens):
             param_name = f"pattern_{idx}"
             conditions.append(f"lower(author_name) ILIKE lower(:{param_name})")
             params[param_name] = f"%{token}%"
+            token_match_parts.append(
+                f"CASE WHEN lower(author_name) ILIKE lower(:{param_name}) THEN 1 ELSE 0 END"
+            )
 
         where_clause = " OR ".join(conditions)
+        token_match_score_sql = " + ".join(token_match_parts) or "0"
+        normalized_author_sql = (
+            "btrim(regexp_replace("
+            "lower(replace(replace(author_name, ',', ' '), '.', ' ')), "
+            "'\\s+', ' ', 'g'"
+            "))"
+        )
 
         with self.engine.connect() as conn:
             rows = conn.execute(
@@ -1623,11 +1779,17 @@ class MetadataDB:
                     )
                     SELECT
                         author_name,
-                        COUNT(DISTINCT paper_id) AS paper_count
+                        COUNT(DISTINCT paper_id) AS paper_count,
+                        CASE
+                            WHEN lower(author_name) = lower(:raw_query) THEN 0
+                            WHEN {normalized_author_sql} = :normalized_query THEN 1
+                            ELSE 2
+                        END AS exact_priority,
+                        ({token_match_score_sql}) AS token_match_count
                     FROM authors
                     WHERE {where_clause}
                     GROUP BY author_name
-                    ORDER BY paper_count DESC, author_name ASC
+                    ORDER BY exact_priority ASC, token_match_count DESC, paper_count DESC, author_name ASC
                     LIMIT :candidate_limit
                 """),
                 params

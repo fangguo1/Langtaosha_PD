@@ -8,6 +8,8 @@
 --     paper_texts / venues / paper_publications / paper_versions
 --     paper_citations / fields / paper_fields
 
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
 -- ============================================================================
 -- 1. papers（统一作品主表）
 -- ============================================================================
@@ -96,6 +98,8 @@ CREATE INDEX IF NOT EXISTS idx_pk_keyword ON paper_keywords(keyword);
 CREATE INDEX IF NOT EXISTS idx_pk_source ON paper_keywords(source);
 CREATE INDEX IF NOT EXISTS idx_pk_source_keyword ON paper_keywords(source, keyword);
 CREATE INDEX IF NOT EXISTS idx_pk_lower_keyword ON paper_keywords(lower(keyword));
+CREATE INDEX IF NOT EXISTS idx_paper_keywords_lower_keyword_trgm
+ON paper_keywords USING gin (lower(keyword) gin_trgm_ops);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_pk_keyword_case_insensitive_unique
 ON paper_keywords(paper_id, lower(keyword_type), lower(keyword), source);
 CREATE INDEX IF NOT EXISTS idx_pk_paper_id_keyword_type ON paper_keywords(paper_id, keyword_type);

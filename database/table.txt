@@ -91,12 +91,14 @@
 - `INDEX idx_pk_source (source)`
 - `INDEX idx_pk_source_keyword (source, keyword)`
 - `INDEX idx_pk_lower_keyword (lower(keyword))`
+- `GIN INDEX idx_paper_keywords_lower_keyword_trgm ON lower(keyword) gin_trgm_ops`，用于 `smart_search` query term 拼写纠错的 trigram 候选召回
 - `UNIQUE INDEX idx_pk_keyword_case_insensitive_unique (paper_id, lower(keyword_type), lower(keyword), source)`
 - `INDEX idx_pk_paper_id_keyword_type (paper_id, keyword_type)`
 
 关键词身份约定：
 - 同一 `paper_id + keyword_type + keyword + source` 是主键维度，允许同一关键词来自多个来源。
 - 同一 `paper_id + lower(keyword_type) + lower(keyword) + source` 必须唯一，避免同一来源内出现 `Machine Learning` / `machine learning` 这类大小写重复。
+- 数据库需要启用 `pg_trgm` extension，以支持 `MetadataDB.suggest_query_terms()` 的 trigram fuzzy recall。
 
 关键词类型约定：
 - `task`

@@ -293,6 +293,10 @@ def suggest_query_terms(
     limit: int = 20,
     sources: Optional[List[str]] = None,
     min_weight: float = 0.0,
+    enable_trigram: bool = True,
+    trigram_threshold: float = 0.35,
+    token_trigram_threshold: float = 0.35,
+    candidate_pool_limit: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     """从 paper_keywords 返回 query correction 候选词"""
 ```
@@ -303,6 +307,24 @@ def suggest_query_terms(
 - `scispacy-en_ner_bionlp13cg_md-generated`
 - `scispacy-en_core_sci_lg-generated-test`
 - `scispacy-en_ner_bionlp13cg_md-generated-test`
+
+候选召回采用多路策略：
+
+- substring recall：`lower(keyword) LIKE %token%`
+- prefix recall：对长度足够的 query token 使用前缀召回
+- trigram recall：当数据库已启用 `pg_trgm` 时，使用 `%` / `<%` operator 扩展候选池，并用 `similarity()` / `word_similarity()` 作为路由内排序分数
+
+各路召回会先独立 `LIMIT`，再 `UNION ALL` 合并、去重和聚合，避免单个大 `OR` 查询把大量 trigram 候选拖进全局排序。trigram 只负责扩大候选池，不直接决定是否自动纠错。最终排序、置信度和 `corrected_query` 是否自动应用仍由 `QueryCorrector` / `PhraseAwareQueryCorrector` 的 rapidfuzz 评分和阈值控制。
+
+如果数据库没有安装 `pg_trgm`，方法会自动退回 substring + prefix 召回。推荐迁移：
+
+```sql
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+CREATE INDEX IF NOT EXISTS idx_paper_keywords_lower_keyword_trgm
+ON paper_keywords
+USING gin (lower(keyword) gin_trgm_ops);
+```
 
 返回字段：
 
