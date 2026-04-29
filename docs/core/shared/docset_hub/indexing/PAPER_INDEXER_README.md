@@ -1,7 +1,7 @@
 # PaperIndexer - 论文索引编排器
 
 **位置**: `src/docset_hub/indexing/paper_indexer.py`
-**版本**: v2.2 (Phrase-aware Query Understanding / Keyword Enrichment 已接入)
+**版本**: v2.3 (pg_trgm Query Term Recall / Phrase-aware Query Understanding 已接入)
 **更新日期**: 2026-04-27
 
 ---
@@ -25,7 +25,8 @@
 - 统一返回 metadata 写入结果与向量化结果
 - 支持按 source 过滤的语义搜索
 - 支持 `smart_search()`：作者姓名走 metadata 作者检索，普通主题走向量检索
-- 支持高置信度拼写纠错：基于 `paper_keywords` 生成候选词后再搜索
+- 支持高置信度拼写纠错：基于 `paper_keywords` 多路召回候选词后再搜索
+- 支持 pg_trgm-backed query term recall：数据库启用 `pg_trgm` 时，主题 typo 可通过 trigram fuzzy recall 扩展候选池
 - 支持 phrase-aware correction：一句 query 内多个短语可分别纠错，并返回 `corrections`
 - 支持可选关键词扩充：本地 scispaCy 生成细粒度 keyword，按模型来源分开写入
 - 支持按 `work_id` 或 `paper_id` 读取完整论文信息
@@ -131,6 +132,8 @@ for item in result["results"]:
 - 英文主题拼写错误且纠错置信度足够高：使用 `corrected_query` 调用向量搜索
 - 空 query：返回 `success=False`、`route="none"` 和空结果
 
+主题 query 纠错候选来自 `MetadataDB.suggest_query_terms()`。该方法默认从 generated `paper_keywords` 中做 substring / prefix 召回；当 metadata DB 已安装 `pg_trgm` 并创建 `lower(keyword) gin_trgm_ops` 索引时，会额外使用 trigram fuzzy recall 扩展候选池。候选召回只决定哪些 keyword 进入候选集，最终是否自动应用 `corrected_query` 仍由 rapidfuzz 分数和 Query Understanding 阈值决定。当前单短语 `QueryCorrector.AUTO_APPLY_THRESHOLD=0.88`，句子级 `PhraseAwareQueryCorrector.AUTO_APPLY_THRESHOLD=0.88`。
+
 ### 读取论文
 
 ```python
@@ -188,7 +191,7 @@ PaperIndexer.smart_search(query)
 |------|------|
 | `PaperIndexer` | 编排转换、写库、向量化、搜索、读取、删除 |
 | `MetadataTransformer` | 解析 source 数据并生成 `db_payload` / `upsert_key` |
-| `MetadataDB` | 写入 metadata、分配 `work_id`、维护 canonical source、embedding 状态、作者检索和 query term 候选 |
+| `MetadataDB` | 写入 metadata、分配 `work_id`、维护 canonical source、embedding 状态、作者检索和 query term 多路候选召回 |
 | `VectorDB` | 按 source collection 写入和搜索向量文档 |
 | `KeywordEnrichmentService` | 本地运行 `en_core_sci_lg` 与 `en_ner_bionlp13cg_md`，输出结构化关键词 |
 | `QueryUnderstandingService` | 规范化 query、识别作者意图、执行主题 query 纠错并选择 route |
@@ -631,6 +634,8 @@ model, dataset, metric, organism, chemical
 
 同一 `paper_id + keyword_type + source` 内，keyword 入库按大小写不敏感处理，例如 `Machine Learning` 和 `machine learning` 只保留一条。纠错结果会按用户输入短语的大小写风格输出：全小写输入返回小写纠错，包含 `RNA` 这类大写缩写时保留候选中的缩写大小写。
 
+query term 纠错候选默认使用 generated keyword sources，并通过 substring / prefix / pg_trgm trigram 多路召回。已有库需要执行 `database/migrations/20260427_paper_keywords_trigram_recall.sql`，新库应在 `database/schema.sql` 中启用 `pg_trgm` 并创建 `idx_paper_keywords_lower_keyword_trgm`。
+
 ---
 
 ## Query Understanding
@@ -839,6 +844,7 @@ result["keyword_enrichment"].get("error")
 
 - query 不是英文或长度太短
 - `paper_keywords` 中 generated source 候选不足
+- metadata DB 未安装 `pg_trgm` 或缺少 `idx_paper_keywords_lower_keyword_trgm`，导致部分 typo 无法召回候选
 - 最佳候选分数低于自动纠错阈值
 - 当前 query 已经是候选词库中的 exact term
 

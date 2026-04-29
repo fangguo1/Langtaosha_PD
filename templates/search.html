@@ -199,6 +199,15 @@
       white-space: pre-wrap;
     }
 
+    mark.hit {
+      background: #fff0a6;
+      color: inherit;
+      padding: 0 2px;
+      border-radius: 3px;
+      box-decoration-break: clone;
+      -webkit-box-decoration-break: clone;
+    }
+
     .meta a {
       overflow-wrap: anywhere;
       word-break: break-all;
@@ -253,16 +262,48 @@
     const resultsEl = document.getElementById("results");
 
     let allResults = [];
-    let selectedSource = "all";
+    let selectedSource = "langtaosha";
     let selectedYear = "all";
 
     function escapeHtml(value) {
-      return (value || "")
+      return String(value || "")
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;")
         .replace(/\"/g, "&quot;")
         .replace(/'/g, "&#39;");
+    }
+
+    function escapeRegExp(value) {
+      return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+
+    function highlightHtml(value, highlight, field) {
+      const raw = String(value || "");
+      const fields = (highlight && highlight.fields) || [];
+      const terms = (highlight && highlight.terms) || [];
+      if (!raw || !fields.includes(field) || !terms.length) {
+        return escapeHtml(raw);
+      }
+
+      const cleanTerms = Array.from(new Set(
+        terms
+          .map((term) => String(term || "").trim())
+          .filter(Boolean)
+      )).sort((a, b) => b.length - a.length);
+      if (!cleanTerms.length) return escapeHtml(raw);
+
+      const pattern = new RegExp(cleanTerms.map(escapeRegExp).join("|"), "gi");
+      let cursor = 0;
+      let html = "";
+      raw.replace(pattern, (match, offset) => {
+        html += escapeHtml(raw.slice(cursor, offset));
+        html += `<mark class="hit">${escapeHtml(match)}</mark>`;
+        cursor = offset + match.length;
+        return match;
+      });
+      html += escapeHtml(raw.slice(cursor));
+      return html;
     }
 
     function extractYear(onlineDate) {
@@ -282,9 +323,10 @@
     }
 
     function renderItem(item) {
-      const title = escapeHtml(item.title || "(无标题)");
-      const abstract = escapeHtml(item.abstract || "(无摘要)");
-      const authors = escapeHtml(item.authors || "未知作者");
+      const highlight = item.highlight || {};
+      const title = highlightHtml(item.title || "(无标题)", highlight, "title");
+      const abstract = highlightHtml(item.abstract || "(无摘要)", highlight, "abstract");
+      const authors = highlightHtml(item.authors || "未知作者", highlight, "authors");
       const doi = escapeHtml(item.doi || "-");
       const onlineDate = escapeHtml(formatDate(item.online_date));
       const source = escapeHtml(item.source || "-");
@@ -323,6 +365,13 @@
         if (sourceCounts[sk] !== undefined) {
           sourceCounts[sk] += 1;
         }
+      });
+
+      const sourceScopedResults = allResults.filter((item) => {
+        return selectedSource === "all" || item.source_key === selectedSource;
+      });
+
+      sourceScopedResults.forEach((item) => {
         const y = extractYear(item.online_date);
         yearCounts[y] = (yearCounts[y] || 0) + 1;
       });
@@ -331,6 +380,7 @@
       sourceFiltersEl.appendChild(
         makeChip(`All (${sourceCounts.all || 0})`, selectedSource === "all", () => {
           selectedSource = "all";
+          selectedYear = "all";
           renderFilters();
           renderFilteredResults();
         })
@@ -338,6 +388,7 @@
       sourceFiltersEl.appendChild(
         makeChip(`Langtaosha (${sourceCounts.langtaosha || 0})`, selectedSource === "langtaosha", () => {
           selectedSource = "langtaosha";
+          selectedYear = "all";
           renderFilters();
           renderFilteredResults();
         })
@@ -345,6 +396,7 @@
       sourceFiltersEl.appendChild(
         makeChip(`Biorxiv (${sourceCounts.biorxiv || 0})`, selectedSource === "biorxiv", () => {
           selectedSource = "biorxiv";
+          selectedYear = "all";
           renderFilters();
           renderFilteredResults();
         })
@@ -358,7 +410,7 @@
 
       yearFiltersEl.innerHTML = "";
       yearFiltersEl.appendChild(
-        makeChip(`All (${allResults.length})`, selectedYear === "all", () => {
+        makeChip(`All (${sourceScopedResults.length})`, selectedYear === "all", () => {
           selectedYear = "all";
           renderFilters();
           renderFilteredResults();
@@ -386,7 +438,7 @@
 
     function renderFilteredResults() {
       const filtered = getFilteredResults();
-      statusEl.textContent = `Top 100 Results: ${allResults.length} | Filtered: ${filtered.length}`;
+      statusEl.textContent = `Results: ${allResults.length} | Filtered: ${filtered.length}`;
       if (!filtered.length) {
         resultsEl.innerHTML = "<div class='paper'>当前筛选条件下暂无结果</div>";
         return;
@@ -450,11 +502,15 @@
       try {
         const data = await searchPapers(query, mode);
         allResults = data.results || [];
-        selectedSource = "all";
+        selectedSource = "langtaosha";
         selectedYear = "all";
         renderQueryNotice(data.notice);
 
         if (!allResults.length) {
+          const route = data.query_understanding && data.query_understanding.route;
+          statusEl.textContent = route === "author_suggestion"
+            ? "发现可能的作者名匹配，请确认是否按建议作者搜索。"
+            : "Results: 0";
           resultsEl.innerHTML = "<div class='paper'>暂无结果</div>";
         } else {
           filterBarEl.style.display = "flex";

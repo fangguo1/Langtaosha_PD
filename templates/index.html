@@ -167,6 +167,15 @@
       white-space: pre-wrap;
     }
 
+    mark.hit {
+      background: #fff0a6;
+      color: inherit;
+      padding: 0 2px;
+      border-radius: 3px;
+      box-decoration-break: clone;
+      -webkit-box-decoration-break: clone;
+    }
+
     .meta a {
       overflow-wrap: anywhere;
       word-break: break-all;
@@ -216,16 +225,48 @@
     const resultsEl = document.getElementById("results");
 
     let allResults = [];
-    let selectedSource = "all";
+    let selectedSource = "langtaosha";
     let selectedYear = "all";
 
     function escapeHtml(value) {
-      return (value || "")
+      return String(value || "")
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;")
         .replace(/\"/g, "&quot;")
         .replace(/'/g, "&#39;");
+    }
+
+    function escapeRegExp(value) {
+      return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+
+    function highlightHtml(value, highlight, field) {
+      const raw = String(value || "");
+      const fields = (highlight && highlight.fields) || [];
+      const terms = (highlight && highlight.terms) || [];
+      if (!raw || !fields.includes(field) || !terms.length) {
+        return escapeHtml(raw);
+      }
+
+      const cleanTerms = Array.from(new Set(
+        terms
+          .map((term) => String(term || "").trim())
+          .filter(Boolean)
+      )).sort((a, b) => b.length - a.length);
+      if (!cleanTerms.length) return escapeHtml(raw);
+
+      const pattern = new RegExp(cleanTerms.map(escapeRegExp).join("|"), "gi");
+      let cursor = 0;
+      let html = "";
+      raw.replace(pattern, (match, offset) => {
+        html += escapeHtml(raw.slice(cursor, offset));
+        html += `<mark class="hit">${escapeHtml(match)}</mark>`;
+        cursor = offset + match.length;
+        return match;
+      });
+      html += escapeHtml(raw.slice(cursor));
+      return html;
     }
 
     function extractYear(onlineDate) {
@@ -245,9 +286,10 @@
     }
 
     function renderItem(item) {
-      const title = escapeHtml(item.title || "(无标题)");
-      const abstract = escapeHtml(item.abstract || "(无摘要)");
-      const authors = escapeHtml(item.authors || "未知作者");
+      const highlight = item.highlight || {};
+      const title = highlightHtml(item.title || "(无标题)", highlight, "title");
+      const abstract = highlightHtml(item.abstract || "(无摘要)", highlight, "abstract");
+      const authors = highlightHtml(item.authors || "未知作者", highlight, "authors");
       const doi = escapeHtml(item.doi || "-");
       const onlineDate = escapeHtml(item.online_date || "-");
       const source = escapeHtml(item.source || "-");
@@ -341,7 +383,7 @@
 
     function renderFilteredResults() {
       const filtered = getFilteredResults();
-      statusEl.textContent = `Top 100 Results: ${allResults.length} | Filtered: ${filtered.length}`;
+      statusEl.textContent = `Results: ${allResults.length} | Filtered: ${filtered.length}`;
       if (!filtered.length) {
         resultsEl.innerHTML = "<div class='paper'>当前筛选条件下暂无结果</div>";
         return;
@@ -375,7 +417,7 @@
       try {
         const data = await searchPapers(query);
         allResults = data.results || [];
-        selectedSource = "all";
+        selectedSource = "langtaosha";
         selectedYear = "all";
 
         if (!allResults.length) {

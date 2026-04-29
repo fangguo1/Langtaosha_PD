@@ -12,6 +12,7 @@ from .query_understanding import (
     normalize_author_name,
     normalize_query,
 )
+from .search_highlighting import build_search_highlight
 
 __all__ = [
     'AuthorMatcher',
@@ -23,6 +24,7 @@ __all__ = [
     'QueryNormalizer',
     'QueryUnderstandingResult',
     'QueryUnderstandingService',
+    'build_search_highlight',
     'normalize_author_name',
     'normalize_query',
 ]

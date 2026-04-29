@@ -94,6 +94,7 @@ class QueryUnderstandingResult:
     route: str
     corrected_query: Optional[str] = None
     matched_author: Optional[str] = None
+    suggested_author: Optional[str] = None
     confidence: float = 0.0
     candidates: List[Dict[str, Any]] = field(default_factory=list)
     corrections: List[Dict[str, Any]] = field(default_factory=list)
@@ -421,7 +422,7 @@ class AuthorMatcher:
 class QueryCorrector:
     """Keyword-backed query corrector for semantic search terms."""
 
-    AUTO_APPLY_THRESHOLD = 0.90
+    AUTO_APPLY_THRESHOLD = 0.88
     SUGGEST_THRESHOLD = 0.75
 
     def __init__(self, metadata_db: Any):
@@ -529,7 +530,7 @@ class QueryCorrector:
 class PhraseAwareQueryCorrector:
     """Correct multiple phrase spans in sentence-like semantic queries."""
 
-    AUTO_APPLY_THRESHOLD = 0.92
+    AUTO_APPLY_THRESHOLD = 0.88
     SUGGEST_THRESHOLD = 0.82
 
     def __init__(
@@ -742,6 +743,22 @@ class QueryUnderstandingService:
                 intent="author_name",
                 route="metadata_author",
                 matched_author=author_match["matched_author"],
+                confidence=author_match["confidence"],
+                candidates=author_match["candidates"],
+                reason=author_match["reason"],
+            )
+
+        if (
+            author_match["candidates"]
+            and float(author_match["confidence"]) >= AuthorMatcher.MIDDLE_CONFIDENCE_THRESHOLD
+            and float(author_match["confidence"]) < AuthorMatcher.HIGH_CONFIDENCE_THRESHOLD
+        ):
+            return QueryUnderstandingResult(
+                original_query=normalized.original_query,
+                normalized_query=normalized.normalized_query,
+                intent="author_name",
+                route="author_suggestion",
+                suggested_author=author_match["candidates"][0]["name"],
                 confidence=author_match["confidence"],
                 candidates=author_match["candidates"],
                 reason=author_match["reason"],

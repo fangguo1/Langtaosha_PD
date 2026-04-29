@@ -400,6 +400,15 @@ class PaperIndexer:
                 "results": results,
             }
 
+        if understanding.route == "author_suggestion":
+            return {
+                "success": True,
+                "query": query,
+                "search_query": None,
+                "query_understanding": understanding_payload,
+                "results": [],
+            }
+
         search_query = understanding.corrected_query or understanding.normalized_query
         results = self.search(
             query=search_query,

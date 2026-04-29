@@ -15,7 +15,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "src"))
 
 from config.config_loader import get_db_engine, init_config
-from src.docset_hub.indexing import PaperIndexer
+from src.docset_hub.indexing import PaperIndexer, build_search_highlight
 
 
 def _resolve_config_path() -> Path:
@@ -42,6 +42,10 @@ app = Flask(
     root_path=str(ROOT),
     template_folder="templates",
 )
+
+LANGTAOSHA_SOURCES = ("langtaosha",)
+BIORXIV_SOURCES = ("biorxiv_history", "biorxiv_daily")
+SOURCE_SEARCH_TOP_K = 10
 
 
 def _extract_doi(metadata: Dict[str, Any]) -> Optional[str]:
@@ -143,17 +147,121 @@ def _format_date_ymd(value: Any) -> Optional[str]:
         return s
 
 
-def _map_search_item(item: Dict[str, Any]) -> Dict[str, Any]:
+def _get_similarity_score(item: Dict[str, Any]) -> Optional[float]:
+    score = item.get("similarity_score", item.get("similarity"))
+    if score is None:
+        return None
+    try:
+        return float(score)
+    except (TypeError, ValueError):
+        return None
+
+
+def _resolve_search_sources(source_list: Optional[List[str]]) -> List[str]:
+    sources = source_list if source_list else list(indexer.default_sources)
+    valid_sources = set(indexer.default_sources)
+    resolved_sources: List[str] = []
+    invalid_sources: List[str] = []
+
+    for source in sources:
+        if source not in valid_sources:
+            invalid_sources.append(source)
+            continue
+        if source not in resolved_sources:
+            resolved_sources.append(source)
+
+    if invalid_sources:
+        raise ValueError(
+            f"source_list 包含未知 source: {invalid_sources}; "
+            f"合法 sources: {indexer.default_sources}"
+        )
+
+    return resolved_sources
+
+
+def _dedupe_search_results(result_groups: List[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    merged_results: List[Dict[str, Any]] = []
+    seen_work_ids = set()
+
+    for results in result_groups:
+        for item in results:
+            work_id = item.get("work_id")
+            if work_id:
+                if work_id in seen_work_ids:
+                    continue
+                seen_work_ids.add(work_id)
+            merged_results.append(item)
+
+    return merged_results
+
+
+def _prioritized_vector_search(
+    query: str,
+    source_list: Optional[List[str]],
+    per_source_top_k: int = SOURCE_SEARCH_TOP_K,
+) -> List[Dict[str, Any]]:
+    resolved_sources = _resolve_search_sources(source_list)
+    langtaosha_sources = [
+        source for source in resolved_sources
+        if source in LANGTAOSHA_SOURCES
+    ]
+    biorxiv_sources = [
+        source for source in resolved_sources
+        if source in BIORXIV_SOURCES
+    ]
+    other_sources = [
+        source for source in resolved_sources
+        if source not in LANGTAOSHA_SOURCES and source not in BIORXIV_SOURCES
+    ]
+
+    langtaosha_results = []
+    if langtaosha_sources:
+        langtaosha_results = indexer.search(
+            query=query,
+            source_list=langtaosha_sources,
+            top_k=per_source_top_k,
+            hydrate=True,
+        )
+
+    biorxiv_results = []
+    if biorxiv_sources:
+        biorxiv_results = indexer.search(
+            query=query,
+            source_list=biorxiv_sources,
+            top_k=per_source_top_k,
+            hydrate=True,
+        )
+
+    other_results = []
+    if other_sources:
+        other_results = indexer.search(
+            query=query,
+            source_list=other_sources,
+            top_k=per_source_top_k,
+            hydrate=True,
+        )
+
+    return _dedupe_search_results(
+        [langtaosha_results, biorxiv_results, other_results]
+    )
+
+
+def _map_search_item(
+    item: Dict[str, Any],
+    highlight: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     metadata = item.get("metadata") or item
     doi = _extract_doi(metadata)
     preferred_source = _get_preferred_source(metadata)
     raw_source_name = preferred_source.get("source_name") or item.get("source_name")
     online_at_raw = metadata.get("online_at")
-    return {
+    similarity_score = _get_similarity_score(item)
+    mapped = {
         "work_id": item.get("work_id"),
         "paper_id": item.get("paper_id"),
         "source_name": item.get("source_name"),
-        "similarity": item.get("similarity"),
+        "similarity": similarity_score,
+        "similarity_score": similarity_score,
         "title": metadata.get("canonical_title"),
         "abstract": metadata.get("canonical_abstract"),
         "authors": _extract_authors(metadata),
@@ -163,6 +271,9 @@ def _map_search_item(item: Dict[str, Any]) -> Dict[str, Any]:
         "source_key": _normalize_source_key(raw_source_name),
         "link": _extract_paper_link(metadata, doi),
     }
+    if highlight:
+        mapped["highlight"] = highlight
+    return mapped
 
 
 def _build_query_notice(
@@ -183,6 +294,7 @@ def _build_query_notice(
     intent = understanding.get("intent")
     route = understanding.get("route")
     matched_author = understanding.get("matched_author") or search_query
+    suggested_author = understanding.get("suggested_author")
     corrected_query = understanding.get("corrected_query")
     normalized_query = understanding.get("normalized_query") or query
 
@@ -193,6 +305,15 @@ def _build_query_notice(
             "action_label": "改用向量检索",
             "fallback_mode": "vector",
             "fallback_query": query,
+        }
+
+    if intent == "author_name" and route == "author_suggestion" and suggested_author:
+        return {
+            "type": "author_suggestion",
+            "message": f'未找到 "{query}" 的高置信作者匹配，是否搜索作者 {suggested_author}？',
+            "action_label": f"搜索作者 {suggested_author}",
+            "fallback_mode": "smart",
+            "fallback_query": suggested_author,
         }
 
     if corrected_query and corrected_query != normalized_query:
@@ -301,11 +422,9 @@ def api_scholar_search():
 
     try:
         if search_mode == "vector":
-            results = indexer.search(
+            results = _prioritized_vector_search(
                 query=query,
                 source_list=source_list,
-                top_k=top_k,
-                hydrate=True,
             )
             search_query = query
             understanding = {
@@ -315,23 +434,51 @@ def api_scholar_search():
                 "route": "vector",
                 "corrected_query": None,
                 "matched_author": None,
+                "suggested_author": None,
                 "confidence": 0.0,
                 "candidates": [],
                 "corrections": [],
                 "reason": "forced_vector_search",
             }
         else:
-            smart_result = indexer.smart_search(
-                query=query,
-                source_list=source_list,
-                top_k=top_k,
-                hydrate=True,
-            )
-            results = smart_result.get("results") or []
-            search_query = smart_result.get("search_query")
-            understanding = smart_result.get("query_understanding")
+            understanding_result = indexer.query_understanding.analyze(query)
+            understanding = understanding_result.to_dict()
 
-        mapped_results = [_map_search_item(item) for item in results]
+            if understanding_result.route == "none":
+                results = []
+                search_query = None
+            elif understanding_result.route == "metadata_author":
+                resolved_sources = _resolve_search_sources(source_list)
+                search_query = (
+                    understanding_result.matched_author
+                    or understanding_result.normalized_query
+                )
+                results = indexer.metadata_db.search_by_author(
+                    author_name=search_query,
+                    limit=top_k,
+                    source_list=resolved_sources,
+                    fuzzy=True,
+                )
+            elif understanding_result.route == "author_suggestion":
+                results = []
+                search_query = None
+            else:
+                search_query = (
+                    understanding_result.corrected_query
+                    or understanding_result.normalized_query
+                )
+                results = _prioritized_vector_search(
+                    query=search_query,
+                    source_list=source_list,
+                )
+
+        highlight = build_search_highlight(
+            query=query,
+            search_query=search_query,
+            understanding=understanding,
+            search_mode=search_mode,
+        )
+        mapped_results = [_map_search_item(item, highlight=highlight) for item in results]
         return jsonify(
             {
                 "success": True,
@@ -339,6 +486,12 @@ def api_scholar_search():
                 "search_query": search_query,
                 "search_mode": search_mode,
                 "query_understanding": understanding,
+                "result_policy": {
+                    "langtaosha_top_k": SOURCE_SEARCH_TOP_K,
+                    "biorxiv_top_k": SOURCE_SEARCH_TOP_K,
+                    "dedupe_key": "work_id",
+                    "default_frontend_source": "langtaosha",
+                },
                 "notice": _build_query_notice(
                     query=query,
                     search_query=search_query,
