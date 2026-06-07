@@ -1,0 +1,11 @@
+[Unit]
+Description=Langtaosha daily bioRxiv/LangTaoSha ingest pipeline
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/wnlab/langtaosha/Langtaosha_PD
+ExecStart=/home/wnlab/miniconda3/envs/langtaosha-pd-test/bin/python scripts/run_daily_orchestrator.py --config-path src/config/config_tecent_backend_server_use.yaml
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

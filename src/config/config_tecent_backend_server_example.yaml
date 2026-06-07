@@ -28,6 +28,19 @@ vector_db:
   embedding_model: BAAI/bge-m3
   database: langtaosha_test
   collection_prefix: "lt_"
+  sparse_collection_prefix: "lt_bm25_"
+  sparse:
+    enabled: true
+    bm25_language: en
+    terminate_after: 4000
+    cutoff_frequency: 0.1
+  hybrid:
+    method: rrf
+    rrf_k: 60
+    dense_weight: 1.0
+    sparse_weight: 1.0
+    candidate_multiplier: 5
+    min_candidate_k: 50
 
 metadata_db:
   host: example-metadata-db
@@ -35,4 +48,3 @@ metadata_db:
   user: example_db_user
   password: example_db_password
   name: langtaosha_test
-

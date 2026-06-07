@@ -47,8 +47,8 @@ except Exception:  # pragma: no cover - tqdm 不可用时降级
 
 def _resolve_default_records_root() -> Path:
     candidates = [
-        #PROJECT_ROOT / "local_data" / "biorxiv_history" / "records",
-        PROJECT_ROOT / "mimic_data" / "biorxiv_daily" / "2026",
+        PROJECT_ROOT / "local_data" / "biorxiv_history" / "records",
+        #PROJECT_ROOT / "mimic_data" / {source_name} / "2026",
     ]
     for root in candidates:
         if not root.exists():
@@ -62,6 +62,11 @@ def _resolve_default_records_root() -> Path:
 def _iter_jsonl_files(records_root: Path) -> list[Path]:
     if not records_root.exists():
         raise FileNotFoundError(f"records 目录不存在: {records_root}")
+
+    if records_root.is_file():
+        if records_root.suffix.lower() != ".jsonl":
+            raise FileNotFoundError(f"records file is not JSONL: {records_root}")
+        return [records_root]
 
     files = sorted(records_root.glob("**/*.jsonl"))
     if not files:

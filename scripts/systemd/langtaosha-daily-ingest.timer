@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Langtaosha daily ingest pipeline every day
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 Asia/Shanghai
+Persistent=true
+Unit=langtaosha-daily-ingest.service
+
+[Install]
+WantedBy=timers.target

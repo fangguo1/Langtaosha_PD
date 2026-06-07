@@ -41,6 +41,23 @@ class LangtaoshaSourceAdapter(BaseSourceAdapter):
         "citation_reference": "references",
     }
 
+    STANDARD_FIELD_FALLBACKS = {
+        "citation_title": ("title",),
+        "citation_abstract": ("abstract",),
+        "citation_language": ("language",),
+        "citation_publisher": ("publisher", "venue"),
+        "citation_date": ("publicationDate",),
+        "citation_online_date": ("publicationDate",),
+        "citation_publication_date": ("publicationDate",),
+        "citation_doi": ("doi", "paperId"),
+        "citation_abstract_html_url": ("abstractUrl", "url"),
+        "citation_pdf_url": ("pdfUrl",),
+        "citation_author": ("authors",),
+        "citation_author_institution": ("institutions",),
+        "citation_keywords": ("fieldsOfStudy", "keywords"),
+        "citation_reference": ("references",),
+    }
+
     def __init__(self, source_name: str = "langtaosha"):
         """初始化 Langtaosha 来源适配器
 
@@ -84,6 +101,19 @@ class LangtaoshaSourceAdapter(BaseSourceAdapter):
             if isinstance(value, list) and len(value) == 1:
                 return value[0]
             return value
+
+        for fallback_name in self.STANDARD_FIELD_FALLBACKS.get(field_name, ()):
+            if fallback_name not in raw_metadata:
+                continue
+            value = raw_metadata[fallback_name]
+            if isinstance(value, list) and len(value) == 1:
+                return value[0]
+            return value
+
+        if field_name == "citation_pdf_url":
+            pdf = raw_metadata.get("openAccessPdf")
+            if isinstance(pdf, dict):
+                return pdf.get("url")
 
         return None
 
@@ -215,6 +245,7 @@ class LangtaoshaSourceAdapter(BaseSourceAdapter):
             return []
 
         # citation_author 可能是字符串、列表或分号分隔的字符串
+        author_affiliations = []
         if isinstance(authors_raw, str):
             # 尝试按分号或逗号分隔
             if ";" in authors_raw:
@@ -225,22 +256,48 @@ class LangtaoshaSourceAdapter(BaseSourceAdapter):
             else:
                 # 单个作者或复杂格式
                 author_names = [authors_raw.strip()]
+            author_affiliations = [[] for _ in author_names]
         elif isinstance(authors_raw, list):
-            author_names = [str(name).strip() for name in authors_raw if name]
+            author_names = []
+            for item in authors_raw:
+                if isinstance(item, dict):
+                    name = str(item.get("name") or "").strip()
+                    if not name:
+                        continue
+                    author_names.append(name)
+                    affiliation = item.get("institution") or item.get("affiliation")
+                    if isinstance(affiliation, list):
+                        author_affiliations.append([str(value).strip() for value in affiliation if value])
+                    elif affiliation:
+                        author_affiliations.append([str(affiliation).strip()])
+                    else:
+                        author_affiliations.append([])
+                elif item:
+                    author_names.append(str(item).strip())
+                    author_affiliations.append([])
         else:
             author_names = [str(authors_raw).strip()]
+            author_affiliations = [[]]
 
         # 构建 Author 对象
         authors = []
         for seq, name in enumerate(author_names, start=1):
             if name:  # 过滤空字符串
-                authors.append(Author(name=name, sequence=seq))
+                affiliations = author_affiliations[seq - 1] if seq - 1 < len(author_affiliations) else []
+                authors.append(Author(name=name, sequence=seq, affiliations=affiliations))
 
         return authors
 
     def _extract_institutions(self, raw_metadata: Dict[str, Any]) -> List[Institution]:
         """提取机构列表"""
         institutions_raw = self._extract_meta_field(raw_metadata, "citation_author_institution")
+
+        if not institutions_raw and isinstance(raw_metadata.get("authors"), list):
+            institutions_raw = [
+                author.get("institution")
+                for author in raw_metadata["authors"]
+                if isinstance(author, dict) and author.get("institution")
+            ]
 
         if not institutions_raw:
             return []
@@ -345,7 +402,7 @@ class LangtaoshaSourceAdapter(BaseSourceAdapter):
         if match:
             return match.group(1)
 
-        return None
+        return raw_metadata.get("paperId")
 
     def extract_source_url(self, raw_metadata: Dict[str, Any]) -> str | None:
         """提取来源 URL"""
