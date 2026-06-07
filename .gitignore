@@ -19,8 +19,23 @@ venv/
 import_mimic.log
 local_data/
 mimic_data/
+local_raw/
+docs/core/local/
+docs/daily_orchestrator_log/*.jsonl
+docs/implementation_log/**/*.jsonl
+docs/implementation_log/**/*.csv
+
+# Generated documentation exports
+docs/**/*.pdf
+docs/core/shared/docset_hub/storage/Untitled
+
+# Local backups and ad-hoc debug entrypoints
+*.recommend_backup_*
+*_prev.py
+app/main_test.py
+debug_*.py
+scripts/_vdb_diag_tmp.py
 
 # Private machine-specific config files
 src/config/config_tecent_backend_server_*.yaml
 !src/config/config_tecent_backend_server_example.yaml
-
