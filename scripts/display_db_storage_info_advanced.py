@@ -384,6 +384,70 @@ def show_vector_db_storage(vector_db_path: Path):
     print()
 
 
+def _get_index_field_type(index_info: dict) -> str:
+    """Return normalized Tencent VectorDB index field type."""
+    return str(
+        index_info.get("fieldType")
+        or index_info.get("field_type")
+        or ""
+    ).lower()
+
+
+def _get_index_field_name(index_info: dict) -> str:
+    """Return normalized Tencent VectorDB index field name."""
+    return str(
+        index_info.get("fieldName")
+        or index_info.get("field_name")
+        or index_info.get("name")
+        or ""
+    )
+
+
+def summarize_tencent_collection_indexes(info: dict) -> dict:
+    """Summarize dense/sparse vector counts from Tencent collection info.
+
+    Tencent sparse-only BM25 collections do not have a dense ``vector`` field.
+    The old display logic reported their "向量索引数" as 0 because it only
+    scanned dense vector indexes. For a sparse collection, each indexed document
+    carries one ``sparse_vector`` value, so use documentCount as the sparse
+    count when the sparse index does not expose indexedCount explicitly.
+    """
+    doc_count = int(info.get("documentCount", 0) or 0)
+    dense_count = 0
+    sparse_count = 0
+    has_dense = False
+    has_sparse = False
+
+    for index_info in info.get("indexes", []) or []:
+        field_type = _get_index_field_type(index_info)
+        field_name = _get_index_field_name(index_info)
+        indexed_count = index_info.get("indexedCount")
+
+        if field_type == "vector" or field_name == "vector":
+            has_dense = True
+            dense_count = int(indexed_count or 0)
+        elif field_type in {"sparsevector", "sparse_vector"} or field_name == "sparse_vector":
+            has_sparse = True
+            sparse_count = int(indexed_count if indexed_count is not None else doc_count)
+
+    if has_dense and has_sparse:
+        collection_type = "hybrid"
+    elif has_sparse:
+        collection_type = "sparse"
+    elif has_dense:
+        collection_type = "dense"
+    else:
+        collection_type = "scalar"
+
+    return {
+        "dense_count": dense_count,
+        "sparse_count": sparse_count,
+        "has_dense": has_dense,
+        "has_sparse": has_sparse,
+        "collection_type": collection_type,
+    }
+
+
 def show_tencent_vector_db_info(config: dict):
     """显示腾讯云 VectorDB 存储信息
 
@@ -427,6 +491,7 @@ def show_tencent_vector_db_info(config: dict):
         print()
 
         # 列出所有数据库
+        databases = None
         try:
             databases = client.list_databases()
             print(f"  所有数据库: {', '.join(databases) if databases else '无'}")
@@ -436,7 +501,7 @@ def show_tencent_vector_db_info(config: dict):
             print()
 
         # 检查目标数据库是否存在
-        if database not in databases:
+        if databases is not None and database not in databases:
             print(f"  ⚠️  数据库 '{database}' 不存在")
             print()
             return
@@ -455,11 +520,12 @@ def show_tencent_vector_db_info(config: dict):
             print()
 
             # 显示该 database 下所有 collection 的详细信息
-            print(f"  {'Collection':<35s} {'文档数':>10s} {'向量索引数':>12s} {'状态':>10s}")
-            print(f"  {'─' * 35} {'─' * 10} {'─' * 12} {'─' * 10}")
+            print(f"  {'Collection':<35s} {'文档数':>10s} {'稠密向量数':>12s} {'稀疏向量数':>12s} {'类型':>8s} {'状态':>10s}")
+            print(f"  {'─' * 35} {'─' * 10} {'─' * 12} {'─' * 12} {'─' * 8} {'─' * 10}")
 
             total_docs = 0
-            total_vectors = 0
+            total_dense_vectors = 0
+            total_sparse_vectors = 0
 
             for info in collections_info:
                 try:
@@ -467,23 +533,36 @@ def show_tencent_vector_db_info(config: dict):
                     doc_count = info.get('documentCount', 0)
                     index_status = info.get('indexStatus', {}).get('status', 'unknown')
 
-                    # 获取向量索引数量
-                    vector_count = 0
-                    indexes = info.get('indexes', [])
-                    for idx in indexes:
-                        if idx.get('fieldType') == 'vector':
-                            vector_count = idx.get('indexedCount', 0)
-                            break
+                    index_summary = summarize_tencent_collection_indexes(info)
+                    dense_count = index_summary["dense_count"]
+                    sparse_count = index_summary["sparse_count"]
+                    collection_type = index_summary["collection_type"]
 
                     total_docs += doc_count
-                    total_vectors += vector_count
-                    print(f"  {collection:<35s} {format_number(doc_count):>10s} {format_number(vector_count):>12s} {index_status:>10s}")
+                    total_dense_vectors += dense_count
+                    total_sparse_vectors += sparse_count
+                    print(
+                        f"  {collection:<35s} "
+                        f"{format_number(doc_count):>10s} "
+                        f"{format_number(dense_count):>12s} "
+                        f"{format_number(sparse_count):>12s} "
+                        f"{collection_type:>8s} "
+                        f"{index_status:>10s}"
+                    )
 
                 except Exception as e:
-                    print(f"  {info.get('collection', 'unknown'):<35s} {'ERROR':>10s} {'─':>12s} {'─':>10s}")
+                    print(
+                        f"  {info.get('collection', 'unknown'):<35s} "
+                        f"{'ERROR':>10s} {'─':>12s} {'─':>12s} {'─':>8s} {'─':>10s}"
+                    )
 
             print()
-            print(f"  {'总计':<35s} {format_number(total_docs):>10s} {format_number(total_vectors):>12s}")
+            print(
+                f"  {'总计':<35s} "
+                f"{format_number(total_docs):>10s} "
+                f"{format_number(total_dense_vectors):>12s} "
+                f"{format_number(total_sparse_vectors):>12s}"
+            )
             print()
 
             # 显示统计信息
