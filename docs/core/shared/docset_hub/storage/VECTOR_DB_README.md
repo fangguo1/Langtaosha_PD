@@ -1,705 +1,717 @@
 # VectorDB 模块使用指南
 
-本模块提供基于腾讯云 VectorDB 的语义检索能力，使用服务端自动 embedding 模式。
-**位置**: `src/docset_hub/storage/vector_db.py`  
----
-
-## 目录
-
-- [快速开始](#快速开始)
-- [架构设计](#架构设计)
-- [配置说明](#配置说明)
-- [API 参考](#api-参考)
-- [使用示例](#使用示例)
-- [最佳实践](#最佳实践)
-- [常见问题](#常见问题)
+**位置**: `src/docset_hub/storage/vector_db.py`
+**配套 HTTP Client**: `src/docset_hub/storage/vector_db_client.py`
+**更新日期**: 2026-06-06
 
 ---
 
-## 快速开始
+## 概述
 
-### 安装依赖
+本模块提供基于腾讯云 VectorDB 的检索能力，当前包含三条检索路径：
 
-```bash
-pip install requests pyyaml
-```
+- dense search：服务端 embedding 语义检索
+- sparse search：本地 BM25 编码后写入 sparse collection 的关键词检索
+- hybrid search：Langtaosha 侧对 dense + sparse 结果做 RRF 融合
 
-### 基本使用
+整体是两层架构：
+
+- `VectorDB`：业务层，负责 source 管理、collection 映射、写入编排和检索路由
+- `VectorDBClient`：HTTP 适配层，负责腾讯云 API 调用、认证、错误处理和响应解析
+
+---
+
+## 阅读顺序
+
+本 README 按当前源码顺序和职责组织：
+
+1. 核心数据结构与初始化
+2. 配置项与运行约束
+3. source / collection / doc_id 规则
+4. 数据库与 collection 生命周期管理
+5. 观测与管理接口
+6. dense 文档写入
+7. sparse 文档写入
+8. 删除接口
+9. dense / sparse / hybrid 检索
+10. `VectorDBClient` HTTP 分层
+11. 使用示例与注意事项
+
+---
+
+## 1. 核心数据结构与初始化
+
+### `SearchResult`
 
 ```python
-from pathlib import Path
-from src.docset_hub.storage.vector_db import VectorDB
-
-# 1. 使用配置文件初始化
-config_path = Path("src/config/config_tecent_backend_server_test.yaml")
-vector_db = VectorDB(config_path=config_path)
-
-# 2. 添加文档
-vector_db.add_document(
-    source_name="biorxiv_history",
-    work_id="work_123",
-    text="论文标题和摘要",
-    text_type="abstract"
-)
-
-# 3. 搜索文档（方法1：使用统一入口）
-results = vector_db.search(
-    query="机器学习算法",
-    source_list=["biorxiv_history"],
-    top_k=10,
-    search_type="dense"
-)
-
-# 或者（方法2：直接调用 dense_search）
-# results = vector_db.dense_search(
-#     query="机器学习算法",
-#     source_list=["biorxiv_history"],
-#     top_k=10
-# )
-
-for result in results:
-    print(f"work_id: {result.work_id}, score: {result.score}")
+@dataclass
+class SearchResult:
+    source_name: str
+    work_id: str
+    score: float
+    text_type: str
+    paper_id: Optional[str] = None
+    retrieval_debug: Optional[Dict[str, Any]] = None
 ```
+
+字段含义：
+
+- `source_name`: 命中文档所属 source
+- `work_id`: 文档的稳定业务标识
+- `score`: 检索分数
+- `text_type`: 文本类型
+- `paper_id`: 可选的论文 ID
+- `retrieval_debug`: hybrid merge 等调试信息
+
+### `VectorDB.__init__(config_path)`
+
+初始化时会：
+
+- 加载 `vector_db` 配置
+- 创建 `VectorDBClient`
+- 读取 dense / sparse / hybrid 运行参数
+- 初始化 ensured collection 缓存
+- 延迟初始化 BM25 sparse encoder
+
+异常：
+
+- `ValueError`: 缺少配置或配置不完整
+- `NotImplementedError`: 使用了当前不支持的 `embedding_source`
 
 ---
 
-## 架构设计
+## 2. 配置项与运行约束
 
-### 两层架构
-
-```
-┌─────────────────────────────────────────┐
-│           VectorDB (业务层)              │
-│  - Source 管理                           │
-│  - Collection 映射                       │
-│  - 业务逻辑封装                          │
-└──────────────┬──────────────────────────┘
-               │
-               │ 调用
-               │
-┌──────────────▼──────────────────────────┐
-│      VectorDBClient (HTTP 适配层)        │
-│  - 腾讯云 API 封装                       │
-│  - 认证和错误处理                        │
-│  - 请求/响应解析                         │
-└──────────────┬──────────────────────────┘
-               │
-               │ HTTP
-               │
-┌──────────────▼──────────────────────────┐
-│     腾讯云 VectorDB 服务                 │
-│  - 服务端 Embedding                      │
-│  - 向量索引和检索                        │
-└─────────────────────────────────────────┘
-```
-
-### 设计原则
-
-1. **配置驱动**: 所有配置来自 YAML 文件，不直接使用环境变量
-2. **Source 隔离**: 一个 source 对应一个 collection
-3. **最小必要字段**: 只保存检索需要的字段
-4. **统一入口**: 使用 `init_config()` 和 `get_vector_db_config()`
-
----
-
-## 配置说明
-
-### 配置文件位置
+配置来自 YAML：
 
 ```yaml
-# src/config/config_tecent_backend_server_test.yaml
-
 vector_db:
-  # 基础连接信息
   url: "http://172.21.0.3:80"
   account: root
   api_key: your_api_key_here
 
-  # Embedding 配置
-  embedding_source: tecent_made  # 当前仅支持 tecent_made
+  embedding_source: tecent_made
   embedding_model: BAAI/bge-m3
 
-  # 数据库和 Collection 配置
   database: langtaosha_test
   collection_prefix: "lt_"
+  sparse_collection_prefix: "lt_bm25_"
 
-  # 允许的 Source 列表
   allowed_sources:
     - biorxiv_history
     - biorxiv_daily
     - langtaosha
+
+  sparse:
+    bm25_language: en
+    max_non_zero: 1024
+    terminate_after: 4000
+    cutoff_frequency: 0.1
+
+  hybrid:
+    candidate_multiplier: 5
+    min_candidate_k: 50
+    rrf_k: 60
+    dense_weight: 1.0
+    sparse_weight: 1.0
 ```
 
-### 配置项说明
+关键约束：
+
+- `embedding_source` 当前仅支持 `tecent_made`
+- `local_made` 已被显式拒绝
+- `allowed_sources` 必须非空
+- `embedding_model` 必须配置
+
+核心配置项：
 
 | 配置项 | 必需 | 说明 |
-|-------|------|------|
-| `url` | ✅ | VectorDB 服务 URL |
-| `account` | ✅ | 账户名 |
-| `api_key` | ✅ | API 密钥 |
-| `embedding_source` | ✅ | Embedding 来源 (仅支持 `tecent_made`) |
-| `embedding_model` | ✅ | Embedding 模型名称 |
-| `database` | ✅ | 数据库名称 |
-| `collection_prefix` | ❌ | Collection 名称前缀 (默认 `lt_`) |
-| `allowed_sources` | ✅ | 允许的 source 列表 |
+|---|---|---|
+| `url` | 是 | VectorDB 服务地址 |
+| `account` | 是 | 账户名 |
+| `api_key` | 是 | API 密钥 |
+| `embedding_source` | 是 | 当前仅支持 `tecent_made` |
+| `embedding_model` | 是 | dense embedding 模型 |
+| `database` | 是 | 目标数据库名 |
+| `collection_prefix` | 否 | dense collection 前缀，默认 `lt_` |
+| `sparse_collection_prefix` | 否 | sparse collection 前缀，默认 `collection_prefix + "bm25_"` |
+| `allowed_sources` | 是 | 允许写入和检索的 source 列表 |
+| `sparse.*` | 否 | BM25 编码和检索参数 |
+| `hybrid.*` | 否 | dense+sparse 融合参数 |
 
 ---
 
-## API 参考
+## 3. source / collection / doc_id 规则
 
-### VectorDB
-
-业务层，管理 source 与 collection 映射。
-
-#### 初始化
+### source 校验
 
 ```python
-def __init__(self, config_path: Optional[Path] = None)
+_validate_source(source_name)
 ```
 
-**参数**:
-- `config_path`: 配置文件路径（必需）
+所有 public API 基本都要求 `source_name` 必须属于 `allowed_sources`。
 
-**异常**:
-- `ValueError`: 配置文件未指定或配置不完整
-- `NotImplementedError`: 使用了不支持的 `embedding_source`
-
-#### ensure_database
+### collection 命名
 
 ```python
-def ensure_database(self) -> bool
+_get_collection_name(source_name)
+_get_sparse_collection_name(source_name)
 ```
 
-确保数据库存在，不存在则创建。
+dense collection：
 
-#### ensure_collection
+```text
+{collection_prefix}{source_name}
+```
+
+sparse collection：
+
+```text
+{sparse_collection_prefix}{source_name}
+```
+
+例如：
+
+- dense: `lt_biorxiv_history`
+- sparse: `lt_bm25_biorxiv_history`
+
+### doc_id 规则
 
 ```python
-def ensure_collection(self, source_name: str) -> bool
+_generate_doc_id(source_name, work_id, text_type)
 ```
 
-确保 source 对应的 collection 存在。
+当前实现的真实语义是：
 
-**参数**:
-- `source_name`: 来源名称（必须在 `allowed_sources` 中）
+- `doc_id` 直接等于 `work_id`
 
-#### add_document
+也就是说，虽然函数签名保留了 `source_name` 和 `text_type`，但当前业务约束是：
+
+- 一个向量文档与一个 `work_id` 一对一
+- `doc_id` 不再拼接 `source_name:text_type`
+
+这一点和旧文档认知不同，当前应以源码为准。
+
+### sparse encoder
+
+```python
+_get_sparse_encoder()
+```
+
+BM25 encoder 采用 lazy-load：
+
+- dense-only 路径不会强依赖 sparse 编码组件
+- 首次 sparse 写入或 sparse 搜索时才初始化
+
+---
+
+## 4. 数据库与 collection 生命周期管理
+
+### `ensure_database()`
+
+确保数据库存在：
+
+- 已存在则直接返回
+- 不存在则创建
+
+### `ensure_collection(source_name)`
+
+确保 dense collection 存在：
+
+- 先校验 source
+- 先查 collection 是否存在
+- 不存在则调用 `VectorDBClient.create_collection()`
+- 内部用 `_ensured_collections` 做轻量缓存
+
+### `ensure_sparse_collection(source_name)`
+
+确保 sparse collection 存在：
+
+- 与 dense collection 类似
+- 实际调用 `VectorDBClient.create_sparse_collection()`
+
+### `_document_exists(collection_name, doc_id, retries=3, retry_delay=0.5)`
+
+内部 helper，用于：
+
+- dense 写入前判断文档是 insert 还是 update
+- 删除前判断文档是否存在
+
+实现特点：
+
+- 通过 `query_documents()` 查询
+- 使用 `strongConsistency`
+- 查询异常时会重试
+- 最终失败时保守地返回“不存在”
+
+---
+
+## 5. 观测与管理接口
+
+### `get_collection_info(source_name=None, collection_name=None)`
+
+获取单个 collection 详细信息。
+
+约束：
+
+- `source_name` 和 `collection_name` 必须二选一
+
+### `get_collection_list(with_info=False, source_list=None)`
+
+列出 collection：
+
+- 可仅返回名称
+- 也可返回详细信息
+- 可按 `source_list` 做过滤
+
+### `get_vector_db_info()`
+
+返回当前运行状态摘要：
+
+- URL
+- database
+- database 是否存在
+- dense/sparse collection 前缀
+- allowed sources
+- embedding source / model
+- 当前 collection 列表
+
+这组方法适合健康检查、调试和运维观察。
+
+---
+
+## 6. dense 文档写入
+
+### `add_document(...) -> Dict[str, Any]`
 
 ```python
 def add_document(
-    self,
     source_name: str,
     work_id: str,
     text: str,
     text_type: str = "abstract",
     paper_id: Optional[str] = None,
-    metadata: Optional[Dict[str, Any]] = None
-) -> bool
+    metadata: Optional[Dict[str, Any]] = None,
+    skip_ensure_collection: bool = False,
+) -> Dict[str, Any]:
 ```
 
-添加文档到向量数据库。
+职责：
 
-**参数**:
-- `source_name`: 来源名称
-- `work_id`: 作品 ID（全局唯一标识符）
-- `text`: 待索引的文本内容（通常是 title + abstract）
-- `text_type`: 文本类型（默认 "abstract"）
-- `paper_id`: 论文 ID（可选）
-- `metadata`: 额外元数据（可选，暂未使用）
+- 可选自动确保 dense collection 存在
+- 生成 `doc_id`
+- 先判断文档是否已存在
+- 调用 `upsert_documents()` 写入原始文本
+- 由腾讯云服务端 embedding 建索引
 
-**返回**: `bool` - 成功返回 True
-
-#### delete_document
+当前写入的最小字段：
 
 ```python
-def delete_document(
-    self,
-    source_name: str,
-    work_id: str,
-    text_type: str = "abstract"
-) -> bool
+{
+    "id": doc_id,
+    "text": text,
+    "work_id": work_id,
+    "source_name": source_name,
+    "text_type": text_type,
+    "paper_id": paper_id,  # 可选
+}
 ```
 
-删除文档。
-
-**参数**:
-- `source_name`: 来源名称
-- `work_id`: 作品 ID
-- `text_type`: 文本类型（默认 "abstract"）
-
-**返回**: `bool` - 成功返回 True
-
-#### dense_search
+返回结构：
 
 ```python
-def dense_search(
-    self,
-    query: str,
-    source_list: Optional[List[str]] = None,
-    top_k: int = 10
-) -> List[SearchResult]
+{
+    "success": True,
+    "action": "inserted|updated",
+    "doc_id": "W...",
+    "affected_count": 1,
+}
 ```
 
-稠密向量搜索（基于 embedding 的语义搜索）。
+说明：
 
-**参数**:
-- `query`: 查询文本
-- `source_list`: 来源列表（None 表示搜索所有允许的 source）
-- `top_k`: 返回结果数量
+- `metadata` 参数当前未实际写入
+- `action` 来自写入前的 existence check
 
-**返回**: `List[SearchResult]` - 搜索结果列表
+---
 
-#### sparse_search
+## 7. sparse 文档写入
+
+### `add_sparse_document(...)`
+
+单篇 sparse 文档写入接口，本质是对 `add_sparse_documents()` 的单条封装。
+
+### `add_sparse_documents(source_name, documents, skip_ensure_collection=False)`
+
+批量写入 BM25 sparse 文档。
+
+每条 document 至少需要：
+
+- `work_id`
+- `text` 或预先计算好的 `sparse_vector`
+
+流程：
+
+1. 校验 source
+2. 可选自动确保 sparse collection 存在
+3. 对未提供 `sparse_vector` 的文档做 BM25 编码
+4. 组装 sparse 文档
+5. 调用 `upsert_documents()` 写入 sparse collection
+
+写入到 sparse collection 的字段：
 
 ```python
-def sparse_search(
-    self,
-    query: str,
-    source_list: Optional[List[str]] = None,
-    top_k: int = 10
-) -> List[SearchResult]
+{
+    "id": work_id,
+    "sparse_vector": [...],
+    "work_id": work_id,
+    "source_name": source_name,
+    "text_type": "abstract",
+    "paper_id": "...",  # 可选
+}
 ```
 
-稀疏向量搜索（基于 BM25 的关键词搜索）。
+注意：
 
-**注意**: 当前版本暂未实现，计划在后续版本支持。
+- sparse collection 不保存完整 index text
+- 它只保存检索所需字段和 `sparse_vector`
 
-**参数**:
-- `query`: 查询文本
-- `source_list`: 来源列表（None 表示搜索所有允许的 source）
-- `top_k`: 返回结果数量
-
-**返回**: `List[SearchResult]` - 搜索结果列表
-
-**异常**: `NotImplementedError` - 当前版本暂不支持
-
-#### search
+返回结构：
 
 ```python
-def search(
-    self,
-    query: str,
-    source_list: Optional[List[str]] = None,
-    top_k: int = 10,
-    search_type: str = "dense"
-) -> List[SearchResult]
-```
-
-统一搜索入口，支持多种搜索模式。
-
-**参数**:
-- `query`: 查询文本
-- `source_list`: 来源列表（None 表示搜索所有允许的 source）
-- `top_k`: 返回结果数量
-- `search_type`: 搜索类型
-    - `"dense"`: 稠密向量搜索（默认，基于 embedding）
-    - `"sparse"`: 稀疏向量搜索（BM25，暂未实现）
-    - `"hybrid"`: 混合搜索（暂未实现）
-
-**返回**: `List[SearchResult]` - 搜索结果列表
-
-### SearchResult
-
-搜索结果数据类。
-
-```python
-@dataclass
-class SearchResult:
-    source_name: str      # 来源名称
-    work_id: str          # 作品 ID
-    score: float          # 相似度分数（0-1）
-    text_type: str        # 文本类型
-    paper_id: Optional[str] = None  # 论文 ID
+{
+    "success": True,
+    "action": "upserted",
+    "affected_count": 10,
+    "document_count": 10,
+}
 ```
 
 ---
 
-## 使用示例
+## 8. 删除接口
 
-### 示例 1: 添加单篇文档
+### `delete_document(source_name, work_id, text_type='abstract')`
+
+职责：
+
+- 校验 source
+- 基于 `work_id` 生成 `doc_id`
+- 删除前检查文档是否存在
+- 若不存在，则返回成功但 `deleted=False`
+- 若存在，则调用 `delete_documents()`
+
+返回结构：
+
+```python
+{
+    "success": True,
+    "deleted": True|False,
+    "doc_id": "W...",
+    "delete_count": 1,
+}
+```
+
+当前删除的是 dense collection 中的文档；如果你同时维护 sparse collection，需要单独处理 sparse 文档生命周期。
+
+---
+
+## 9. dense / sparse / hybrid 检索
+
+### `dense_search(query, source_list=None, top_k=10)`
+
+语义搜索入口。
+
+流程：
+
+1. 确定 source 范围
+2. 逐个 source 检查 dense collection 是否存在
+3. 调用 `VectorDBClient.search_documents()`
+4. 把返回结果映射成 `SearchResult`
+5. 全局按 score 排序并截断 `top_k`
+
+特点：
+
+- 使用腾讯云服务端 embedding
+- 适合语义相似、概念相关、同义表达检索
+
+### `sparse_search(query, source_list=None, top_k=10)`
+
+BM25 sparse 检索入口。
+
+流程：
+
+1. 对 query 做 BM25 sparse 编码
+2. 逐个 source 检查 sparse collection 是否存在
+3. 调用 `VectorDBClient.fulltext_search_documents()`
+4. 把返回结果映射成 `SearchResult`
+5. 全局按 score 排序并截断 `top_k`
+
+特点：
+
+- 适合关键词、术语、实体名精确匹配
+- 依赖 sparse collection 预先完成 backfill / upsert
+
+### `hybrid_search(query, source_list=None, top_k=10)`
+
+混合检索入口。
+
+流程：
+
+1. 用更大的 `candidate_k` 分别跑 dense 和 sparse
+2. 调用 `_rrf_merge_results()` 做 RRF 融合
+3. 返回 top-k 融合结果
+
+融合参数来自 `hybrid` 配置：
+
+- `candidate_multiplier`
+- `min_candidate_k`
+- `rrf_k`
+- `dense_weight`
+- `sparse_weight`
+
+### `_rrf_merge_results(...)`
+
+内部 RRF 融合逻辑：
+
+- 以 `work_id` 为 merge key
+- 汇总 dense/sparse rank 与原始 score
+- 计算融合分数
+- 在 `retrieval_debug` 中保留调试信息
+
+### `search(query, source_list=None, top_k=10, search_type='dense')`
+
+统一搜索入口，负责把请求路由到：
+
+- `dense`
+- `sparse`
+- `hybrid`
+
+不支持的 `search_type` 会直接抛 `ValueError`。
+
+### 搜索类型如何选择
+
+| 场景 | 推荐 | 说明 |
+|---|---|---|
+| 语义相似查询 | `dense` | 适合理解概念与意图 |
+| 专业术语精确匹配 | `sparse` | 适合词汇和实体名命中 |
+| 综合召回 | `hybrid` | 同时利用 dense 和 sparse |
+
+---
+
+## 10. `VectorDBClient` HTTP 分层
+
+`vector_db_client.py` 的职责更底层，建议这样理解。
+
+### 错误模型
+
+```python
+VectorDBError
+VectorDBClientError
+VectorDBServerError
+```
+
+语义：
+
+- `VectorDBClientError`: HTTP 请求、JSON 解析、调用方式错误
+- `VectorDBServerError`: 腾讯云 API 返回了业务错误码
+
+### 统一请求入口
+
+```python
+VectorDBClient.__init__(url, account, api_key)
+VectorDBClient._request(method, endpoint, data=None)
+```
+
+负责：
+
+- 认证头设置
+- GET/POST/DELETE 分发
+- HTTP 状态检查
+- 业务 `code != 0` 检查
+- 错误细节提取
+
+### Database APIs
+
+- `create_database`
+- `drop_database`
+- `list_databases`
+
+### Collection APIs
+
+- `create_collection`
+- `create_sparse_collection`
+- `drop_collection`
+- `list_collections`
+- `list_collections_with_info`
+- `describe_collection`
+
+其中：
+
+- `create_collection()` 创建 dense collection，带 embedding 和 HNSW vector index
+- `create_sparse_collection()` 创建 sparse collection，带 `sparse_vector` inverted index
+
+### Document APIs
+
+- `upsert_documents`
+- `delete_documents`
+- `search_documents`
+- `fulltext_search_documents`
+- `query_documents`
+
+对应关系：
+
+- dense search -> `search_documents()`
+- sparse search -> `fulltext_search_documents()`
+- existence check / query -> `query_documents()`
+
+---
+
+## 11. 使用示例
+
+### 初始化
 
 ```python
 from pathlib import Path
 from src.docset_hub.storage.vector_db import VectorDB
 
-# 初始化
-vector_db = VectorDB(config_path=Path("src/config/config_tecent_backend_server_test.yaml"))
+vector_db = VectorDB(
+    config_path=Path("src/config/config_tecent_backend_server_test.yaml")
+)
+```
 
-# 准备文本（使用 title + abstract）
+### dense 文档写入
+
+```python
 title = "Deep Learning for Bioinformatics"
 abstract = "This paper presents a novel approach..."
 text = f"{title} {abstract}".strip()
 
-# 添加文档
-vector_db.add_document(
+result = vector_db.add_document(
     source_name="biorxiv_history",
     work_id="W019b73d6-1634-77d3-9574-b6014f85b118",
     text=text,
     text_type="abstract",
-    paper_id="10.1101/2024.01.01.123456"
+    paper_id="12345",
 )
 ```
 
-### 示例 2: 批量添加文档
+### sparse 文档写入
 
 ```python
-from src.docset_hub.storage.vector_db import VectorDB
-
-vector_db = VectorDB(config_path=Path("src/config/config_tecent_backend_server_test.yaml"))
-
-# 假设有一批论文数据
-papers = [
-    {"work_id": "work_1", "title": "...", "abstract": "...", "paper_id": "..."},
-    {"work_id": "work_2", "title": "...", "abstract": "...", "paper_id": "..."},
-]
-
-# 批量添加
-for paper in papers:
-    text = f"{paper['title']} {paper['abstract']}".strip()
-
-    vector_db.add_document(
-        source_name="biorxiv_history",
-        work_id=paper['work_id'],
-        text=text,
-        text_type="abstract",
-        paper_id=paper['paper_id']
-    )
+result = vector_db.add_sparse_document(
+    source_name="biorxiv_history",
+    work_id="W019b73d6-1634-77d3-9574-b6014f85b118",
+    text="Deep Learning for Bioinformatics This paper presents a novel approach...",
+    text_type="abstract",
+    paper_id="12345",
+)
 ```
 
-### 示例 3: 搜索文档
+### dense 搜索
 
 ```python
-from src.docset_hub.storage.vector_db import VectorDB
-
-vector_db = VectorDB(config_path=Path("src/config/config_tecent_backend_server_test.yaml"))
-
-# 方法1：使用统一搜索入口（推荐）
 results = vector_db.search(
     query="machine learning algorithms for genomics",
     source_list=["biorxiv_history"],
     top_k=5,
-    search_type="dense"
+    search_type="dense",
 )
-
-# 方法2：直接调用 dense_search
-# results = vector_db.dense_search(
-#     query="machine learning algorithms for genomics",
-#     source_list=["biorxiv_history"],
-#     top_k=5
-# )
-
-# 遍历结果
-for result in results:
-    print(f"Score: {result.score:.4f}")
-    print(f"Work ID: {result.work_id}")
-    print(f"Source: {result.source_name}")
-    print(f"Text Type: {result.text_type}")
-    print("---")
 ```
 
-### 示例 4: 多 Source 搜索
+### hybrid 搜索
 
 ```python
-from src.docset_hub.storage.vector_db import VectorDB
-
-vector_db = VectorDB(config_path=Path("src/config/config_tecent_backend_server_test.yaml"))
-
-# 从多个 source 搜索
 results = vector_db.search(
     query="CRISPR gene editing",
     source_list=["biorxiv_history", "biorxiv_daily", "langtaosha"],
     top_k=10,
-    search_type="dense"
+    search_type="hybrid",
 )
-
-# 按来源分组
-from collections import defaultdict
-by_source = defaultdict(list)
-
-for result in results:
-    by_source[result.source_name].append(result)
-
-# 输出每个 source 的结果
-for source, items in by_source.items():
-    print(f"\n{source}: {len(items)} results")
-    for item in items[:3]:  # 每个 source 显示前 3 个
-        print(f"  - {item.work_id}: {item.score:.4f}")
 ```
 
-### 示例 5: 删除文档
+### 删除文档
 
 ```python
-from src.docset_hub.storage.vector_db import VectorDB
-
-vector_db = VectorDB(config_path=Path("src/config/config_tecent_backend_server_test.yaml"))
-
-# 删除单个文档
-vector_db.delete_document(
+result = vector_db.delete_document(
     source_name="biorxiv_history",
-    work_id="work_123",
-    text_type="abstract"
+    work_id="W019b73d6-1634-77d3-9574-b6014f85b118",
+    text_type="abstract",
 )
 ```
 
 ---
 
-## 最佳实践
+## 12. 使用约束与注意事项
 
-### 1. 文本构造
+### 文本构造建议
 
-推荐使用 `title + abstract` 作为索引文本：
-
-```python
-# ✅ 推荐
-text = f"{paper['title']} {paper['abstract']}".strip()
-
-# ❌ 不推荐：只用 abstract
-text = paper['abstract']
-```
-
-### 2. work_id 使用
-
-使用全局唯一的 `work_id`（UUID v7 格式）：
+推荐使用：
 
 ```python
-# ✅ 推荐：使用 UUID v7
-work_id = "W019b73d6-1634-77d3-9574-b6014f85b118"
-
-# ❌ 不推荐：使用简单自增 ID
-work_id = "123"
+text = f"{title} {abstract}".strip()
 ```
 
-### 3. Source 命名
+相比只用 abstract，`title + abstract` 更稳定。
 
-使用清晰、具有描述性的 source 名称：
+### `work_id` 是向量文档主标识
 
-```python
-# ✅ 推荐
-source_name = "biorxiv_history"
-source_name = "langtaosha"
+当前实现里：
 
-# ❌ 不推荐：过于简单或模糊
-source_name = "bio"
-source_name = "source1"
-```
+- `doc_id == work_id`
+- dense / sparse merge 也以 `work_id` 为键
 
-### 4. 搜索优化
+因此 `work_id` 应保持稳定且全局唯一，推荐使用 UUID v7 风格 ID。
 
-根据需要调整 `top_k` 参数：
+### source 必须可控
 
-```python
-# 精确搜索：只需要最相关的几个结果
-results = vector_db.search(query, top_k=5)
+不要传任意字符串作为 `source_name`，所有 source 都应在配置中的 `allowed_sources` 里。
 
-# 广泛搜索：需要更多候选
-results = vector_db.search(query, top_k=50)
-```
+### sparse 使用前提
 
-### 5. 错误处理
+使用 `sparse_search()` 前，需要满足：
 
-始终处理可能的异常：
+- 已创建 sparse collection
+- 已写入 sparse 文档或完成 sparse backfill
+
+### 当前不支持的路径
+
+- `embedding_source=local_made`
+- 更复杂的 filter DSL
+- 自动联动删除 sparse collection 文档
+
+### 错误处理建议
 
 ```python
 from src.docset_hub.storage.vector_db import VectorDB, VectorDBError
 
 try:
     vector_db = VectorDB(config_path=config_path)
-    vector_db.add_document(...)
+    results = vector_db.search("CRISPR", search_type="hybrid")
 except ValueError as e:
-    print(f"配置错误: {e}")
+    print(f"配置或参数错误: {e}")
 except VectorDBError as e:
-    print(f"向量库错误: {e}")
+    print(f"VectorDB 调用失败: {e}")
 ```
-
-### 6. 搜索类型选择
-
-理解不同搜索类型的适用场景：
-
-```python
-# 稠密向量搜索（当前支持）
-# 适用场景：
-# - 语义相似度搜索
-# - 同义词、概念相关查询
-# - 跨语言搜索
-# - 需要理解查询意图的场景
-results = vector_db.search(query, search_type="dense")
-
-# 稀疏向量搜索（暂未实现）
-# 计划适用场景：
-# - 关键词精确匹配
-# - 专业术语搜索
-# - 特定实体名称查找
-# - 需要精确词汇匹配的场景
-# results = vector_db.search(query, search_type="sparse")
-
-# 混合搜索（暂未实现）
-# 计划适用场景：
-# - 结合语义和关键词优势
-# - 提高召回率和准确率
-# - 复杂查询场景
-# results = vector_db.search(query, search_type="hybrid")
-```
-
----
-
-## 常见问题
-
-### Q1: 如何选择 embedding_model？
-
-当前使用的模型是 `BAAI/bge-m3`，这是一个支持多语言的高性能 embedding 模型。除非有特殊需求，建议使用此模型。
-
-### Q2: Collection 名称是如何生成的？
-
-Collection 名称格式为：`{collection_prefix}{source_name}`
-
-例如：
-- `source_name = "biorxiv_history"` → Collection 名称 = `"lt_biorxiv_history"`
-- `source_name = "langtaosha"` → Collection 名称 = `"lt_langtaosha"`
-
-### Q3: 文档 ID 是如何生成的？
-
-文档 ID 格式为：`{source_name}:{work_id}:{text_type}`
-
-例如：
-- `"biorxiv_history:work_123:abstract"`
-- `"langtaosha:work_456:abstract"`
-
-这种设计可以：
-- 避免不同 source 之间的 ID 冲突
-- 支持同一文档的多个文本类型（如 abstract, full_text）
-- 便于删除和排错
-
-### Q4: 如何处理没有 title 或 abstract 的文档？
-
-当前实现要求文档必须有 title 和 abstract：
-
-```python
-if not title or not abstract:
-    raise ValueError(f"数据缺少 title 或 abstract")
-```
-
-如果某些数据可能缺失，建议：
-
-```python
-# 方案 1: 跳过
-if not title or not abstract:
-    logging.warning(f"跳过数据: 缺少 title 或 abstract")
-    continue
-
-# 方案 2: 使用默认值
-title = data.get('title', 'Untitled')
-abstract = data.get('abstract', '')
-text = f"{title} {abstract}".strip()
-```
-
-### Q5: 如何实现分页？
-
-当前 API 不直接支持分页，但可以通过多次搜索实现：
-
-```python
-# 第一次搜索
-results = vector_db.search(query, top_k=20)
-
-# 假设页面大小为 10
-page_size = 10
-page_1 = results[:page_size]
-page_2 = results[page_size:page_size*2]
-```
-
-### Q6: 是否支持自定义 filter？
-
-当前版本不支持复杂的 filter DSL，仅支持按 source 分离。如果需要更复杂的过滤，建议：
-
-1. 使用多个 collection（按不同维度）
-2. 在搜索后对结果进行二次过滤
-
-### Q7: 如何调试和查看日志？
-
-VectorDB 使用 Python 标准的 `logging` 模块：
-
-```python
-import logging
-
-# 启用详细日志
-logging.basicConfig(level=logging.INFO)
-
-# 或只查看 vector_db 的日志
-logging.getLogger('src.docset_hub.storage.vector_db').setLevel(logging.DEBUG)
-```
-
-### Q8: embedding_source=local_made 何时支持？
-
-当前版本仅支持 `tecent_made`（腾讯云服务端 embedding）。`local_made` 模式（本地生成向量）计划在后续版本实现。
-
-### Q9: dense_search 和 sparse_search 有什么区别？
-
-**稠密向量搜索 (Dense Search)**:
-- 使用 embedding 模型将文本转换为高维向量
-- 基于语义相似度进行检索
-- 支持同义词、概念相关查询
-- 适合理解查询意图的场景
-- **当前版本已支持**
-
-**稀疏向量搜索 (Sparse Search)**:
-- 使用 BM25 算法基于词频统计
-- 基于关键词精确匹配
-- 适合专业术语、实体名称搜索
-- **计划在后续版本实现**
-
-**推荐使用方式**:
-```python
-# 当前使用稠密向量搜索
-results = vector_db.search(query, search_type="dense")
-# 或直接调用
-results = vector_db.dense_search(query)
-
-# 未来可以使用稀疏向量搜索
-# results = vector_db.search(query, search_type="sparse")
-# 或直接调用
-# results = vector_db.sparse_search(query)
-```
-
-### Q10: 如何选择搜索类型？
-
-根据查询场景选择：
-
-| 场景 | 推荐搜索类型 | 示例 |
-|------|------------|------|
-| 语义相似度查询 | `dense` | "机器学习在生物学中的应用" |
-| 同义词、概念查询 | `dense` | "基因编辑" → 找到 CRISPR 相关论文 |
-| 关键词精确匹配 | `sparse` (暂未实现) | "CRISPR-Cas9" 精确匹配 |
-| 专业术语搜索 | `sparse` (暂未实现) | "p53 gene mutation" |
-| 综合查询 | `hybrid` (暂未实现) | 结合语义和关键词 |
 
 ---
 
 ## 相关文档
 
-- [VectorDB 构建计划](../../docs/vector_db_building_plan_0415.md)
-- [腾讯云 VectorDB 手册](../../docs/tencent_vectordb_embedding_manual.md)
-- [实现完成报告](../../docs/vector_db_implementation_report_0415.md)
+- `src/docset_hub/storage/vector_db.py`
+- `src/docset_hub/storage/vector_db_client.py`
+- `src/docset_hub/storage/sparse_encoder.py`
+- `docs/vector_db_building_plan_0415.md`
+- `docs/tencent_vectordb_embedding_manual.md`
+- `docs/vector_db_implementation_report_0415.md`
 
 ---
 
-## 更新日志
+## 变更说明
 
-### v1.1 (2026-04-20)
+本次 README 重构重点是：
 
-- ✅ 重构搜索接口
-  - 将 `search` 重命名为 `dense_search`，明确语义为稠密向量搜索
-  - 新增 `sparse_search` 接口（暂未实现，为 BM25 预留）
-  - 新增统一 `search` 入口，支持 `search_type` 参数
-- ✅ 完善文档，添加搜索类型说明和选择指南
-
-### v1.0 (2026-04-15)
-
-- ✅ 初始版本
-- ✅ 支持 `tecent_made` embedding 模式
-- ✅ 实现基本的 CRUD 操作
-- ✅ 支持多 source 搜索
-- ✅ 完整的单元测试
-
----
-
-**维护者**: Langtaosha 开发团队
-**最后更新**: 2026-04-15
+- 按 `vector_db.py` / `vector_db_client.py` 当前职责与源码顺序重排
+- 明确 dense / sparse / hybrid 三条路径的边界
+- 补上 `VectorDBClient` 的分层说明
+- 修正文档中已经过时的 `doc_id` 描述，和当前源码保持一致

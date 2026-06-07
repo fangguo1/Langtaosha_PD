@@ -392,10 +392,11 @@ def search(
     source_list: Optional[List[str]] = None,
     top_k: int = 10,
     hydrate: bool = True,
+    search_type: str = "dense",
 ) -> List[Dict[str, Any]]
 ```
 
-执行语义搜索。内部调用 `VectorDB.search(..., search_type="dense")`。
+执行论文搜索。内部调用 `VectorDB.search(..., search_type=search_type)`。
 
 **参数**:
 
@@ -403,6 +404,7 @@ def search(
 - `source_list`: 搜索的 source 列表，不传则使用全部 `default_sources`
 - `top_k`: 返回数量
 - `hydrate`: 是否根据 `work_id` 补全完整 metadata
+- `search_type`: 检索类型，支持 `dense`、`sparse`、`hybrid`
 
 `hydrate=True` 返回：
 
