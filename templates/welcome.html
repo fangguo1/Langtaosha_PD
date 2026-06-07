@@ -44,6 +44,19 @@
       margin-bottom: 18px;
     }
 
+    .hero-logo-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 10px;
+      text-decoration: none;
+    }
+
+    .hero-logo-link:focus-visible {
+      outline: 3px solid rgba(200, 177, 90, 0.45);
+      outline-offset: 4px;
+    }
+
     .hero-brand img {
       width: 64px;
       height: 64px;
@@ -108,6 +121,35 @@
 
     .search-box button:hover {
       background: var(--primary-dark);
+    }
+
+    .entry-actions {
+      max-width: 760px;
+      margin: 12px auto 0;
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .study-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 38px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: #ffffff;
+      color: #1c1c1c;
+      padding: 8px 14px;
+      font-size: 14px;
+      font-weight: 700;
+      text-decoration: none;
+    }
+
+    .study-link:hover {
+      border-color: var(--primary);
+      background: #fffaf0;
     }
 
     .section {
@@ -184,14 +226,19 @@
   <div class="container">
     <section class="hero">
       <div class="hero-brand">
-        <img src="/static/image.png" alt="LTS logo" onerror="this.style.display='none';document.getElementById('logoFallback').style.display='flex';" />
-        <div id="logoFallback" class="logo-fallback">LTS</div>
+        <a class="hero-logo-link" href="https://langtaosha.org.cn/" aria-label="打开浪淘沙官网">
+          <img src="/static/image.png" alt="LTS logo" onerror="this.style.display='none';document.getElementById('logoFallback').style.display='flex';" />
+          <div id="logoFallback" class="logo-fallback">LTS</div>
+        </a>
         <h1>Langtaosha Smart Search Demo</h1>
       </div>
       <form class="search-box" action="/search" method="get">
         <input name="q" type="text" placeholder="Search papers..." required />
         <button type="submit">Search</button>
       </form>
+      <div class="entry-actions">
+        <a class="study-link" href="/study">反馈模式</a>
+      </div>
     </section>
 
     <section class="section">

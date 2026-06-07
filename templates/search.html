@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Scholar Search</title>
+  <title>{% if is_study_mode %}反馈模式搜索{% else %}Scholar Search{% endif %}</title>
   <style>
     :root {
       --bg: #f4f4f2;
@@ -36,6 +36,27 @@
       font-size: 28px;
       font-weight: 700;
       letter-spacing: 0.2px;
+    }
+
+    .page-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .study-badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: #ffffff;
+      color: var(--muted);
+      padding: 4px 10px;
+      font-size: 12px;
+      font-weight: 700;
     }
 
     .search-box {
@@ -191,12 +212,161 @@
       line-height: 1.6;
     }
 
+    .evidence-tags {
+      display: flex;
+      align-items: flex-start;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 8px 0 10px;
+    }
+
+    .evidence-title {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+      line-height: 28px;
+    }
+
+    .evidence-tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      max-width: 100%;
+      border: 1px solid #d7c77c;
+      border-radius: 999px;
+      background: #fffaf0;
+      color: #2f2a14;
+      padding: 4px 9px;
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+
+    .source-switch {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      width: 100%;
+      background: #fffdf0;
+      border: 1px solid #e6d58a;
+      border-radius: 12px;
+      padding: 12px 14px;
+      color: #3b3212;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .source-switch button {
+      flex: 0 0 auto;
+      border: 0;
+      border-radius: 8px;
+      background: var(--primary);
+      color: #1c1c1c;
+      padding: 8px 12px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .source-switch button:hover {
+      background: var(--primary-dark);
+    }
+
     .abstract {
       margin: 0;
       line-height: 1.7;
       color: #1e293b;
       font-size: 14px;
       white-space: pre-wrap;
+    }
+
+    .feedback {
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+    }
+
+    .feedback-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .feedback-btn {
+      min-height: 34px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #ffffff;
+      color: #1e293b;
+      padding: 7px 12px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .feedback-btn:hover {
+      border-color: var(--primary);
+      background: #fffaf0;
+    }
+
+    .feedback-btn.active {
+      border-color: var(--primary);
+      background: #fff5cc;
+      color: #1c1c1c;
+    }
+
+    .feedback-state {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .reason-panel {
+      display: grid;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .reason-panel textarea {
+      width: 100%;
+      min-height: 82px;
+      resize: vertical;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 9px 10px;
+      font: inherit;
+      font-size: 14px;
+      line-height: 1.6;
+      outline: none;
+    }
+
+    .reason-panel textarea:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(200, 177, 90, 0.18);
+    }
+
+    .reason-submit {
+      justify-self: start;
+      min-height: 34px;
+      border: 0;
+      border-radius: 8px;
+      background: var(--primary);
+      color: #1c1c1c;
+      padding: 7px 12px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .reason-submit:hover {
+      background: var(--primary-dark);
+    }
+
+    .feedback-error {
+      color: #b42318;
+      font-size: 13px;
     }
 
     mark.hit {
@@ -216,16 +386,24 @@
     @media (max-width: 640px) {
       .container { padding-top: 20px; }
       h1 { font-size: 24px; }
+      .page-title { align-items: flex-start; }
       .search-box { flex-direction: column; }
       .search-box button { width: 100%; }
       .query-notice { align-items: stretch; flex-direction: column; }
       .query-notice button { width: 100%; }
+      .source-switch { align-items: stretch; flex-direction: column; }
+      .source-switch button { width: 100%; }
     }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>Scholar Search</h1>
+    <div class="page-title">
+      <h1>{% if is_study_mode %}反馈模式搜索{% else %}Scholar Search{% endif %}</h1>
+      {% if is_study_mode %}
+      <span class="study-badge">Participant: {{ participant_id }}</span>
+      {% endif %}
+    </div>
 
     <form id="searchForm" class="search-box">
       <input id="queryInput" type="text" placeholder="输入论文主题，例如: protein folding" required />
@@ -251,6 +429,8 @@
 
   <script>
     const initialQuery = {{ initial_query|tojson }};
+    const isStudyMode = {{ is_study_mode|default(false)|tojson }};
+    const participantId = {{ participant_id|default(none)|tojson }};
     const form = document.getElementById("searchForm");
     const queryInput = document.getElementById("queryInput");
     const searchBtn = document.getElementById("searchBtn");
@@ -264,6 +444,9 @@
     let allResults = [];
     let selectedSource = "langtaosha";
     let selectedYear = "all";
+    let currentStudy = null;
+    let currentSearchMeta = null;
+    let feedbackStates = {};
 
     function escapeHtml(value) {
       return String(value || "")
@@ -313,6 +496,11 @@
       return m ? m[1] : "Unknown";
     }
 
+    function feedbackYear(onlineDate) {
+      const year = extractYear(onlineDate);
+      return year === "Unknown" ? null : year;
+    }
+
     function makeChip(label, active, onClick) {
       const btn = document.createElement("button");
       btn.type = "button";
@@ -320,6 +508,75 @@
       btn.textContent = label;
       btn.addEventListener("click", onClick);
       return btn;
+    }
+
+    function feedbackKey(item) {
+      if (!currentStudy || !item || !item._resultRank) return "";
+      return `${currentStudy.search_event_id}:${item._resultRank}`;
+    }
+
+    function renderStudyFeedback(item) {
+      if (!isStudyMode || !currentStudy) return "";
+
+      const rank = item._resultRank;
+      const key = feedbackKey(item);
+      const state = feedbackStates[key] || {};
+      const isRelevant = state.feedback === "relevant";
+      const isNotRelevant = state.feedback === "not_relevant";
+      const isDraft = state.feedback === "not_relevant_draft";
+      const stateLabel = state.message ? `<span class="feedback-state">${escapeHtml(state.message)}</span>` : "";
+      const errorLabel = state.error ? `<span class="feedback-error">${escapeHtml(state.error)}</span>` : "";
+      const reasonPanel = (isDraft || isNotRelevant)
+        ? `
+          <div class="reason-panel" data-rank="${rank}">
+            <textarea
+              data-role="reason"
+              placeholder="请简单描述对搜索结果不满意的原因"
+            >${escapeHtml(state.reason || "")}</textarea>
+            <button class="reason-submit" type="button" data-action="submit-not-relevant" data-rank="${rank}">提交原因</button>
+            ${errorLabel}
+          </div>
+        `
+        : errorLabel;
+
+      return `
+        <div class="feedback" data-rank="${rank}">
+          <div class="feedback-actions">
+            <button class="feedback-btn ${isRelevant ? "active" : ""}" type="button" data-action="relevant" data-rank="${rank}">满意</button>
+            <button class="feedback-btn ${isNotRelevant || isDraft ? "active" : ""}" type="button" data-action="not-relevant" data-rank="${rank}">不满意</button>
+            ${stateLabel}
+          </div>
+          ${reasonPanel}
+        </div>
+      `;
+    }
+
+    function formatReasonScore(score) {
+      if (score === null || score === undefined || Number.isNaN(Number(score))) {
+        return "";
+      }
+      return ` ${Number(score).toFixed(4)}`;
+    }
+
+    function renderRetrievalReasons(item) {
+      const reasons = Array.isArray(item.retrieval_reasons) ? item.retrieval_reasons : [];
+      if (!reasons.length) return "";
+
+      const tags = reasons.map((reason) => {
+        const concepts = Array.isArray(reason.matched_concepts)
+          ? reason.matched_concepts.filter(Boolean).slice(0, 6)
+          : [];
+        const conceptText = concepts.length ? `: ${concepts.join(", ")}` : "";
+        const scoreText = formatReasonScore(reason.score);
+        return `<span class="evidence-tag" title="${escapeHtml(conceptText || reason.label || reason.key)}">${escapeHtml(reason.label || reason.key)}${escapeHtml(scoreText)}${escapeHtml(conceptText)}</span>`;
+      }).join("");
+
+      return `
+        <div class="evidence-tags">
+          <span class="evidence-title">Reason:</span>
+          ${tags}
+        </div>
+      `;
     }
 
     function renderItem(item) {
@@ -342,8 +599,10 @@
           <p class="meta"><strong>Source:</strong> ${source}</p>
           <p class="meta"><strong>DOI:</strong> ${doi} | <strong>Online Date:</strong> ${onlineDate}</p>
           <p class="meta"><strong>Link:</strong> ${linkHtml}</p>
+          ${renderRetrievalReasons(item)}
           <p class="meta"><strong>ABSTRACT</strong></p>
           <p class="abstract">${abstract}</p>
+          ${renderStudyFeedback(item)}
         </article>
       `;
     }
@@ -436,14 +695,40 @@
       });
     }
 
+    function countBySource(sourceKey) {
+      return allResults.filter((item) => item.source_key === sourceKey).length;
+    }
+
+    function renderBiorxivJump() {
+      const biorxivCount = countBySource("biorxiv");
+      if (selectedSource !== "langtaosha" || selectedYear !== "all" || biorxivCount <= 0) {
+        return "";
+      }
+      const langtaoshaCount = countBySource("langtaosha");
+      const message = langtaoshaCount > 0
+        ? "浪淘沙的结果已展示，可以查看 Biorxiv 的结果。"
+        : "浪淘沙暂无符合要求的结果，可以查看 Biorxiv 的结果。";
+      return `
+        <div class="source-switch">
+          <span>${escapeHtml(message)}</span>
+          <button type="button" data-action="show-biorxiv">查看 Biorxiv 结果 (${biorxivCount})</button>
+        </div>
+      `;
+    }
+
     function renderFilteredResults() {
       const filtered = getFilteredResults();
-      statusEl.textContent = `Results: ${allResults.length} | Filtered: ${filtered.length}`;
+      const sourceLabel = selectedSource === "langtaosha"
+        ? "Langtaosha"
+        : selectedSource === "biorxiv"
+          ? "Biorxiv"
+          : "All";
+      statusEl.textContent = `Results: ${allResults.length} | Showing ${sourceLabel}: ${filtered.length}`;
       if (!filtered.length) {
-        resultsEl.innerHTML = "<div class='paper'>当前筛选条件下暂无结果</div>";
+        resultsEl.innerHTML = `<div class='paper'>当前筛选条件下暂无结果</div>${renderBiorxivJump()}`;
         return;
       }
-      resultsEl.innerHTML = filtered.map(renderItem).join("");
+      resultsEl.innerHTML = `${filtered.map(renderItem).join("")}${renderBiorxivJump()}`;
     }
 
     function clearQueryNotice() {
@@ -478,13 +763,66 @@
         top_k: "100",
         mode,
       });
-      const url = `/api/scholar/search?${params.toString()}`;
-      const resp = await fetch(url);
+      if (isStudyMode) {
+        params.set("participant_id", participantId || "");
+      }
+      const endpoint = isStudyMode ? "/api/study/search" : "/api/scholar/search";
+      const url = `${endpoint}?${params.toString()}`;
+      const resp = await fetch(url, { credentials: "same-origin" });
       const data = await resp.json();
       if (!resp.ok || !data.success) {
         throw new Error(data.error || "搜索失败");
       }
       return data;
+    }
+
+    function findResultByRank(rank) {
+      return allResults.find((item) => item._resultRank === Number(rank));
+    }
+
+    function buildFeedbackPayload(item, feedback, reasonText) {
+      const searchMeta = currentSearchMeta || {};
+      return {
+        study_session_id: currentStudy && currentStudy.study_session_id,
+        participant_id: participantId,
+        search_event_id: currentStudy && currentStudy.search_event_id,
+        query_index: currentStudy && currentStudy.query_index,
+        query: searchMeta.query,
+        search_mode: searchMeta.search_mode,
+        search_query: searchMeta.search_query,
+        result_rank: item._resultRank,
+        work_id: item.work_id || null,
+        paper_id: item.paper_id || null,
+        title: item.title || null,
+        source: item.source || null,
+        year: feedbackYear(item.online_date),
+        similarity_score: item.similarity_score ?? item.similarity ?? null,
+        feedback,
+        reason_text: reasonText || null,
+      };
+    }
+
+    async function submitFeedback(item, feedback, reasonText) {
+      if (!currentStudy) {
+        throw new Error("Study session not ready");
+      }
+
+      const resp = await fetch("/api/study/feedback", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildFeedbackPayload(item, feedback, reasonText)),
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.success) {
+        throw new Error(data.error || "提交失败");
+      }
+      return data;
+    }
+
+    function setFeedbackState(item, state) {
+      feedbackStates[feedbackKey(item)] = state;
+      renderFilteredResults();
     }
 
     async function runSearch(query, mode = "smart") {
@@ -501,7 +839,17 @@
 
       try {
         const data = await searchPapers(query, mode);
-        allResults = data.results || [];
+        currentStudy = data.study || null;
+        currentSearchMeta = {
+          query: data.query,
+          search_mode: data.search_mode,
+          search_query: data.search_query,
+        };
+        feedbackStates = {};
+        allResults = (data.results || []).map((item, index) => ({
+          ...item,
+          _resultRank: index + 1,
+        }));
         selectedSource = "langtaosha";
         selectedYear = "all";
         renderQueryNotice(data.notice);
@@ -523,6 +871,84 @@
         searchBtn.disabled = false;
       }
     }
+
+    resultsEl.addEventListener("click", async (event) => {
+      const actionEl = event.target.closest("[data-action]");
+      if (!actionEl) return;
+
+      const action = actionEl.dataset.action;
+      if (action === "show-biorxiv") {
+        selectedSource = "biorxiv";
+        selectedYear = "all";
+        renderFilters();
+        renderFilteredResults();
+        resultsEl.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
+
+      if (!isStudyMode) return;
+
+      const rank = Number(actionEl.dataset.rank);
+      const item = findResultByRank(rank);
+      if (!item) return;
+
+      if (action === "not-relevant") {
+        const previous = feedbackStates[feedbackKey(item)] || {};
+        setFeedbackState(item, {
+          feedback: "not_relevant_draft",
+          reason: previous.reason || "",
+          message: previous.feedback === "not_relevant" ? "已标记不满意" : "",
+        });
+        return;
+      }
+
+      if (action === "relevant") {
+        actionEl.disabled = true;
+        try {
+          await submitFeedback(item, "relevant", null);
+          setFeedbackState(item, {
+            feedback: "relevant",
+            message: "已标记满意",
+          });
+        } catch (err) {
+          setFeedbackState(item, {
+            ...(feedbackStates[feedbackKey(item)] || {}),
+            error: err.message,
+          });
+        }
+        return;
+      }
+
+      if (action === "submit-not-relevant") {
+        const panel = actionEl.closest(".reason-panel");
+        const textarea = panel && panel.querySelector("[data-role='reason']");
+        const reason = textarea ? textarea.value.trim() : "";
+        if (!reason) {
+          setFeedbackState(item, {
+            feedback: "not_relevant_draft",
+            reason,
+            error: "请先填写原因",
+          });
+          return;
+        }
+
+        actionEl.disabled = true;
+        try {
+          await submitFeedback(item, "not_relevant", reason);
+          setFeedbackState(item, {
+            feedback: "not_relevant",
+            reason,
+            message: "已标记不满意",
+          });
+        } catch (err) {
+          setFeedbackState(item, {
+            feedback: "not_relevant_draft",
+            reason,
+            error: err.message,
+          });
+        }
+      }
+    });
 
     form.addEventListener("submit", async (event) => {
       event.preventDefault();

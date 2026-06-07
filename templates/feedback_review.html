@@ -1,0 +1,970 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Feedback Review</title>
+  <style>
+    :root {
+      --bg: #f4f4f2;
+      --card: #ffffff;
+      --text: #181818;
+      --muted: #555555;
+      --primary: #c8b15a;
+      --primary-dark: #a48f3f;
+      --border: #d8d8d4;
+      --good: #146c43;
+      --good-bg: #e8f5ee;
+      --bad: #b42318;
+      --bad-bg: #fff0ed;
+      --neutral-bg: #f8fafc;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: linear-gradient(160deg, #f6f6f4 0%, #f1f1ee 100%);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 320px minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    .sidebar {
+      border-right: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.74);
+      padding: 22px 16px;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+    }
+
+    .main {
+      min-width: 0;
+      padding: 28px 24px 56px;
+    }
+
+    h1 {
+      margin: 0 0 14px;
+      font-size: 26px;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    .label {
+      display: block;
+      margin: 16px 0 7px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .toggle-row {
+      display: flex;
+      gap: 9px;
+      align-items: flex-start;
+      margin: 10px 0 16px;
+      padding: 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #ffffff;
+    }
+
+    .toggle-row input {
+      width: 16px;
+      height: 16px;
+      margin-top: 2px;
+      accent-color: var(--primary-dark);
+    }
+
+    .toggle-row strong {
+      display: block;
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    .toggle-row span {
+      display: block;
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    select {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #ffffff;
+      color: var(--text);
+      padding: 9px 10px;
+      font: inherit;
+      font-size: 14px;
+      outline: none;
+    }
+
+    select:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(200, 177, 90, 0.18);
+    }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(120px, 1fr));
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .metric {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+    }
+
+    .metric span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .metric strong {
+      display: block;
+      margin-top: 5px;
+      font-size: 18px;
+      line-height: 1.3;
+      overflow-wrap: anywhere;
+    }
+
+    .query-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+      margin-bottom: 14px;
+    }
+
+    .query-title {
+      margin: 0 0 8px;
+      font-size: 20px;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+
+    .meta {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.65;
+      overflow-wrap: anywhere;
+    }
+
+    .source-score-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+      font-size: 13px;
+    }
+
+    .source-score-table th,
+    .source-score-table td {
+      border-top: 1px solid var(--border);
+      padding: 7px 6px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .source-score-table th {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: flex-start;
+      margin-bottom: 14px;
+      padding: 12px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+
+    .control-group {
+      display: grid;
+      gap: 7px;
+    }
+
+    .control-title {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .chip,
+    .rank-dot {
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: #ffffff;
+      color: #1e293b;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .chip {
+      padding: 6px 10px;
+    }
+
+    .chip.active {
+      border-color: var(--primary);
+      background: #fff8dc;
+      color: #1c1c1c;
+    }
+
+    .rank-strip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 14px;
+    }
+
+    .rank-dot {
+      width: 34px;
+      height: 30px;
+      padding: 0;
+    }
+
+    .rank-dot.good {
+      border-color: #7fc6a1;
+      background: var(--good-bg);
+      color: var(--good);
+    }
+
+    .rank-dot.bad {
+      border-color: #f2a49b;
+      background: var(--bad-bg);
+      color: var(--bad);
+    }
+
+    .rank-dot.unlabeled {
+      background: var(--neutral-bg);
+      color: var(--muted);
+    }
+
+    .results {
+      display: grid;
+      gap: 14px;
+    }
+
+    .paper {
+      width: 100%;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      overflow-wrap: anywhere;
+    }
+
+    .paper.feedback-good {
+      border-color: #a6d9bd;
+    }
+
+    .paper.feedback-bad {
+      border-color: #efb1aa;
+    }
+
+    .paper-head {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+    }
+
+    .rank-badge {
+      flex: 0 0 auto;
+      min-width: 38px;
+      min-height: 30px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: #f8fafc;
+      color: #1e293b;
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .title {
+      margin: 0 0 8px;
+      font-size: 18px;
+      font-weight: 700;
+      color: #1b1b1b;
+      line-height: 1.4;
+    }
+
+    .abstract {
+      margin: 0;
+      line-height: 1.7;
+      color: #1e293b;
+      font-size: 14px;
+      white-space: pre-wrap;
+    }
+
+    .feedback-box {
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+      display: grid;
+      gap: 8px;
+    }
+
+    .feedback-pill {
+      justify-self: start;
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .feedback-pill.good {
+      background: var(--good-bg);
+      color: var(--good);
+      border: 1px solid #9bd0b5;
+    }
+
+    .feedback-pill.bad {
+      background: var(--bad-bg);
+      color: var(--bad);
+      border: 1px solid #efb1aa;
+    }
+
+    .feedback-pill.none {
+      background: var(--neutral-bg);
+      color: var(--muted);
+      border: 1px solid var(--border);
+    }
+
+    .reason {
+      margin: 0;
+      color: #3b3212;
+      background: #fffdf0;
+      border: 1px solid #e6d58a;
+      border-radius: 8px;
+      padding: 9px 10px;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .history {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .empty {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 18px;
+      color: var(--muted);
+    }
+
+    .badge {
+      display: inline-flex;
+      min-height: 24px;
+      align-items: center;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      background: #ffffff;
+      padding: 3px 8px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    @media (max-width: 920px) {
+      .layout { grid-template-columns: 1fr; }
+      .sidebar {
+        position: static;
+        height: auto;
+        border-right: 0;
+        border-bottom: 1px solid var(--border);
+      }
+      .main { padding: 20px 16px 48px; }
+      .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 560px) {
+      .summary { grid-template-columns: 1fr; }
+      .paper-head { display: block; }
+      .rank-badge { margin-bottom: 8px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <h1>Feedback Review</h1>
+
+      <label class="toggle-row" for="qualifiedOnly">
+        <input id="qualifiedOnly" type="checkbox" checked />
+        <span>
+          <strong>Qualified feedback only</strong>
+          <span>只显示至少有一条反馈的 query/search。</span>
+        </span>
+      </label>
+
+      <label class="label" for="userSelect">User ID</label>
+      <select id="userSelect"></select>
+
+      <label class="label" for="querySelect">Query</label>
+      <select id="querySelect"></select>
+
+      <label class="label" for="searchSelect">Search Event</label>
+      <select id="searchSelect"></select>
+    </aside>
+
+    <main class="main">
+      <section id="summary" class="summary"></section>
+      <section id="queryCard" class="query-card"></section>
+      <section id="controls" class="controls"></section>
+      <section id="rankStrip" class="rank-strip"></section>
+      <section id="results" class="results"></section>
+    </main>
+  </div>
+
+  <script>
+    const DATA_URL = "/api/study/feedback-review-data";
+
+    const qualifiedOnlyInput = document.getElementById("qualifiedOnly");
+    const userSelect = document.getElementById("userSelect");
+    const querySelect = document.getElementById("querySelect");
+    const searchSelect = document.getElementById("searchSelect");
+    const summaryEl = document.getElementById("summary");
+    const queryCardEl = document.getElementById("queryCard");
+    const controlsEl = document.getElementById("controls");
+    const rankStripEl = document.getElementById("rankStrip");
+    const resultsEl = document.getElementById("results");
+
+    let searches = [];
+    let selectedUser = "";
+    let selectedQuery = "";
+    let selectedSearchId = "";
+    let qualifiedOnly = true;
+    let feedbackFilter = "all";
+    let sourceFilter = "all";
+
+    function escapeHtml(value) {
+      return String(value || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function formatDate(value) {
+      if (!value) return "-";
+      return String(value).replace("T", " ").slice(0, 19);
+    }
+
+    function normalizeSourceKey(value) {
+      const raw = String(value || "").toLowerCase();
+      if (raw.includes("biorxiv")) return "biorxiv";
+      if (raw.includes("langtaosha")) return "langtaosha";
+      return raw || "unknown";
+    }
+
+    function feedbackClass(feedback) {
+      if (feedback === "relevant") return "good";
+      if (feedback === "not_relevant") return "bad";
+      return "unlabeled";
+    }
+
+    function feedbackLabel(feedback) {
+      if (feedback === "relevant") return "满意";
+      if (feedback === "not_relevant") return "不满意";
+      return "未反馈";
+    }
+
+    function countFeedback(searchItems) {
+      return searchItems.reduce((acc, item) => {
+        const summary = item.feedback_summary || {};
+        acc.searches += 1;
+        acc.feedback += Number(summary.total || 0);
+        acc.relevant += Number(summary.relevant || 0);
+        acc.notRelevant += Number(summary.not_relevant || 0);
+        return acc;
+      }, { searches: 0, feedback: 0, relevant: 0, notRelevant: 0 });
+    }
+
+    function hasQualifiedFeedback(item) {
+      const summary = item.feedback_summary || {};
+      return Number(summary.total || 0) > 0;
+    }
+
+    function reviewSearches() {
+      return qualifiedOnly ? searches.filter(hasQualifiedFeedback) : searches;
+    }
+
+    function currentSearchesForUser() {
+      return reviewSearches().filter((item) => item.user_id === selectedUser);
+    }
+
+    function currentSearchesForQuery() {
+      return currentSearchesForUser().filter((item) => item.query === selectedQuery);
+    }
+
+    function currentSearch() {
+      return searches.find((item) => String(item.search_event_id) === selectedSearchId) || null;
+    }
+
+    function setOptions(select, options, value) {
+      select.innerHTML = options.map((option) => {
+        const selected = String(option.value) === String(value) ? "selected" : "";
+        return `<option value="${escapeHtml(option.value)}" ${selected}>${escapeHtml(option.label)}</option>`;
+      }).join("");
+    }
+
+    function renderUserOptions() {
+      const visibleSearches = reviewSearches();
+      const users = Array.from(new Set(visibleSearches.map((item) => item.user_id).filter(Boolean)));
+      users.sort((a, b) => {
+        const aLast = Math.max(...visibleSearches.filter((item) => item.user_id === a).map((item) => Date.parse(item.created_at) || 0));
+        const bLast = Math.max(...visibleSearches.filter((item) => item.user_id === b).map((item) => Date.parse(item.created_at) || 0));
+        return bLast - aLast || a.localeCompare(b);
+      });
+
+      if (!selectedUser || !users.includes(selectedUser)) {
+        selectedUser = users[0] || "";
+      }
+
+      const options = users.map((user) => {
+        const stats = countFeedback(visibleSearches.filter((item) => item.user_id === user));
+        return {
+          value: user,
+          label: `${user} (${stats.searches} searches, ${stats.feedback} feedback)`,
+        };
+      });
+      setOptions(userSelect, options, selectedUser);
+    }
+
+    function renderQueryOptions() {
+      const byQuery = new Map();
+      currentSearchesForUser().forEach((item) => {
+        if (!byQuery.has(item.query)) byQuery.set(item.query, []);
+        byQuery.get(item.query).push(item);
+      });
+
+      const queries = Array.from(byQuery.keys()).sort((a, b) => {
+        const aFirst = Math.min(...byQuery.get(a).map((item) => Date.parse(item.created_at) || 0));
+        const bFirst = Math.min(...byQuery.get(b).map((item) => Date.parse(item.created_at) || 0));
+        return aFirst - bFirst || String(a).localeCompare(String(b));
+      });
+
+      if (!selectedQuery || !queries.includes(selectedQuery)) {
+        selectedQuery = queries[0] || "";
+      }
+
+      const options = queries.map((query) => {
+        const stats = countFeedback(byQuery.get(query));
+        return {
+          value: query,
+          label: `${query} (${stats.searches} searches, ${stats.feedback} feedback)`,
+        };
+      });
+      setOptions(querySelect, options, selectedQuery);
+    }
+
+    function renderSearchOptions() {
+      const items = currentSearchesForQuery().slice().sort((a, b) => {
+        return (Date.parse(a.created_at) || 0) - (Date.parse(b.created_at) || 0);
+      });
+
+      if (!items.some((item) => String(item.search_event_id) === selectedSearchId)) {
+        selectedSearchId = items.length ? String(items[0].search_event_id) : "";
+      }
+
+      const options = items.map((item) => {
+        const summary = item.feedback_summary || {};
+        return {
+          value: String(item.search_event_id),
+          label: `#${item.search_event_id} | ${formatDate(item.created_at)} | ${item.query_understanding_route || "-"} | ${summary.relevant || 0}/${summary.not_relevant || 0}`,
+        };
+      });
+      setOptions(searchSelect, options, selectedSearchId);
+    }
+
+    function updateUrl() {
+      const params = new URLSearchParams();
+      if (selectedUser) params.set("user_id", selectedUser);
+      if (selectedQuery) params.set("query", selectedQuery);
+      if (selectedSearchId) params.set("search_event_id", selectedSearchId);
+      if (!qualifiedOnly) params.set("qualified", "0");
+      const url = `${window.location.pathname}?${params.toString()}`;
+      window.history.replaceState(null, "", url);
+    }
+
+    function metric(label, value) {
+      return `<div class="metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`;
+    }
+
+    function numericScore(result) {
+      const raw = result && result.similarity_score;
+      if (raw === null || raw === undefined || raw === "") return null;
+      const value = Number(raw);
+      return Number.isFinite(value) ? value : null;
+    }
+
+    function formatScore(value) {
+      if (value === null || value === undefined || !Number.isFinite(Number(value))) return "-";
+      return Number(value).toFixed(4);
+    }
+
+    function computeSourceScoreRows(results) {
+      const groups = new Map();
+      (results || []).forEach((result) => {
+        const key = normalizeSourceKey(result.source_key || result.source);
+        if (!groups.has(key)) {
+          groups.set(key, {
+            source: key,
+            count: 0,
+            scored: 0,
+            min: null,
+            max: null,
+            sum: 0,
+            relevant: 0,
+            notRelevant: 0,
+          });
+        }
+        const group = groups.get(key);
+        group.count += 1;
+        if (result.latest_feedback === "relevant") group.relevant += 1;
+        if (result.latest_feedback === "not_relevant") group.notRelevant += 1;
+        const score = numericScore(result);
+        if (score === null) return;
+        group.scored += 1;
+        group.sum += score;
+        group.min = group.min === null ? score : Math.min(group.min, score);
+        group.max = group.max === null ? score : Math.max(group.max, score);
+      });
+      return Array.from(groups.values()).sort((a, b) => {
+        if (a.source === "langtaosha") return -1;
+        if (b.source === "langtaosha") return 1;
+        if (a.source === "biorxiv") return -1;
+        if (b.source === "biorxiv") return 1;
+        return a.source.localeCompare(b.source);
+      });
+    }
+
+    function renderSummary(search) {
+      if (!search) {
+        summaryEl.innerHTML = "";
+        return;
+      }
+      const summary = search.feedback_summary || {};
+      summaryEl.innerHTML = [
+        metric("User", search.user_id || "-"),
+        metric("Route", search.query_understanding_route || "-"),
+        metric("Results", `${search.snapshot_count || 0}/${search.result_count || 0}`),
+        metric("Feedback", `${summary.total || 0}`),
+        metric("Relevant / Not", `${summary.relevant || 0} / ${summary.not_relevant || 0}`),
+      ].join("");
+    }
+
+    function renderQueryCard(search) {
+      if (!search) {
+        queryCardEl.innerHTML = "<div class='empty'>No search selected</div>";
+        return;
+      }
+      queryCardEl.innerHTML = `
+        <h2 class="query-title">${escapeHtml(search.query || "-")}</h2>
+        <p class="meta"><strong>Search query:</strong> ${escapeHtml(search.search_query || "-")}</p>
+        <p class="meta"><strong>Search event:</strong> #${escapeHtml(search.search_event_id)} | <strong>Query index:</strong> ${escapeHtml(search.query_index || "-")} | <strong>Created:</strong> ${escapeHtml(formatDate(search.created_at))}</p>
+        ${renderSourceScoreSummary(search.results || [])}
+      `;
+    }
+
+    function renderSourceScoreSummary(results) {
+      const rows = computeSourceScoreRows(results);
+      if (!rows.length) return "";
+      return `
+        <table class="source-score-table">
+          <thead>
+            <tr>
+              <th>Source</th>
+              <th>Results</th>
+              <th>Score min</th>
+              <th>Score avg</th>
+              <th>Score max</th>
+              <th>Feedback +/-</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map((row) => {
+              const avg = row.scored ? row.sum / row.scored : null;
+              return `
+                <tr>
+                  <td>${escapeHtml(row.source)}</td>
+                  <td>${escapeHtml(row.count)}</td>
+                  <td>${escapeHtml(formatScore(row.min))}</td>
+                  <td>${escapeHtml(formatScore(avg))}</td>
+                  <td>${escapeHtml(formatScore(row.max))}</td>
+                  <td>${escapeHtml(row.relevant)} / ${escapeHtml(row.notRelevant)}</td>
+                </tr>
+              `;
+            }).join("")}
+          </tbody>
+        </table>
+      `;
+    }
+
+    function makeChip(label, value, activeValue, onClick) {
+      return `<button type="button" class="chip ${value === activeValue ? "active" : ""}" data-chip="${escapeHtml(value)}">${escapeHtml(label)}</button>`;
+    }
+
+    function sourceCounts(results) {
+      return results.reduce((acc, result) => {
+        const key = normalizeSourceKey(result.source_key || result.source);
+        acc[key] = (acc[key] || 0) + 1;
+        acc.all += 1;
+        return acc;
+      }, { all: 0 });
+    }
+
+    function renderControls(search) {
+      if (!search) {
+        controlsEl.innerHTML = "";
+        return;
+      }
+      const results = search.results || [];
+      const feedbackCounts = {
+        all: results.length,
+        feedback: results.filter((item) => item.latest_feedback).length,
+        not_relevant: results.filter((item) => item.latest_feedback === "not_relevant").length,
+        relevant: results.filter((item) => item.latest_feedback === "relevant").length,
+        unlabeled: results.filter((item) => !item.latest_feedback).length,
+      };
+      const sources = sourceCounts(results);
+
+      controlsEl.innerHTML = `
+        <div class="control-group">
+          <span class="control-title">Feedback</span>
+          <div class="chips" data-control="feedback">
+            ${makeChip(`All (${feedbackCounts.all})`, "all", feedbackFilter)}
+            ${makeChip(`Feedback (${feedbackCounts.feedback})`, "feedback", feedbackFilter)}
+            ${makeChip(`Not relevant (${feedbackCounts.not_relevant})`, "not_relevant", feedbackFilter)}
+            ${makeChip(`Relevant (${feedbackCounts.relevant})`, "relevant", feedbackFilter)}
+            ${makeChip(`Unlabeled (${feedbackCounts.unlabeled})`, "unlabeled", feedbackFilter)}
+          </div>
+        </div>
+        <div class="control-group">
+          <span class="control-title">Source</span>
+          <div class="chips" data-control="source">
+            ${makeChip(`All (${sources.all || 0})`, "all", sourceFilter)}
+            ${makeChip(`Langtaosha (${sources.langtaosha || 0})`, "langtaosha", sourceFilter)}
+            ${makeChip(`Biorxiv (${sources.biorxiv || 0})`, "biorxiv", sourceFilter)}
+          </div>
+        </div>
+      `;
+    }
+
+    function resultMatchesFilters(result) {
+      const sourceKey = normalizeSourceKey(result.source_key || result.source);
+      const sourceOk = sourceFilter === "all" || sourceKey === sourceFilter;
+      let feedbackOk = true;
+      if (feedbackFilter === "feedback") feedbackOk = Boolean(result.latest_feedback);
+      if (feedbackFilter === "not_relevant") feedbackOk = result.latest_feedback === "not_relevant";
+      if (feedbackFilter === "relevant") feedbackOk = result.latest_feedback === "relevant";
+      if (feedbackFilter === "unlabeled") feedbackOk = !result.latest_feedback;
+      return sourceOk && feedbackOk;
+    }
+
+    function renderRankStrip(search) {
+      const results = search ? (search.results || []) : [];
+      rankStripEl.innerHTML = results.map((result) => {
+        const cls = feedbackClass(result.latest_feedback);
+        return `<button type="button" class="rank-dot ${cls}" data-rank-target="${escapeHtml(result.rank)}">${escapeHtml(result.rank)}</button>`;
+      }).join("");
+    }
+
+    function renderHistory(history) {
+      const items = (history || []);
+      if (items.length <= 1) return "";
+      return `
+        <ol class="history">
+          ${items.map((item) => `<li>${escapeHtml(formatDate(item.created_at))}: ${escapeHtml(feedbackLabel(item.feedback))}${item.reason ? ` - ${escapeHtml(item.reason)}` : ""}</li>`).join("")}
+        </ol>
+      `;
+    }
+
+    function renderFeedback(result) {
+      const cls = feedbackClass(result.latest_feedback);
+      const reason = result.latest_reason ? `<p class="reason">${escapeHtml(result.latest_reason)}</p>` : "";
+      return `
+        <div class="feedback-box">
+          <span class="feedback-pill ${cls}">${escapeHtml(feedbackLabel(result.latest_feedback))}</span>
+          ${reason}
+          ${renderHistory(result.feedback_history)}
+        </div>
+      `;
+    }
+
+    function renderResult(result) {
+      const cls = result.latest_feedback === "relevant" ? "feedback-good" : (result.latest_feedback === "not_relevant" ? "feedback-bad" : "");
+      const link = result.link ? `<a href="${escapeHtml(result.link)}" target="_blank" rel="noopener noreferrer">${escapeHtml(result.link)}</a>` : "-";
+      const snapshotBadge = result.snapshot_missing ? " <span class=\"badge\">snapshot missing</span>" : "";
+      const score = formatScore(numericScore(result));
+      return `
+        <article class="paper ${cls}" id="result-rank-${escapeHtml(result.rank)}">
+          <div class="paper-head">
+            <span class="rank-badge">#${escapeHtml(result.rank)}</span>
+            <div>
+              <h2 class="title">${escapeHtml(result.title || "(无标题)")}${snapshotBadge}</h2>
+              <p class="meta"><strong>Authors:</strong> ${escapeHtml(result.authors || "未知作者")}</p>
+              <p class="meta"><strong>Source:</strong> ${escapeHtml(result.source || "-")} | <strong>Online Date:</strong> ${escapeHtml(result.online_date || "-")} | <strong>Relevance score:</strong> ${escapeHtml(score)}</p>
+              <p class="meta"><strong>DOI:</strong> ${escapeHtml(result.doi || "-")}</p>
+              <p class="meta"><strong>Link:</strong> ${link}</p>
+            </div>
+          </div>
+          <p class="meta"><strong>ABSTRACT</strong></p>
+          <p class="abstract">${escapeHtml(result.abstract || "(无摘要)")}</p>
+          ${renderFeedback(result)}
+        </article>
+      `;
+    }
+
+    function renderResults(search) {
+      if (!search) {
+        resultsEl.innerHTML = "<div class='empty'>No data</div>";
+        return;
+      }
+      const filtered = (search.results || []).filter(resultMatchesFilters);
+      if (!filtered.length) {
+        resultsEl.innerHTML = "<div class='empty'>No results for current filters</div>";
+        return;
+      }
+      resultsEl.innerHTML = filtered.map(renderResult).join("");
+    }
+
+    function renderAll() {
+      renderUserOptions();
+      renderQueryOptions();
+      renderSearchOptions();
+      const search = currentSearch();
+      renderSummary(search);
+      renderQueryCard(search);
+      renderControls(search);
+      renderRankStrip(search);
+      renderResults(search);
+      updateUrl();
+    }
+
+    async function loadData() {
+      summaryEl.innerHTML = metric("Loading", "...");
+      const resp = await fetch(DATA_URL, { credentials: "same-origin" });
+      const data = await resp.json();
+      if (!resp.ok || !data.success) {
+        throw new Error(data.error || "Failed to load feedback data");
+      }
+      searches = data.searches || [];
+
+      const params = new URLSearchParams(window.location.search);
+      selectedUser = params.get("user_id") || "";
+      selectedQuery = params.get("query") || "";
+      selectedSearchId = params.get("search_event_id") || "";
+      qualifiedOnly = params.get("qualified") !== "0";
+      qualifiedOnlyInput.checked = qualifiedOnly;
+      renderAll();
+    }
+
+    qualifiedOnlyInput.addEventListener("change", () => {
+      qualifiedOnly = qualifiedOnlyInput.checked;
+      selectedUser = "";
+      selectedQuery = "";
+      selectedSearchId = "";
+      feedbackFilter = "all";
+      sourceFilter = "all";
+      renderAll();
+    });
+
+    userSelect.addEventListener("change", () => {
+      selectedUser = userSelect.value;
+      selectedQuery = "";
+      selectedSearchId = "";
+      feedbackFilter = "all";
+      sourceFilter = "all";
+      renderAll();
+    });
+
+    querySelect.addEventListener("change", () => {
+      selectedQuery = querySelect.value;
+      selectedSearchId = "";
+      feedbackFilter = "all";
+      sourceFilter = "all";
+      renderAll();
+    });
+
+    searchSelect.addEventListener("change", () => {
+      selectedSearchId = searchSelect.value;
+      feedbackFilter = "all";
+      sourceFilter = "all";
+      renderAll();
+    });
+
+    controlsEl.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-chip]");
+      if (!button) return;
+      const group = button.closest("[data-control]");
+      if (!group) return;
+      if (group.dataset.control === "feedback") {
+        feedbackFilter = button.dataset.chip;
+      }
+      if (group.dataset.control === "source") {
+        sourceFilter = button.dataset.chip;
+      }
+      const search = currentSearch();
+      renderControls(search);
+      renderResults(search);
+    });
+
+    rankStripEl.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-rank-target]");
+      if (!button) return;
+      const target = document.getElementById(`result-rank-${button.dataset.rankTarget}`);
+      if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+
+    loadData().catch((err) => {
+      summaryEl.innerHTML = metric("Error", err.message);
+      queryCardEl.innerHTML = "";
+      controlsEl.innerHTML = "";
+      rankStripEl.innerHTML = "";
+      resultsEl.innerHTML = "";
+    });
+  </script>
+</body>
+</html>
