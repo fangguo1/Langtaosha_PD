@@ -28,6 +28,7 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.docset_hub.indexing import PaperIndexer
+from src.docset_hub.indexing.query_understanding import QueryUnderstandingResult
 from src.docset_hub.storage.vector_db import VectorDB
 from src.docset_hub.metadata.transformer import MetadataTransformer
 from src.config import (
@@ -37,6 +38,38 @@ from src.config import (
     load_config_from_yaml,
     get_db_engine,
 )
+
+
+class FakeSmartSearchUnderstanding:
+    def __init__(self, result):
+        self.result = result
+
+    def analyze(self, query):
+        return self.result
+
+
+class FakeSmartSearchMetadataDB:
+    def __init__(self):
+        self.author_queries = []
+
+    def search_by_author(self, author_name, limit=100, source_list=None, fuzzy=True):
+        self.author_queries.append(
+            {
+                "author_name": author_name,
+                "limit": limit,
+                "source_list": source_list,
+                "fuzzy": fuzzy,
+            }
+        )
+        return [{"paper_id": 1, "title": "Author paper"}]
+
+
+def _smart_search_indexer(understanding_result):
+    indexer = PaperIndexer.__new__(PaperIndexer)
+    indexer.default_sources = ["langtaosha", "biorxiv_history", "biorxiv_daily"]
+    indexer.metadata_db = FakeSmartSearchMetadataDB()
+    indexer.query_understanding = FakeSmartSearchUnderstanding(understanding_result)
+    return indexer
 
 # 配置 logging
 logging.basicConfig(
@@ -195,6 +228,170 @@ def indexer(config_path, clean_db):
 def transformer():
     """MetadataTransformer 实例（session 级别）"""
     return MetadataTransformer()
+
+
+# =============================================================================
+# Phase 4: smart_search 路由测试
+# =============================================================================
+
+class TestPaperIndexerSmartSearch:
+    """Test smart_search routing without external services."""
+
+    def test_smart_search_routes_author_query_to_metadata_db(self):
+        indexer = _smart_search_indexer(
+            QueryUnderstandingResult(
+                original_query="Alice Zhang",
+                normalized_query="Alice Zhang",
+                intent="author_name",
+                route="metadata_author",
+                matched_author="Alice Zhang",
+                confidence=1.0,
+                reason="author_candidate_exact_match",
+            )
+        )
+
+        result = indexer.smart_search("Alice Zhang", source_list=["langtaosha"], top_k=3)
+
+        assert result["success"] is True
+        assert result["search_query"] == "Alice Zhang"
+        assert result["query_understanding"]["route"] == "metadata_author"
+        assert result["results"] == [{"paper_id": 1, "title": "Author paper"}]
+        assert indexer.metadata_db.author_queries == [
+            {
+                "author_name": "Alice Zhang",
+                "limit": 3,
+                "source_list": ["langtaosha"],
+                "fuzzy": True,
+            }
+        ]
+
+    def test_smart_search_uses_corrected_query_for_vector_route(self, monkeypatch):
+        indexer = _smart_search_indexer(
+            QueryUnderstandingResult(
+                original_query="solvent formtion",
+                normalized_query="solvent formtion",
+                intent="semantic_search",
+                route="vector",
+                corrected_query="solvent formation",
+                confidence=0.95,
+                reason="query_term_high_confidence",
+            )
+        )
+        calls = []
+
+        def fake_search(query, source_list=None, top_k=10, hydrate=True):
+            calls.append(
+                {
+                    "query": query,
+                    "source_list": source_list,
+                    "top_k": top_k,
+                    "hydrate": hydrate,
+                }
+            )
+            return [{"paper_id": 2, "title": "Vector paper"}]
+
+        monkeypatch.setattr(indexer, "search", fake_search)
+
+        result = indexer.smart_search("solvent formtion", top_k=5, hydrate=False)
+
+        assert result["success"] is True
+        assert result["search_query"] == "solvent formation"
+        assert result["query_understanding"]["corrected_query"] == "solvent formation"
+        assert calls == [
+            {
+                "query": "solvent formation",
+                "source_list": ["langtaosha", "biorxiv_history", "biorxiv_daily"],
+                "top_k": 5,
+                "hydrate": False,
+            }
+        ]
+
+    def test_smart_search_returns_author_suggestion_without_vector_search(self, monkeypatch):
+        indexer = _smart_search_indexer(
+            QueryUnderstandingResult(
+                original_query="niang yan",
+                normalized_query="niang yan",
+                intent="author_name",
+                route="author_suggestion",
+                suggested_author="Nieng Yan",
+                confidence=0.8888888888888888,
+                candidates=[
+                    {
+                        "name": "Nieng Yan",
+                        "normalized_name": "nieng yan",
+                        "score": 0.8888888888888888,
+                        "paper_count": 4,
+                    }
+                ],
+                reason="author_candidate_middle_confidence",
+            )
+        )
+
+        def fail_search(*args, **kwargs):
+            raise AssertionError("author suggestions should not call vector search")
+
+        monkeypatch.setattr(indexer, "search", fail_search)
+
+        result = indexer.smart_search("niang yan", top_k=5)
+
+        assert result["success"] is True
+        assert result["search_query"] is None
+        assert result["results"] == []
+        assert result["query_understanding"]["route"] == "author_suggestion"
+        assert result["query_understanding"]["suggested_author"] == "Nieng Yan"
+        assert result["query_understanding"]["candidates"][0]["name"] == "Nieng Yan"
+        assert indexer.metadata_db.author_queries == []
+
+    def test_smart_search_returns_phrase_corrections_payload(self, monkeypatch):
+        indexer = _smart_search_indexer(
+            QueryUnderstandingResult(
+                original_query="solvent formtion for cancr cell therpy",
+                normalized_query="solvent formtion for cancr cell therpy",
+                intent="semantic_search",
+                route="vector",
+                corrected_query="solvent formation for cancer cell therapy",
+                confidence=0.94,
+                corrections=[
+                    {
+                        "original": "solvent formtion",
+                        "corrected": "solvent formation",
+                        "start": 0,
+                        "end": 16,
+                        "confidence": 0.96,
+                    }
+                ],
+                reason="phrase_query_terms_high_confidence",
+            )
+        )
+
+        def fake_search(query, source_list=None, top_k=10, hydrate=True):
+            return [{"paper_id": 2, "title": "Vector paper", "query": query}]
+
+        monkeypatch.setattr(indexer, "search", fake_search)
+
+        result = indexer.smart_search("solvent formtion for cancr cell therpy", top_k=5)
+
+        assert result["success"] is True
+        assert result["search_query"] == "solvent formation for cancer cell therapy"
+        assert result["query_understanding"]["corrections"][0]["corrected"] == "solvent formation"
+
+    def test_smart_search_returns_empty_result_for_invalid_query(self):
+        indexer = _smart_search_indexer(
+            QueryUnderstandingResult(
+                original_query="   ",
+                normalized_query="",
+                intent="invalid",
+                route="none",
+                reason="empty_query",
+            )
+        )
+
+        result = indexer.smart_search("   ")
+
+        assert result["success"] is False
+        assert result["search_query"] is None
+        assert result["results"] == []
+        assert result["query_understanding"]["intent"] == "invalid"
 
 
 # =============================================================================

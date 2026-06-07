@@ -24,6 +24,7 @@ from .vector_db_client import (
     VectorDBClientError,
     VectorDBServerError
 )
+from .sparse_encoder import BM25SparseEncoder
 
 
 @dataclass
@@ -42,6 +43,7 @@ class SearchResult:
     score: float
     text_type: str
     paper_id: Optional[str] = None
+    retrieval_debug: Optional[Dict[str, Any]] = None
 
 
 class VectorDB:
@@ -97,7 +99,17 @@ class VectorDB:
             'collection_prefix',
             self.DEFAULT_COLLECTION_PREFIX
         )
+        self.sparse_collection_prefix = self.config.get(
+            'sparse_collection_prefix',
+            f"{self.collection_prefix}bm25_"
+        )
         self.allowed_sources = self.config.get('allowed_sources', [])
+        self.sparse_config = self.config.get('sparse', {}) or {}
+        self.hybrid_config = self.config.get('hybrid', {}) or {}
+        self.sparse_bm25_language = self.sparse_config.get('bm25_language', 'en')
+        self.sparse_max_non_zero = int(self.sparse_config.get('max_non_zero', 1024))
+        self.sparse_terminate_after = self.sparse_config.get('terminate_after', 4000)
+        self.sparse_cutoff_frequency = self.sparse_config.get('cutoff_frequency', 0.1)
 
         # 验证配置
         self._validate_config()
@@ -109,6 +121,7 @@ class VectorDB:
             api_key=self.api_key
         )
         self._ensured_collections: set[str] = set()
+        self._sparse_encoder: Optional[BM25SparseEncoder] = None
 
         logging.info(f"✅ VectorDB 初始化成功 (database={self.database})")
 
@@ -160,6 +173,19 @@ class VectorDB:
             'lt_biorxiv_history'
         """
         return f"{self.collection_prefix}{source_name}"
+
+    def _get_sparse_collection_name(self, source_name: str) -> str:
+        """获取 source 对应的 BM25 sparse collection 名称。"""
+        return f"{self.sparse_collection_prefix}{source_name}"
+
+    def _get_sparse_encoder(self) -> BM25SparseEncoder:
+        """Lazy-load BM25 encoder so dense-only flows do not require tcvdb-text."""
+        if self._sparse_encoder is None:
+            self._sparse_encoder = BM25SparseEncoder(
+                language=self.sparse_bm25_language,
+                max_non_zero=self.sparse_max_non_zero,
+            )
+        return self._sparse_encoder
 
     def _validate_source(self, source_name: str) -> None:
         """验证 source 名称是否允许
@@ -334,6 +360,45 @@ class VectorDB:
             logging.error(f"❌ 创建 Collection 失败: {str(e)}")
             raise VectorDBError(f"创建 Collection 失败: {str(e)}")
 
+    def ensure_sparse_collection(self, source_name: str) -> bool:
+        """确保 source 对应的 BM25 sparse collection 存在。"""
+        self._validate_source(source_name)
+
+        try:
+            collection_name = self._get_sparse_collection_name(source_name)
+            if collection_name in self._ensured_collections:
+                return True
+
+            try:
+                collections = self.client.list_collections(self.database)
+                if collection_name in collections:
+                    logging.info(f"Sparse Collection 已存在: {collection_name}")
+                    self._ensured_collections.add(collection_name)
+                    return True
+            except Exception as e:
+                logging.warning(f"无法获取 collection 列表（将尝试创建 sparse collection）: {e}")
+
+            try:
+                self.client.create_sparse_collection(
+                    database=self.database,
+                    collection=collection_name,
+                    disk_swap_enabled=self.sparse_config.get("disk_swap_enabled")
+                )
+                logging.info(f"✅ Sparse Collection 创建成功: {collection_name}")
+            except (VectorDBClientError, VectorDBServerError) as e:
+                err = str(e).lower()
+                if 'already exist' in err or 'already exists' in err or '已存在' in str(e):
+                    logging.info(f"Sparse Collection 已存在: {collection_name}")
+                else:
+                    raise
+
+            self._ensured_collections.add(collection_name)
+            return True
+
+        except (VectorDBClientError, VectorDBServerError) as e:
+            logging.error(f"❌ 创建 Sparse Collection 失败: {str(e)}")
+            raise VectorDBError(f"创建 Sparse Collection 失败: {str(e)}")
+
     def get_collection_info(
         self,
         source_name: Optional[str] = None,
@@ -438,6 +503,7 @@ class VectorDB:
                 "database": self.database,
                 "database_exists": self.database in databases,
                 "collection_prefix": self.collection_prefix,
+                "sparse_collection_prefix": self.sparse_collection_prefix,
                 "allowed_sources": list(self.allowed_sources),
                 "embedding_source": self.embedding_source,
                 "embedding_model": self.embedding_model,
@@ -545,6 +611,122 @@ class VectorDB:
         except (VectorDBClientError, VectorDBServerError) as e:
             logging.error(f"❌ 添加文档失败: {str(e)}")
             raise VectorDBError(f"添加文档失败: {str(e)}")
+
+    def add_sparse_document(
+        self,
+        source_name: str,
+        work_id: str,
+        text: str,
+        text_type: str = "abstract",
+        paper_id: Optional[str] = None,
+        sparse_vector: Optional[List[List[float]]] = None,
+        skip_ensure_collection: bool = False
+    ) -> Dict[str, Any]:
+        """添加单篇文档到 BM25 sparse collection。"""
+        results = self.add_sparse_documents(
+            source_name=source_name,
+            documents=[
+                {
+                    "work_id": work_id,
+                    "text": text,
+                    "text_type": text_type,
+                    "paper_id": paper_id,
+                    "sparse_vector": sparse_vector,
+                }
+            ],
+            skip_ensure_collection=skip_ensure_collection,
+        )
+        return {
+            "success": results.get("success", False),
+            "action": "upserted",
+            "doc_id": work_id,
+            "affected_count": results.get("affected_count", 0),
+        }
+
+    def add_sparse_documents(
+        self,
+        source_name: str,
+        documents: List[Dict[str, Any]],
+        skip_ensure_collection: bool = False
+    ) -> Dict[str, Any]:
+        """批量添加文档到 BM25 sparse collection。
+
+        Each document must include `work_id` and either `text` or a precomputed
+        `sparse_vector`. The sparse collection stores only retrieval fields, not
+        the full index text.
+        """
+        self._validate_source(source_name)
+        if not skip_ensure_collection:
+            self.ensure_sparse_collection(source_name)
+
+        if not documents:
+            return {
+                "success": True,
+                "action": "upserted",
+                "affected_count": 0,
+                "document_count": 0,
+            }
+
+        try:
+            collection_name = self._get_sparse_collection_name(source_name)
+            texts_to_encode: List[str] = []
+            text_positions: List[int] = []
+            sparse_vectors: List[Optional[List[List[float]]]] = []
+
+            for index, document in enumerate(documents):
+                provided_vector = document.get("sparse_vector")
+                if provided_vector is not None:
+                    sparse_vectors.append(provided_vector)
+                    continue
+
+                sparse_vectors.append(None)
+                texts_to_encode.append(document.get("text", ""))
+                text_positions.append(index)
+
+            if texts_to_encode:
+                encoded_vectors = self._get_sparse_encoder().encode_documents(texts_to_encode)
+                for position, sparse_vector in zip(text_positions, encoded_vectors):
+                    sparse_vectors[position] = sparse_vector
+
+            upsert_documents = []
+            for document, sparse_vector in zip(documents, sparse_vectors):
+                work_id = document.get("work_id")
+                if not work_id:
+                    raise ValueError("BM25 sparse document 缺少 work_id")
+
+                upsert_document = {
+                    "id": str(work_id),
+                    "sparse_vector": sparse_vector or [],
+                    "work_id": str(work_id),
+                    "source_name": source_name,
+                    "text_type": document.get("text_type") or "abstract",
+                }
+                paper_id = document.get("paper_id")
+                if paper_id is not None:
+                    upsert_document["paper_id"] = str(paper_id)
+                upsert_documents.append(upsert_document)
+
+            result = self.client.upsert_documents(
+                database=self.database,
+                collection=collection_name,
+                documents=upsert_documents,
+                build_index=True
+            )
+            affected_count = result.get('affectedCount', result.get('insertCount', 0))
+            logging.info(
+                f"✅ Sparse 文档 upsert 成功: source={source_name}, "
+                f"count={len(upsert_documents)}, affected_count={affected_count}"
+            )
+            return {
+                "success": True,
+                "action": "upserted",
+                "affected_count": affected_count,
+                "document_count": len(upsert_documents),
+            }
+
+        except (VectorDBClientError, VectorDBServerError) as e:
+            logging.error(f"❌ 添加 Sparse 文档失败: {str(e)}")
+            raise VectorDBError(f"添加 Sparse 文档失败: {str(e)}")
 
     def delete_document(
         self,
@@ -744,10 +926,144 @@ class VectorDB:
             ...     top_k=10
             ... )
         """
-        raise NotImplementedError(
-            "稀疏向量搜索 (BM25) 功能计划在后续版本实现。"
-            "请使用 dense_search() 进行语义搜索。"
+        if source_list is None:
+            source_list = self.allowed_sources
+
+        for source_name in source_list:
+            self._validate_source(source_name)
+
+        query_sparse_vector = self._get_sparse_encoder().encode_query(query)
+        if not query_sparse_vector:
+            return []
+
+        try:
+            all_results = []
+            collections = self.client.list_collections(self.database)
+
+            for source_name in source_list:
+                collection_name = self._get_sparse_collection_name(source_name)
+                if collection_name not in collections:
+                    logging.warning(f"Sparse Collection 不存在，跳过: {collection_name}")
+                    continue
+
+                result = self.client.fulltext_search_documents(
+                    database=self.database,
+                    collection=collection_name,
+                    sparse_vector=query_sparse_vector,
+                    limit=top_k,
+                    output_fields=["work_id", "paper_id", "source_name", "text_type"],
+                    terminate_after=self.sparse_terminate_after,
+                    cutoff_frequency=self.sparse_cutoff_frequency,
+                )
+
+                documents = result.get('_extracted_documents', [])
+                for doc in documents:
+                    all_results.append(
+                        SearchResult(
+                            source_name=doc.get('source_name', source_name),
+                            work_id=doc.get('work_id', doc.get('id', '')),
+                            score=doc.get('score', 0.0),
+                            text_type=doc.get('text_type', ''),
+                            paper_id=doc.get('paper_id')
+                        )
+                    )
+
+            all_results.sort(key=lambda x: x.score, reverse=True)
+            return all_results[:top_k]
+
+        except (VectorDBClientError, VectorDBServerError) as e:
+            logging.error(f"❌ BM25 稀疏搜索失败: {str(e)}")
+            raise VectorDBError(f"BM25 稀疏搜索失败: {str(e)}")
+
+    def hybrid_search(
+        self,
+        query: str,
+        source_list: Optional[List[str]] = None,
+        top_k: int = 10
+    ) -> List[SearchResult]:
+        """Langtaosha-side hybrid search using dense + BM25 RRF merge."""
+        candidate_multiplier = int(self.hybrid_config.get("candidate_multiplier", 5))
+        min_candidate_k = int(self.hybrid_config.get("min_candidate_k", 50))
+        candidate_k = max(top_k * candidate_multiplier, min_candidate_k)
+
+        dense_results = self.dense_search(
+            query=query,
+            source_list=source_list,
+            top_k=candidate_k,
         )
+        sparse_results = self.sparse_search(
+            query=query,
+            source_list=source_list,
+            top_k=candidate_k,
+        )
+
+        return self._rrf_merge_results(
+            dense_results=dense_results,
+            sparse_results=sparse_results,
+            top_k=top_k,
+            rrf_k=float(self.hybrid_config.get("rrf_k", 60)),
+            dense_weight=float(self.hybrid_config.get("dense_weight", 1.0)),
+            sparse_weight=float(self.hybrid_config.get("sparse_weight", 1.0)),
+        )
+
+    @staticmethod
+    def _rrf_merge_results(
+        dense_results: List[SearchResult],
+        sparse_results: List[SearchResult],
+        top_k: int,
+        rrf_k: float = 60.0,
+        dense_weight: float = 1.0,
+        sparse_weight: float = 1.0,
+    ) -> List[SearchResult]:
+        """Merge dense and sparse ranked lists with Reciprocal Rank Fusion."""
+        merged: Dict[str, Dict[str, Any]] = {}
+
+        def add_results(results: List[SearchResult], retriever: str, weight: float) -> None:
+            for rank, result in enumerate(results, start=1):
+                key = result.work_id or f"{retriever}:{rank}"
+                entry = merged.setdefault(
+                    key,
+                    {
+                        "result": result,
+                        "rrf_score": 0.0,
+                        "retrieval_debug": {"matched_retrievers": []},
+                    },
+                )
+
+                entry["rrf_score"] += weight / (rrf_k + rank)
+                debug = entry["retrieval_debug"]
+                debug[f"{retriever}_rank"] = rank
+                debug[f"{retriever}_score"] = result.score
+                if retriever not in debug["matched_retrievers"]:
+                    debug["matched_retrievers"].append(retriever)
+
+                existing = entry["result"]
+                if not existing.paper_id and result.paper_id:
+                    existing.paper_id = result.paper_id
+                if not existing.text_type and result.text_type:
+                    existing.text_type = result.text_type
+                if not existing.source_name and result.source_name:
+                    existing.source_name = result.source_name
+
+        add_results(dense_results, "dense", dense_weight)
+        add_results(sparse_results, "sparse", sparse_weight)
+
+        fused_results = []
+        for entry in merged.values():
+            result = entry["result"]
+            fused_results.append(
+                SearchResult(
+                    source_name=result.source_name,
+                    work_id=result.work_id,
+                    score=entry["rrf_score"],
+                    text_type=result.text_type,
+                    paper_id=result.paper_id,
+                    retrieval_debug=entry["retrieval_debug"],
+                )
+            )
+
+        fused_results.sort(key=lambda x: x.score, reverse=True)
+        return fused_results[:top_k]
 
     def search(
         self,
@@ -796,12 +1112,9 @@ class VectorDB:
         elif search_type == "sparse":
             return self.sparse_search(query, source_list, top_k)
         elif search_type == "hybrid":
-            raise NotImplementedError(
-                "混合搜索功能计划在后续版本实现。"
-                "请使用 search_type='dense' 进行语义搜索。"
-            )
+            return self.hybrid_search(query, source_list, top_k)
         else:
             raise ValueError(
                 f"不支持的 search_type: '{search_type}'。"
-                f"支持的类型: 'dense', 'sparse' (暂未实现), 'hybrid' (暂未实现)"
+                f"支持的类型: 'dense', 'sparse', 'hybrid'"
             )

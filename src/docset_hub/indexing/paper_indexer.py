@@ -44,15 +44,42 @@
 """
 
 import logging
+import math
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Union
+from typing import Dict, Any, List, Mapping, Optional, Sequence, Union
 
 from config import init_config, get_default_sources
 from ..metadata.transformer import MetadataTransformer, TransformResult
 from ..storage.metadata_db import MetadataDB
 from ..storage.vector_db import VectorDB, SearchResult
+from .dense_result_filter import (
+    DENSE_DEFAULT_MIN_SIMILARITY,
+    filter_dense_results_by_hard_rules,
+)
 from .keyword_enrichment import KeywordEnrichmentService
+from .paper_keyword_lookup import (
+    PaperKeywordLookupResult,
+    match_paper_keywords_with_lookup_plan,
+)
+from .query_phrase_analyzer import (
+    AtomicPhraseExtractor,
+    MetadataDBPhraseLexicon,
+    QueryPhraseNormalizer,
+)
+from .span_matcher import (
+    KeywordSurfaceSpanMatcher,
+    MaximalConceptSelector,
+    SpanMatcherExecutor,
+)
 from .query_understanding import QueryUnderstandingService
+
+
+DEFAULT_HYBRID_RETRIEVAL_WEIGHTS = {
+    "dense": 0.4,
+    "sparse": 0.4,
+    "keyword_lookup": 0.2,
+}
 
 
 class PaperIndexer:
@@ -141,6 +168,7 @@ class PaperIndexer:
                 - mode (str): 操作模式
                 - metadata (Dict): metadata 操作结果
                 - vectorization (Dict): 向量化操作结果
+                - sparse_vectorization (Dict): BM25 稀疏向量化操作结果
 
         Raises:
             ValueError: 参数错误或 source 解析失败
@@ -187,6 +215,12 @@ class PaperIndexer:
                 db_result=db_result
             )
 
+            sparse_vector_result = self._handle_insert_sparse_vectorization(
+                resolved_source_name=resolved_source_name,
+                db_payload=transform_result.db_payload,
+                db_result=db_result
+            )
+
             keyword_enrichment_result = self._handle_keyword_enrichment(
                 db_payload=transform_result.db_payload,
                 db_result=db_result
@@ -201,6 +235,7 @@ class PaperIndexer:
                 "mode": effective_mode,
                 "metadata": db_result,
                 "vectorization": vector_result,
+                "sparse_vectorization": sparse_vector_result,
                 "keyword_enrichment": keyword_enrichment_result
             }
 
@@ -271,6 +306,12 @@ class PaperIndexer:
                 db_result=db_result
             )
 
+            sparse_vector_result = self._handle_insert_sparse_vectorization(
+                resolved_source_name=resolved_source_name,
+                db_payload=transform_result.db_payload,
+                db_result=db_result
+            )
+
             keyword_enrichment_result = self._handle_keyword_enrichment(
                 db_payload=transform_result.db_payload,
                 db_result=db_result
@@ -285,6 +326,7 @@ class PaperIndexer:
                 "mode": effective_mode,
                 "metadata": db_result,
                 "vectorization": vector_result,
+                "sparse_vectorization": sparse_vector_result,
                 "keyword_enrichment": keyword_enrichment_result
             }
 
@@ -302,7 +344,8 @@ class PaperIndexer:
         query: str,
         source_list: Optional[List[str]] = None,
         top_k: int = 10,
-        hydrate: bool = True
+        hydrate: bool = True,
+        search_type: str = "dense"
     ) -> List[Dict[str, Any]]:
         """搜索论文
 
@@ -311,6 +354,7 @@ class PaperIndexer:
             source_list: 来源列表（如果不提供则使用 default_sources）
             top_k: 返回结果数量
             hydrate: 是否补全完整 metadata（默认 True）
+            search_type: 检索类型，支持 dense / sparse / hybrid / hybrid_retrieval
 
         Returns:
             List[Dict[str, Any]]: 搜索结果列表，每个结果包含:
@@ -331,12 +375,20 @@ class PaperIndexer:
             # 1. 解析 source_list
             resolved_source_list = self._resolve_source_list(source_list)
 
+            if search_type == "hybrid_retrieval":
+                return self.hybrid_retrieval_search(
+                    query=query,
+                    source_list=resolved_source_list,
+                    top_k=top_k,
+                    hydrate=hydrate,
+                )
+
             # 2. 执行向量搜索
             search_results = self.vector_db.search(
                 query=query,
                 source_list=resolved_source_list,
                 top_k=top_k,
-                search_type="dense"
+                search_type=search_type
             )
 
             # 3. 可选：补全 metadata
@@ -350,7 +402,8 @@ class PaperIndexer:
                         "paper_id": result.paper_id,
                         "source_name": result.source_name,
                         "similarity": result.score,
-                        "text_type": result.text_type
+                        "text_type": result.text_type,
+                        "retrieval_debug": result.retrieval_debug,
                     }
                     for result in search_results
                 ]
@@ -358,6 +411,115 @@ class PaperIndexer:
         except Exception as e:
             logging.error(f"search 失败: {str(e)}", exc_info=True)
             raise e
+
+    def hybrid_retrieval_search(
+        self,
+        query: str,
+        source_list: Optional[List[str]] = None,
+        top_k: int = 10,
+        hydrate: bool = True,
+        retrieval_weights: Optional[Dict[str, float]] = None,
+        candidate_multiplier: Optional[int] = None,
+        min_candidate_k: Optional[int] = None,
+        rrf_k: Optional[float] = None,
+        include_keyword_lookup: bool = True,
+        keyword_sources: Optional[List[str]] = None,
+        dense_min_similarity: Optional[float] = None,
+    ) -> List[Dict[str, Any]]:
+        """Run dense, BM25 sparse, and keyword lookup recall, then weighted RRF.
+
+        This is the Step 3 candidate-pool builder. Dense results are first
+        passed through ``dense_result_filter``. Sparse and keyword lookup
+        candidates must carry positive branch evidence before they enter RRF.
+        """
+        if not self.vector_db:
+            raise ValueError("向量数据库未启用，无法执行三路混合检索")
+
+        resolved_source_list = self._resolve_source_list(source_list)
+        top_k = max(1, int(top_k))
+
+        hybrid_config = getattr(self.vector_db, "hybrid_config", {}) or {}
+        effective_candidate_multiplier = int(
+            candidate_multiplier
+            if candidate_multiplier is not None
+            else hybrid_config.get("candidate_multiplier", 5)
+        )
+        effective_min_candidate_k = int(
+            min_candidate_k
+            if min_candidate_k is not None
+            else hybrid_config.get("min_candidate_k", 50)
+        )
+        candidate_k = max(top_k * effective_candidate_multiplier, effective_min_candidate_k)
+        effective_rrf_k = float(rrf_k if rrf_k is not None else hybrid_config.get("rrf_k", 60))
+        effective_weights = self._resolve_hybrid_retrieval_weights(retrieval_weights)
+        effective_dense_min_similarity = float(
+            dense_min_similarity
+            if dense_min_similarity is not None
+            else hybrid_config.get("dense_min_similarity", DENSE_DEFAULT_MIN_SIMILARITY)
+        )
+
+        branch_results: Dict[str, List[Dict[str, Any]]] = {}
+        branch_failures: Dict[str, str] = {}
+        futures = {}
+
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            futures[
+                executor.submit(
+                    self._run_dense_retrieval_branch,
+                    query=query,
+                    source_list=resolved_source_list,
+                    top_k=candidate_k,
+                    keyword_sources=keyword_sources,
+                    min_similarity=effective_dense_min_similarity,
+                )
+            ] = "dense"
+            futures[
+                executor.submit(
+                    self._run_sparse_retrieval_branch,
+                    query=query,
+                    source_list=resolved_source_list,
+                    top_k=candidate_k,
+                )
+            ] = "sparse"
+            if include_keyword_lookup:
+                futures[
+                    executor.submit(
+                        self._run_keyword_lookup_retrieval_branch,
+                        query=query,
+                        source_list=resolved_source_list,
+                        top_k=candidate_k,
+                        keyword_sources=keyword_sources,
+                    )
+                ] = "keyword_lookup"
+
+            for future in as_completed(futures):
+                branch_name = futures[future]
+                try:
+                    branch_results[branch_name] = future.result()
+                except Exception as exc:
+                    branch_failures[branch_name] = str(exc)
+                    logging.warning(
+                        "三路混合检索 branch 失败: branch=%s, error=%s",
+                        branch_name,
+                        exc,
+                        exc_info=True,
+                    )
+
+        requested_branch_count = len(futures)
+        if branch_failures and len(branch_failures) == requested_branch_count:
+            raise RuntimeError(f"三路混合检索全部 branch 失败: {branch_failures}")
+
+        merged_results = self._weighted_rrf_merge_retrieval_branches(
+            branch_results=branch_results,
+            top_k=top_k,
+            weights=effective_weights,
+            rrf_k=effective_rrf_k,
+            branch_failures=branch_failures,
+        )
+
+        if hydrate:
+            return self._hydrate_search_results(merged_results)
+        return self._search_results_to_lightweight_dicts(merged_results)
 
     def smart_search(
         self,
@@ -410,19 +572,393 @@ class PaperIndexer:
             }
 
         search_query = understanding.corrected_query or understanding.normalized_query
-        results = self.search(
-            query=search_query,
-            source_list=resolved_source_list,
-            top_k=top_k,
-            hydrate=hydrate,
-        )
+        expansion = understanding_payload.get("expansion") or {}
+        expanded_queries = expansion.get("expanded_queries") if expansion.get("status") == "ok" else []
+        queries = [search_query] + [q for q in (expanded_queries or []) if q and q != search_query]
+        result_batches = []
+        for candidate_query in queries:
+            result_batches.append(
+                (
+                    candidate_query,
+                    self.search(
+                        query=candidate_query,
+                        source_list=resolved_source_list,
+                        top_k=top_k,
+                        hydrate=hydrate,
+                    ),
+                )
+            )
+        results = self._merge_search_result_batches(result_batches, top_k=top_k)
         return {
             "success": True,
             "query": query,
             "search_query": search_query,
+            "expanded_search_queries": queries[1:],
             "query_understanding": understanding_payload,
             "results": results,
         }
+
+    @staticmethod
+    def _merge_search_result_batches(
+        result_batches: List[tuple[str, List[Dict[str, Any]]]],
+        top_k: int,
+    ) -> List[Dict[str, Any]]:
+        """Merge search results from original and expanded queries."""
+        merged: Dict[str, Dict[str, Any]] = {}
+        order = 0
+        for query, results in result_batches:
+            for result in results:
+                order += 1
+                key = str(result.get("work_id") or result.get("paper_id") or order)
+                score = result.get("similarity")
+                existing = merged.get(key)
+                if existing is None or (score is not None and score > existing.get("similarity", -1)):
+                    item = dict(result)
+                    item["matched_query"] = query
+                    item["_merge_order"] = order
+                    merged[key] = item
+        values = list(merged.values())
+        values.sort(key=lambda item: (item.get("similarity") is not None, item.get("similarity", -1)), reverse=True)
+        for item in values:
+            item.pop("_merge_order", None)
+        return values[:top_k]
+
+    def _run_dense_retrieval_branch(
+        self,
+        query: str,
+        source_list: List[str],
+        top_k: int,
+        keyword_sources: Optional[Sequence[str]] = None,
+        min_similarity: float = DENSE_DEFAULT_MIN_SIMILARITY,
+    ) -> List[Dict[str, Any]]:
+        """Run dense search and apply the DB-backed hard filter."""
+        dense_results = self.vector_db.dense_search(
+            query=query,
+            source_list=source_list,
+            top_k=top_k,
+        )
+        dense_payloads = [
+            self._search_result_to_filter_payload(result)
+            for result in dense_results
+        ]
+        filtered_payloads, report = filter_dense_results_by_hard_rules(
+            metadata_db=self.metadata_db,
+            query=query,
+            results=dense_payloads,
+            min_similarity=min_similarity,
+            keyword_sources=keyword_sources,
+        )
+        return self._adapt_dense_payloads_to_branch_results(filtered_payloads, report.to_dict())
+
+    def _run_sparse_retrieval_branch(
+        self,
+        query: str,
+        source_list: List[str],
+        top_k: int,
+    ) -> List[Dict[str, Any]]:
+        """Run BM25 sparse search and keep only positive-evidence results."""
+        sparse_results = self.vector_db.sparse_search(
+            query=query,
+            source_list=source_list,
+            top_k=top_k,
+        )
+        return self._adapt_search_results_to_branch_results(
+            sparse_results,
+            retriever="sparse",
+            drop_non_positive=True,
+        )
+
+    def _run_keyword_lookup_retrieval_branch(
+        self,
+        query: str,
+        source_list: List[str],
+        top_k: int,
+        keyword_sources: Optional[Sequence[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Run DB-backed keyword lookup recall from query span matches."""
+        normalizer = QueryPhraseNormalizer()
+        normalized = normalizer.normalize_query(query)
+        if not normalized.normalized_query:
+            return []
+
+        lexicon = MetadataDBPhraseLexicon(
+            metadata_db=self.metadata_db,
+            paper_source_names=source_list,
+            keyword_sources=keyword_sources,
+            normalizer=normalizer,
+        )
+        extractor = AtomicPhraseExtractor(normalizer=normalizer)
+        candidates = extractor.extract(normalized.normalized_query)
+        if not candidates:
+            return []
+
+        matcher = KeywordSurfaceSpanMatcher(lexicon=lexicon, normalizer=normalizer)
+        executor = SpanMatcherExecutor(matcher=matcher)
+        span_results = executor.match_candidates(candidates)
+        selected_concepts = MaximalConceptSelector(normalizer=normalizer).select(span_results)
+        if not selected_concepts:
+            return []
+
+        lookup_results = match_paper_keywords_with_lookup_plan(
+            metadata_db=self.metadata_db,
+            selected_concepts=selected_concepts,
+            span_results=span_results,
+            source_list=source_list,
+            keyword_sources=keyword_sources,
+            top_k=top_k,
+            include_sub_concepts=True,
+            include_substring_candidates=True,
+        )
+        return self._adapt_keyword_lookup_results_to_branch_results(lookup_results)
+
+    @staticmethod
+    def _resolve_hybrid_retrieval_weights(
+        retrieval_weights: Optional[Mapping[str, float]] = None,
+    ) -> Dict[str, float]:
+        """Return non-negative branch weights for weighted RRF."""
+        weights = dict(DEFAULT_HYBRID_RETRIEVAL_WEIGHTS)
+        for key, value in (retrieval_weights or {}).items():
+            if key not in weights:
+                continue
+            try:
+                weights[key] = max(0.0, float(value))
+            except (TypeError, ValueError):
+                continue
+        if not any(value > 0 for value in weights.values()):
+            return dict(DEFAULT_HYBRID_RETRIEVAL_WEIGHTS)
+        return weights
+
+    @staticmethod
+    def _search_result_to_filter_payload(result: SearchResult) -> Dict[str, Any]:
+        """Convert a dense SearchResult into dense_result_filter input."""
+        return {
+            "work_id": result.work_id,
+            "paper_id": result.paper_id,
+            "source_name": result.source_name,
+            "similarity": result.score,
+            "similarity_score": result.score,
+            "text_type": result.text_type,
+            "retrieval_debug": dict(result.retrieval_debug or {}),
+        }
+
+    def _adapt_dense_payloads_to_branch_results(
+        self,
+        dense_payloads: Sequence[Mapping[str, Any]],
+        filter_report: Optional[Mapping[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Convert filtered dense payloads into RRF branch results."""
+        branch_results = []
+        rank = 0
+        for item in dense_payloads:
+            raw_score = self._safe_float(item.get("similarity_score", item.get("similarity")))
+            if not math.isfinite(raw_score):
+                continue
+            rank += 1
+            retrieval_debug = dict(item.get("retrieval_debug") or {})
+            if filter_report is not None:
+                retrieval_debug.setdefault("dense_hard_filter_report", dict(filter_report))
+            branch_results.append(
+                {
+                    "work_id": str(item.get("work_id") or ""),
+                    "paper_id": item.get("paper_id"),
+                    "source_name": str(item.get("source_name") or ""),
+                    "text_type": str(item.get("text_type") or ""),
+                    "raw_score": raw_score,
+                    "retriever": "dense",
+                    "rank": rank,
+                    "payload": dict(item),
+                    "retrieval_debug": retrieval_debug,
+                }
+            )
+        return branch_results
+
+    def _adapt_search_results_to_branch_results(
+        self,
+        search_results: Sequence[SearchResult],
+        retriever: str,
+        drop_non_positive: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """Convert VectorDB SearchResult objects into RRF branch results."""
+        branch_results = []
+        rank = 0
+        for result in search_results:
+            raw_score = self._safe_float(result.score)
+            if not math.isfinite(raw_score):
+                continue
+            if drop_non_positive and raw_score <= 0:
+                continue
+            rank += 1
+            branch_results.append(
+                {
+                    "work_id": result.work_id,
+                    "paper_id": result.paper_id,
+                    "source_name": result.source_name,
+                    "text_type": result.text_type,
+                    "raw_score": raw_score,
+                    "retriever": retriever,
+                    "rank": rank,
+                    "payload": result,
+                    "retrieval_debug": dict(result.retrieval_debug or {}),
+                }
+            )
+        return branch_results
+
+    def _adapt_keyword_lookup_results_to_branch_results(
+        self,
+        lookup_results: Sequence[PaperKeywordLookupResult],
+    ) -> List[Dict[str, Any]]:
+        """Convert keyword lookup results into positive-evidence branch results."""
+        branch_results = []
+        rank = 0
+        for result in lookup_results:
+            raw_score = self._safe_float(result.keyword_lookup_score)
+            if not math.isfinite(raw_score) or raw_score <= 0:
+                continue
+            rank += 1
+            payload = result.to_dict()
+            retrieval_debug = dict(result.retrieval_debug or {})
+            retrieval_debug.setdefault("matched_concepts", result.matched_concepts)
+            retrieval_debug.setdefault("matched_concept_count", result.matched_concept_count)
+            retrieval_debug.setdefault("total_concept_count", result.total_concept_count)
+            branch_results.append(
+                {
+                    "work_id": result.work_id,
+                    "paper_id": result.paper_id,
+                    "source_name": "",
+                    "text_type": "",
+                    "raw_score": raw_score,
+                    "retriever": "keyword_lookup",
+                    "rank": rank,
+                    "payload": payload,
+                    "retrieval_debug": retrieval_debug,
+                }
+            )
+        return branch_results
+
+    def _weighted_rrf_merge_retrieval_branches(
+        self,
+        branch_results: Mapping[str, Sequence[Mapping[str, Any]]],
+        top_k: int,
+        weights: Mapping[str, float],
+        rrf_k: float,
+        branch_failures: Optional[Mapping[str, str]] = None,
+    ) -> List[SearchResult]:
+        """Merge multiple retrieval branch ranked lists with weighted RRF."""
+        merged: Dict[str, Dict[str, Any]] = {}
+        branch_failures = dict(branch_failures or {})
+        rrf_k = float(rrf_k)
+
+        for retriever, results in branch_results.items():
+            branch_weight = max(0.0, self._safe_float(weights.get(retriever, 0.0)))
+            if branch_weight <= 0:
+                continue
+            for fallback_rank, branch_result in enumerate(results, start=1):
+                rank = int(branch_result.get("rank") or fallback_rank)
+                if rank <= 0:
+                    continue
+                work_id = str(branch_result.get("work_id") or "")
+                paper_id = branch_result.get("paper_id")
+                key = self._retrieval_dedupe_key(work_id=work_id, paper_id=paper_id, retriever=retriever, rank=rank)
+                entry = merged.setdefault(
+                    key,
+                    {
+                        "work_id": work_id,
+                        "paper_id": paper_id,
+                        "source_name": str(branch_result.get("source_name") or ""),
+                        "text_type": str(branch_result.get("text_type") or ""),
+                        "rrf_score": 0.0,
+                        "retrieval_debug": {
+                            "matched_retrievers": [],
+                            "rrf_k": rrf_k,
+                            "retrieval_weights": dict(weights),
+                        },
+                    },
+                )
+                entry["rrf_score"] += branch_weight / (rrf_k + rank)
+
+                if not entry.get("work_id") and work_id:
+                    entry["work_id"] = work_id
+                if not entry.get("paper_id") and paper_id:
+                    entry["paper_id"] = paper_id
+                if not entry.get("source_name") and branch_result.get("source_name"):
+                    entry["source_name"] = str(branch_result.get("source_name") or "")
+                if not entry.get("text_type") and branch_result.get("text_type"):
+                    entry["text_type"] = str(branch_result.get("text_type") or "")
+
+                debug = entry["retrieval_debug"]
+                matched_retrievers = debug["matched_retrievers"]
+                if retriever not in matched_retrievers:
+                    matched_retrievers.append(retriever)
+                raw_score = self._safe_float(branch_result.get("raw_score"))
+                debug[f"{retriever}_rank"] = rank
+                debug[f"{retriever}_score"] = raw_score
+                branch_debug = dict(branch_result.get("retrieval_debug") or {})
+                if branch_debug:
+                    debug[f"{retriever}_debug"] = branch_debug
+                payload = branch_result.get("payload")
+                if retriever == "keyword_lookup" and isinstance(payload, Mapping):
+                    debug["keyword_lookup_matched_concepts"] = list(payload.get("matched_concepts") or [])
+
+        fused_results = []
+        for entry in merged.values():
+            debug = entry["retrieval_debug"]
+            if branch_failures:
+                debug["branch_failures"] = branch_failures
+            fused_results.append(
+                SearchResult(
+                    source_name=str(entry.get("source_name") or ""),
+                    work_id=str(entry.get("work_id") or ""),
+                    score=float(entry.get("rrf_score") or 0.0),
+                    text_type=str(entry.get("text_type") or ""),
+                    paper_id=entry.get("paper_id"),
+                    retrieval_debug=debug,
+                )
+            )
+
+        fused_results.sort(
+            key=lambda result: (
+                result.score,
+                len((result.retrieval_debug or {}).get("matched_retrievers", [])),
+                result.work_id,
+            ),
+            reverse=True,
+        )
+        return fused_results[: max(1, int(top_k))]
+
+    @staticmethod
+    def _retrieval_dedupe_key(
+        work_id: str,
+        paper_id: Any,
+        retriever: str,
+        rank: int,
+    ) -> str:
+        if work_id:
+            return f"work:{work_id}"
+        if paper_id not in (None, ""):
+            return f"paper:{paper_id}"
+        return f"{retriever}:{rank}"
+
+    @staticmethod
+    def _safe_float(value: Any) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return float("nan")
+
+    @staticmethod
+    def _search_results_to_lightweight_dicts(search_results: Sequence[SearchResult]) -> List[Dict[str, Any]]:
+        """Serialize SearchResult objects without metadata hydration."""
+        return [
+            {
+                "work_id": result.work_id,
+                "paper_id": result.paper_id,
+                "source_name": result.source_name,
+                "similarity": result.score,
+                "text_type": result.text_type,
+                "retrieval_debug": result.retrieval_debug,
+            }
+            for result in search_results
+        ]
 
     def delete(
         self,
@@ -650,31 +1186,21 @@ class PaperIndexer:
                 "message": "向量化未启用"
             }
 
-        status_code = db_result.get("status_code")
-        canonical_changed = bool(db_result.get("canonical_changed", False))
-        canonical_source_name = db_result.get("canonical_source_name")
-        is_canonical_source = canonical_source_name == resolved_source_name
+        decision = self._get_insert_vectorization_decision(
+            resolved_source_name=resolved_source_name,
+            db_result=db_result
+        )
 
-        should_vectorize = False
-        if status_code == "INSERT_NEW_PAPER":
-            should_vectorize = True
-        elif status_code == "INSERT_APPEND_SOURCE":
-            # 仅在 append 后 canonical 切换到该来源时触发
-            should_vectorize = canonical_changed
-        elif status_code == "INSERT_UPDATE_SAME_SOURCE":
-            # 仅当当前 canonical 指向该来源时触发
-            should_vectorize = is_canonical_source
-
-        if not should_vectorize:
+        if not decision["should_vectorize"]:
             return {
                 "enabled": True,
                 "success": False,
                 "skipped": True,
                 "message": (
                     "跳过向量化："
-                    f"status_code={status_code}, "
-                    f"canonical_changed={canonical_changed}, "
-                    f"is_canonical_source={is_canonical_source}"
+                    f"status_code={decision['status_code']}, "
+                    f"canonical_changed={decision['canonical_changed']}, "
+                    f"is_canonical_source={decision['is_canonical_source']}"
                 )
             }
 
@@ -734,6 +1260,121 @@ class PaperIndexer:
             )
 
         return vector_result
+
+    def _handle_insert_sparse_vectorization(
+        self,
+        resolved_source_name: str,
+        db_payload: Dict[str, Any],
+        db_result: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """insert-only BM25 稀疏向量化编排：与 dense 共享 canonical 触发规则。"""
+        sparse_enabled = self._is_sparse_vectorization_enabled()
+        if not self.enable_vectorization or not self.vector_db:
+            return {
+                "enabled": sparse_enabled,
+                "success": False,
+                "skipped": True,
+                "message": "稀疏向量化未启用：向量数据库未启用"
+            }
+
+        if not sparse_enabled:
+            return {
+                "enabled": False,
+                "success": False,
+                "skipped": True,
+                "message": "稀疏向量化未启用"
+            }
+
+        decision = self._get_insert_vectorization_decision(
+            resolved_source_name=resolved_source_name,
+            db_result=db_result
+        )
+        if not decision["should_vectorize"]:
+            return {
+                "enabled": True,
+                "success": False,
+                "skipped": True,
+                "message": (
+                    "跳过稀疏向量化："
+                    f"status_code={decision['status_code']}, "
+                    f"canonical_changed={decision['canonical_changed']}, "
+                    f"is_canonical_source={decision['is_canonical_source']}"
+                )
+            }
+
+        paper_id = db_result.get("paper_id")
+        work_id = db_result.get("work_id")
+        index_text_info = self._build_index_text(db_payload)
+        canonical_source_name = db_result.get("canonical_source_name") or resolved_source_name
+
+        if paper_id is None:
+            return {
+                "enabled": True,
+                "success": False,
+                "skipped": True,
+                "message": "跳过稀疏向量化：paper_id 为空"
+            }
+
+        if not work_id:
+            return {
+                "enabled": True,
+                "success": False,
+                "skipped": True,
+                "message": "跳过稀疏向量化：work_id 为空"
+            }
+
+        if not index_text_info.get("should_vectorize", False):
+            return {
+                "enabled": True,
+                "success": True,
+                "skipped": True,
+                "message": "跳过稀疏向量化：title 和 abstract 均为空"
+            }
+
+        return self._sparse_vectorize_document(
+            source_name=canonical_source_name,
+            work_id=work_id,
+            paper_id=paper_id,
+            db_payload=db_payload
+        )
+
+    def _get_insert_vectorization_decision(
+        self,
+        resolved_source_name: str,
+        db_result: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """根据 insert-only 写入结果判断是否需要刷新 canonical 向量索引。"""
+        status_code = db_result.get("status_code")
+        canonical_changed = bool(db_result.get("canonical_changed", False))
+        canonical_source_name = db_result.get("canonical_source_name")
+        is_canonical_source = canonical_source_name == resolved_source_name
+
+        should_vectorize = False
+        if status_code == "INSERT_NEW_PAPER":
+            should_vectorize = True
+        elif status_code == "INSERT_APPEND_SOURCE":
+            should_vectorize = canonical_changed
+        elif status_code == "INSERT_UPDATE_SAME_SOURCE":
+            should_vectorize = is_canonical_source
+
+        return {
+            "should_vectorize": should_vectorize,
+            "status_code": status_code,
+            "canonical_changed": canonical_changed,
+            "is_canonical_source": is_canonical_source,
+        }
+
+    def _is_sparse_vectorization_enabled(self) -> bool:
+        """Return whether PaperIndexer should write BM25 sparse documents."""
+        vector_db = getattr(self, "vector_db", None)
+        sparse_config = getattr(vector_db, "sparse_config", {}) if vector_db else {}
+        if not isinstance(sparse_config, dict):
+            return False
+
+        enabled = sparse_config.get("enabled", False)
+        if isinstance(enabled, str):
+            return enabled.strip().lower() in {"1", "true", "yes", "on"}
+        return bool(enabled)
 
     def _handle_keyword_enrichment(
         self,
@@ -946,6 +1587,50 @@ class PaperIndexer:
                 "error": str(e)
             }
 
+    def _sparse_vectorize_document(
+        self,
+        source_name: str,
+        work_id: str,
+        paper_id: Optional[int],
+        db_payload: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """生成并写入 BM25 sparse_vector 文档。"""
+        try:
+            index_text_info = self._build_index_text(db_payload)
+
+            if not index_text_info["should_vectorize"]:
+                return {
+                    "success": True,
+                    "enabled": True,
+                    "skipped": True,
+                    "message": "跳过稀疏向量化：title 和 abstract 均为空"
+                }
+
+            result = self.vector_db.add_sparse_document(
+                source_name=source_name,
+                work_id=work_id,
+                text=index_text_info["text"],
+                text_type=index_text_info["text_type"],
+                paper_id=str(paper_id) if paper_id else None
+            )
+
+            return {
+                "success": True,
+                "enabled": True,
+                "action": result.get("action", "unknown"),
+                "doc_id": result.get("doc_id"),
+                "affected_count": result.get("affected_count", 0),
+                "message": f"稀疏向量化成功: {result.get('action')}"
+            }
+
+        except Exception as e:
+            logging.error(f"_sparse_vectorize_document 失败: {str(e)}", exc_info=True)
+            return {
+                "success": False,
+                "enabled": True,
+                "error": str(e)
+            }
+
     def _hydrate_search_results(self, search_results: List[SearchResult]) -> List[Dict[str, Any]]:
         """补全搜索结果的 metadata
 
@@ -970,6 +1655,7 @@ class PaperIndexer:
                         "source_name": result.source_name,
                         "similarity": result.score,
                         "text_type": result.text_type,
+                        "retrieval_debug": result.retrieval_debug,
                         "metadata": paper_info
                     }
                     hydrated_results.append(hydrated_result)

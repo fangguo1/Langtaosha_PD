@@ -2,7 +2,7 @@
 import json
 import re
 from difflib import SequenceMatcher
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Iterable, Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
 from sqlalchemy import text
@@ -1096,8 +1096,6 @@ class MetadataDB:
                 ) VALUES (
                     :paper_id, :keyword_type, :keyword, :weight, :source
                 )
-                ON CONFLICT (paper_id, keyword_type, keyword, source)
-                DO UPDATE SET weight = EXCLUDED.weight
                 RETURNING (xmax = 0) AS inserted
             """),
             {
@@ -1119,9 +1117,12 @@ class MetadataDB:
     ) -> Dict[str, Any]:
         """Upsert model-generated keywords into paper_keywords.
 
-        The table primary key is expected to be
-        (paper_id, keyword_type, keyword, source), so generated keywords do not
-        overwrite metadata/native keywords from other sources.
+        Keyword identity is handled by _upsert_keyword_case_insensitive(), which
+        first updates any existing lower(keyword_type)/lower(keyword)/source
+        match, then inserts a new row only when no such row exists. This keeps
+        the code compatible with both the deployed primary key
+        (paper_id, keyword_type, keyword, source) and newer case-insensitive
+        expression indexes.
         """
         if not paper_id:
             raise ValueError("paper_id is required")
@@ -1429,6 +1430,490 @@ class MetadataDB:
             }
             for row in rows
         ]
+
+    def lookup_papers_by_keyword_terms(
+        self,
+        query_terms: Sequence[Mapping[str, Any]],
+        source_list: Optional[Sequence[str]] = None,
+        keyword_sources: Optional[Sequence[str]] = None,
+        top_k: int = 50,
+        strict_all_concepts: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """Recall papers by matching normalized query concept terms to paper_keywords.
+
+        Scoring: exact case-insensitive keyword match only
+        (``lower(pk.keyword) = term``). Each raw match gets
+        ``term_weight * COALESCE(pk.weight, 1.0)``; each paper/concept keeps the
+        max raw match as ``concept_score``; the paper score is the sum of matched
+        concept scores.
+
+        Ranking: sort by matched concept count DESC, then paper score DESC, then
+        paper_id DESC. If ``strict_all_concepts`` is true, only papers matching
+        every selected concept are returned.
+        """
+
+        normalized_terms = self._normalize_keyword_lookup_terms(query_terms)
+        if not normalized_terms:
+            return []
+
+        total_concept_count = len({row["concept_idx"] for row in normalized_terms})
+        params: Dict[str, Any] = {
+            "top_k": max(1, int(top_k)),
+            "total_concept_count": total_concept_count,
+        }
+        values_sql = []
+        for index, row in enumerate(normalized_terms):
+            placeholders = []
+            for field in (
+                "concept_idx",
+                "concept_id",
+                "concept_label",
+                "term",
+                "term_role",
+                "term_weight",
+            ):
+                param_name = f"lookup_{field}_{index}"
+                placeholders.append(f":{param_name}")
+                params[param_name] = row[field]
+            values_sql.append(f"({', '.join(placeholders)})")
+
+        filters = ["1 = 1"]
+        keyword_source_filter = self._keyword_lookup_in_filter(
+            column="pk.source",
+            prefix="lookup_keyword_source",
+            values=keyword_sources or [],
+            params=params,
+        )
+        if keyword_source_filter:
+            filters.append(keyword_source_filter)
+
+        paper_source_filter = self._keyword_lookup_paper_source_filter(
+            source_list=source_list or [],
+            params=params,
+        )
+        if paper_source_filter:
+            filters.append(paper_source_filter)
+
+        having_clause = ""
+        if strict_all_concepts:
+            having_clause = "HAVING COUNT(DISTINCT cm.concept_idx) = :total_concept_count"
+
+        sql = text(
+            f"""
+            WITH query_terms(
+                concept_idx,
+                concept_id,
+                concept_label,
+                term,
+                term_role,
+                term_weight
+            ) AS (
+                VALUES {", ".join(values_sql)}
+            ),
+            raw_matches AS (
+                SELECT
+                    pk.paper_id,
+                    qt.concept_idx,
+                    qt.concept_id,
+                    qt.concept_label,
+                    qt.term,
+                    qt.term_role,
+                    qt.term_weight,
+                    pk.keyword,
+                    pk.keyword_type,
+                    pk.source AS keyword_source,
+                    COALESCE(pk.weight, 1.0) AS keyword_weight,
+                    qt.term_weight * COALESCE(pk.weight, 1.0) AS match_score
+                FROM query_terms qt
+                JOIN paper_keywords pk
+                  ON lower(pk.keyword) = qt.term
+                WHERE {" AND ".join(filters)}
+            ),
+            concept_matches AS (
+                SELECT
+                    paper_id,
+                    concept_idx,
+                    concept_id,
+                    MIN(concept_label) AS concept_label,
+                    MAX(match_score) AS concept_score,
+                    JSONB_AGG(DISTINCT JSONB_BUILD_OBJECT(
+                        'query_term', term,
+                        'term_role', term_role,
+                        'keyword', keyword,
+                        'keyword_type', keyword_type,
+                        'keyword_source', keyword_source,
+                        'keyword_weight', keyword_weight
+                    )) AS matched_keywords
+                FROM raw_matches
+                GROUP BY paper_id, concept_idx, concept_id
+            )
+            SELECT
+                p.paper_id,
+                p.work_id,
+                COUNT(DISTINCT cm.concept_idx) AS matched_concept_count,
+                :total_concept_count AS total_concept_count,
+                SUM(cm.concept_score) AS keyword_lookup_score,
+                JSONB_AGG(JSONB_BUILD_OBJECT(
+                    'concept_idx', cm.concept_idx,
+                    'concept_id', cm.concept_id,
+                    'concept_label', cm.concept_label,
+                    'concept_score', cm.concept_score,
+                    'matched_keywords', cm.matched_keywords
+                ) ORDER BY cm.concept_idx) AS matched_concepts
+            FROM concept_matches cm
+            JOIN papers p ON p.paper_id = cm.paper_id
+            GROUP BY p.paper_id, p.work_id
+            {having_clause}
+            ORDER BY matched_concept_count DESC, keyword_lookup_score DESC, p.paper_id DESC
+            LIMIT :top_k
+            """
+        )
+
+        with self.engine.connect() as conn:
+            rows = conn.execute(sql, params).mappings().fetchall()
+
+        return [self._keyword_lookup_row_to_dict(row) for row in rows]
+
+    def lookup_papers_by_keyword_lookup_terms(
+        self,
+        query_terms: Sequence[Mapping[str, Any]],
+        source_list: Optional[Sequence[str]] = None,
+        keyword_sources: Optional[Sequence[str]] = None,
+        top_k: int = 50,
+        strict_all_groups: bool = False,
+        group_support_cap: float = 0.85,
+    ) -> List[Dict[str, Any]]:
+        """Recall papers with grouped selected/sub-concept lookup terms.
+
+        Scoring is intentionally simple for the first recall-expansion version:
+        exact case-insensitive keyword join, then
+        ``item_weight * term_weight * route_weight``. Keyword row weight and
+        specificity are not used here. Terms in the same group are support
+        evidence for one query concept, so support-only scores are capped before
+        groups are summed into the paper score.
+        """
+
+        normalized_terms = self._normalize_keyword_lookup_terms(query_terms)
+        if not normalized_terms:
+            return []
+
+        total_group_count = len({row["group_id"] for row in normalized_terms})
+        params: Dict[str, Any] = {
+            "top_k": max(1, int(top_k)),
+            "total_group_count": total_group_count,
+            "group_support_cap": float(group_support_cap),
+        }
+        values_sql = []
+        for index, row in enumerate(normalized_terms):
+            placeholders = []
+            for field in (
+                "group_id",
+                "item_id",
+                "item_role",
+                "item_weight",
+                "concept_idx",
+                "concept_id",
+                "concept_label",
+                "term",
+                "term_role",
+                "term_weight",
+                "route",
+                "route_weight",
+            ):
+                param_name = f"lookup_{field}_{index}"
+                placeholders.append(f":{param_name}")
+                params[param_name] = row[field]
+            values_sql.append(f"({', '.join(placeholders)})")
+
+        filters = ["1 = 1"]
+        keyword_source_filter = self._keyword_lookup_in_filter(
+            column="pk.source",
+            prefix="lookup_keyword_source",
+            values=keyword_sources or [],
+            params=params,
+        )
+        if keyword_source_filter:
+            filters.append(keyword_source_filter)
+
+        paper_source_filter = self._keyword_lookup_paper_source_filter(
+            source_list=source_list or [],
+            params=params,
+        )
+        if paper_source_filter:
+            filters.append(paper_source_filter)
+
+        having_clause = ""
+        if strict_all_groups:
+            having_clause = "HAVING COUNT(DISTINCT gm.group_id) = :total_group_count"
+
+        sql = text(
+            f"""
+            WITH query_terms(
+                group_id,
+                item_id,
+                item_role,
+                item_weight,
+                concept_idx,
+                concept_id,
+                concept_label,
+                term,
+                term_role,
+                term_weight,
+                route,
+                route_weight
+            ) AS (
+                VALUES {", ".join(values_sql)}
+            ),
+            raw_matches AS (
+                SELECT
+                    pk.paper_id,
+                    qt.group_id,
+                    qt.item_id,
+                    qt.item_role,
+                    qt.item_weight,
+                    qt.concept_idx,
+                    qt.concept_id,
+                    qt.concept_label,
+                    qt.term,
+                    qt.term_role,
+                    qt.term_weight,
+                    qt.route,
+                    qt.route_weight,
+                    pk.keyword,
+                    pk.keyword_type,
+                    pk.source AS keyword_source,
+                    COALESCE(pk.weight, 1.0) AS keyword_weight,
+                    qt.item_weight * qt.term_weight * qt.route_weight AS match_score
+                FROM query_terms qt
+                JOIN paper_keywords pk
+                  ON lower(pk.keyword) = qt.term
+                WHERE {" AND ".join(filters)}
+            ),
+            item_scores AS (
+                SELECT
+                    paper_id,
+                    group_id,
+                    item_id,
+                    MIN(item_role) AS item_role,
+                    MIN(concept_idx) AS concept_idx,
+                    MIN(concept_id) AS concept_id,
+                    MIN(concept_label) AS concept_label,
+                    MAX(match_score) AS item_score
+                FROM raw_matches
+                GROUP BY paper_id, group_id, item_id
+            ),
+            group_keywords AS (
+                SELECT
+                    paper_id,
+                    group_id,
+                    JSONB_AGG(DISTINCT JSONB_BUILD_OBJECT(
+                        'item_id', item_id,
+                        'item_role', item_role,
+                        'query_term', term,
+                        'term_role', term_role,
+                        'term_weight', term_weight,
+                        'route', route,
+                        'route_weight', route_weight,
+                        'item_weight', item_weight,
+                        'keyword', keyword,
+                        'keyword_type', keyword_type,
+                        'keyword_source', keyword_source,
+                        'keyword_weight', keyword_weight,
+                        'match_score', match_score
+                    )) AS matched_keywords
+                FROM raw_matches
+                GROUP BY paper_id, group_id
+            ),
+            group_matches AS (
+                SELECT
+                    item_scores.paper_id,
+                    item_scores.group_id,
+                    MIN(item_scores.concept_idx) AS concept_idx,
+                    MIN(item_scores.concept_id) AS concept_id,
+                    MIN(item_scores.concept_label) AS concept_label,
+                    MAX(CASE WHEN item_scores.item_role = 'selected_concept' THEN item_scores.item_score ELSE 0 END)
+                        AS primary_score,
+                    SUM(CASE WHEN item_scores.item_role != 'selected_concept' THEN item_scores.item_score ELSE 0 END)
+                        AS raw_support_score,
+                    GREATEST(
+                        MAX(CASE WHEN item_scores.item_role = 'selected_concept' THEN item_scores.item_score ELSE 0 END),
+                        LEAST(
+                            :group_support_cap,
+                            SUM(CASE WHEN item_scores.item_role != 'selected_concept' THEN item_scores.item_score ELSE 0 END)
+                        )
+                    ) AS group_score,
+                    BOOL_OR(item_scores.item_role = 'selected_concept') AS has_primary_match,
+                    group_keywords.matched_keywords
+                FROM item_scores
+                JOIN group_keywords
+                  ON group_keywords.paper_id = item_scores.paper_id
+                 AND group_keywords.group_id = item_scores.group_id
+                GROUP BY item_scores.paper_id, item_scores.group_id, group_keywords.matched_keywords
+            )
+            SELECT
+                p.paper_id,
+                p.work_id,
+                COUNT(DISTINCT gm.group_id) AS matched_group_count,
+                COUNT(DISTINCT CASE WHEN gm.has_primary_match THEN gm.group_id END) AS matched_primary_group_count,
+                :total_group_count AS total_group_count,
+                SUM(gm.group_score) AS keyword_lookup_score,
+                JSONB_AGG(JSONB_BUILD_OBJECT(
+                    'concept_idx', gm.concept_idx,
+                    'group_id', gm.group_id,
+                    'concept_id', gm.concept_id,
+                    'concept_label', gm.concept_label,
+                    'concept_score', gm.group_score,
+                    'primary_score', gm.primary_score,
+                    'support_score', LEAST(:group_support_cap, gm.raw_support_score),
+                    'has_primary_match', gm.has_primary_match,
+                    'matched_keywords', gm.matched_keywords
+                ) ORDER BY gm.group_id) AS matched_concepts
+            FROM group_matches gm
+            JOIN papers p ON p.paper_id = gm.paper_id
+            GROUP BY p.paper_id, p.work_id
+            {having_clause}
+            ORDER BY matched_group_count DESC,
+                     matched_primary_group_count DESC,
+                     keyword_lookup_score DESC,
+                     p.paper_id DESC
+            LIMIT :top_k
+            """
+        )
+
+        with self.engine.connect() as conn:
+            rows = conn.execute(sql, params).mappings().fetchall()
+
+        return [self._keyword_lookup_plan_row_to_dict(row) for row in rows]
+
+    @staticmethod
+    def _normalize_keyword_lookup_terms(
+        query_terms: Sequence[Mapping[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        normalized: List[Dict[str, Any]] = []
+        seen = set()
+        for row in query_terms:
+            term = re.sub(r"\s+", " ", str(row.get("term") or "").strip().lower())
+            if not term:
+                continue
+            try:
+                concept_idx = int(row.get("concept_idx"))
+            except (TypeError, ValueError):
+                continue
+            try:
+                group_id = int(row.get("group_id") or concept_idx)
+            except (TypeError, ValueError):
+                group_id = concept_idx
+            item_id = str(row.get("item_id") or f"g{group_id}:selected:{concept_idx}")
+            item_role = str(row.get("item_role") or "selected_concept")
+            route = str(row.get("route") or "selected_exact")
+            key = (group_id, item_id, term, str(row.get("term_role") or "term"), route)
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized.append(
+                {
+                    "group_id": group_id,
+                    "item_id": item_id,
+                    "item_role": item_role,
+                    "item_weight": float(row.get("item_weight") or 1.0),
+                    "concept_idx": concept_idx,
+                    "concept_id": str(row.get("concept_id") or f"concept:{concept_idx}"),
+                    "concept_label": str(row.get("concept_label") or ""),
+                    "term": term,
+                    "term_role": str(row.get("term_role") or "term"),
+                    "term_weight": float(row.get("term_weight") or 1.0),
+                    "route": route,
+                    "route_weight": float(row.get("route_weight") or 1.0),
+                }
+            )
+        return normalized
+
+    @staticmethod
+    def _keyword_lookup_in_filter(
+        column: str,
+        prefix: str,
+        values: Sequence[str],
+        params: Dict[str, Any],
+    ) -> str:
+        if not values:
+            return ""
+        placeholders = []
+        for index, value in enumerate(values):
+            param_name = f"{prefix}_{index}"
+            placeholders.append(f":{param_name}")
+            params[param_name] = value
+        return f"{column} IN ({', '.join(placeholders)})"
+
+    @classmethod
+    def _keyword_lookup_paper_source_filter(
+        cls,
+        source_list: Sequence[str],
+        params: Dict[str, Any],
+    ) -> str:
+        source_filter = cls._keyword_lookup_in_filter(
+            column="ps.source_name",
+            prefix="lookup_paper_source",
+            values=source_list,
+            params=params,
+        )
+        if not source_filter:
+            return ""
+        return (
+            "EXISTS ("
+            "SELECT 1 FROM paper_sources ps "
+            "WHERE ps.paper_id = pk.paper_id "
+            f"AND {source_filter}"
+            ")"
+        )
+
+    @staticmethod
+    def _keyword_lookup_row_to_dict(row: Mapping[str, Any]) -> Dict[str, Any]:
+        matched_concepts = row.get("matched_concepts") or []
+        matched_concept_count = int(row.get("matched_concept_count") or 0)
+        total_concept_count = int(row.get("total_concept_count") or 0)
+        keyword_lookup_score = float(row.get("keyword_lookup_score") or 0.0)
+        return {
+            "paper_id": row.get("paper_id"),
+            "work_id": row.get("work_id"),
+            "matched_concept_count": matched_concept_count,
+            "total_concept_count": total_concept_count,
+            "keyword_lookup_score": keyword_lookup_score,
+            "matched_concepts": matched_concepts,
+            "recall_sources": ["keyword_lookup"],
+            "retrieval_debug": {
+                "retriever": "keyword_lookup",
+                "matched_concept_count": matched_concept_count,
+                "total_concept_count": total_concept_count,
+                "keyword_lookup_score": keyword_lookup_score,
+            },
+        }
+
+    @staticmethod
+    def _keyword_lookup_plan_row_to_dict(row: Mapping[str, Any]) -> Dict[str, Any]:
+        matched_concepts = row.get("matched_concepts") or []
+        matched_group_count = int(row.get("matched_group_count") or 0)
+        matched_primary_group_count = int(row.get("matched_primary_group_count") or 0)
+        total_group_count = int(row.get("total_group_count") or 0)
+        keyword_lookup_score = float(row.get("keyword_lookup_score") or 0.0)
+        return {
+            "paper_id": row.get("paper_id"),
+            "work_id": row.get("work_id"),
+            "matched_concept_count": matched_group_count,
+            "matched_group_count": matched_group_count,
+            "matched_primary_group_count": matched_primary_group_count,
+            "total_concept_count": total_group_count,
+            "total_group_count": total_group_count,
+            "keyword_lookup_score": keyword_lookup_score,
+            "matched_concepts": matched_concepts,
+            "recall_sources": ["keyword_lookup"],
+            "retrieval_debug": {
+                "retriever": "keyword_lookup",
+                "matched_group_count": matched_group_count,
+                "matched_primary_group_count": matched_primary_group_count,
+                "total_group_count": total_group_count,
+                "keyword_lookup_score": keyword_lookup_score,
+            },
+        }
 
     def _has_pg_trgm(self) -> bool:
         """Return whether pg_trgm is available for fuzzy keyword recall."""
@@ -2168,6 +2653,241 @@ class MetadataDB:
             if row and row[0]:
                 return row[0]  # 返回 JSONB 数组
             return []
+
+    def update_author_enrichment(
+        self,
+        paper_id: int,
+        authors: List[Dict[str, Any]],
+        semantic_scholar_paper_id: Optional[str] = None,
+        doi: Optional[str] = None,
+    ) -> None:
+        """Update enriched author JSON for one paper.
+
+        The existing JSONB shape is preserved; enrichment fields are appended
+        by the caller. If a Semantic Scholar paper id is available, also store
+        it on matching source rows for later dedup/disambiguation work.
+        """
+        with self.engine.begin() as conn:
+            conn.execute(
+                text("""
+                    INSERT INTO paper_author_affiliation (paper_id, authors)
+                    VALUES (:paper_id, CAST(:authors AS jsonb))
+                    ON CONFLICT (paper_id) DO UPDATE SET
+                        authors = EXCLUDED.authors
+                """),
+                {
+                    "paper_id": paper_id,
+                    "authors": json.dumps(authors, ensure_ascii=False),
+                },
+            )
+
+            if semantic_scholar_paper_id:
+                if doi:
+                    conn.execute(
+                        text("""
+                            UPDATE paper_sources
+                            SET semantic_scholar_id = :semantic_scholar_id,
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE paper_id = :paper_id
+                              AND (doi = :doi OR semantic_scholar_id IS NULL)
+                        """),
+                        {
+                            "paper_id": paper_id,
+                            "doi": doi,
+                            "semantic_scholar_id": semantic_scholar_paper_id,
+                        },
+                    )
+                else:
+                    conn.execute(
+                        text("""
+                            UPDATE paper_sources
+                            SET semantic_scholar_id = :semantic_scholar_id,
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE paper_id = :paper_id
+                              AND semantic_scholar_id IS NULL
+                        """),
+                        {
+                            "paper_id": paper_id,
+                            "semantic_scholar_id": semantic_scholar_paper_id,
+                        },
+                    )
+
+    def iter_papers_for_author_enrichment(
+        self,
+        source_names: Optional[Iterable[str]] = None,
+        limit: Optional[int] = None,
+        only_missing: bool = True,
+        target_date: Optional[str] = None,
+        skip_recorded_status: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """Return papers with DOI and author JSON eligible for enrichment."""
+        params: Dict[str, Any] = {}
+        filters = [
+            "ps.doi IS NOT NULL",
+            "btrim(ps.doi) != ''",
+            "paa.authors IS NOT NULL",
+        ]
+
+        if source_names:
+            placeholders = []
+            for idx, source_name in enumerate(source_names):
+                key = f"source_name_{idx}"
+                params[key] = source_name
+                placeholders.append(f":{key}")
+            filters.append(f"ps.source_name IN ({', '.join(placeholders)})")
+
+        if only_missing:
+            filters.append("""
+                (
+                    ps.semantic_scholar_id IS NULL
+                    OR NOT EXISTS (
+                        SELECT 1
+                        FROM jsonb_array_elements(paa.authors) AS author
+                        WHERE author ? 'enriched_name'
+                          AND author->>'author_enrichment_source' = 'semantic_scholar'
+                    )
+                )
+            """)
+
+        if target_date:
+            params["target_date"] = target_date
+            filters.append("""
+                DATE(COALESCE(ps.online_at, ps.submitted_at, ps.published_at, p.online_at, p.submitted_at)) = CAST(:target_date AS date)
+            """)
+
+        status_join = ""
+        if skip_recorded_status:
+            status_join = """
+                LEFT JOIN semantic_scholar_author_enrichment_status ssaes
+                  ON ssaes.paper_id = p.paper_id
+            """
+            filters.append("""
+                (
+                    ssaes.paper_id IS NULL
+                    OR ssaes.status NOT IN (
+                        'matched_author_count',
+                        'author_count_mismatch',
+                        'semantic_scholar_not_found',
+                        'no_current_authors',
+                        'semantic_scholar_no_authors'
+                    )
+                )
+            """)
+
+        limit_sql = ""
+        if limit is not None:
+            params["limit"] = int(limit)
+            limit_sql = "LIMIT :limit"
+
+        where_sql = " AND ".join(filters)
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                text(f"""
+                    SELECT DISTINCT ON (p.paper_id)
+                        p.paper_id,
+                        p.work_id,
+                        ps.paper_source_id,
+                        ps.source_name,
+                        ps.doi,
+                        ps.version,
+                        ps.semantic_scholar_id,
+                        paa.authors
+                    FROM papers p
+                    JOIN paper_sources ps ON ps.paper_id = p.paper_id
+                    JOIN paper_author_affiliation paa ON paa.paper_id = p.paper_id
+                    {status_join}
+                    WHERE {where_sql}
+                    ORDER BY p.paper_id, ps.online_at DESC NULLS LAST, ps.paper_source_id DESC
+                    {limit_sql}
+                """),
+                params,
+            ).fetchall()
+
+        return [
+            {
+                "paper_id": row[0],
+                "work_id": row[1],
+                "paper_source_id": row[2],
+                "source_name": row[3],
+                "doi": row[4],
+                "version": row[5],
+                "semantic_scholar_id": row[6],
+                "authors": row[7] or [],
+            }
+            for row in rows
+        ]
+
+    def ensure_author_enrichment_status_table(self) -> None:
+        """Create a lightweight progress table for large Semantic Scholar backfills."""
+        with self.engine.begin() as conn:
+            conn.execute(
+                text("""
+                    CREATE TABLE IF NOT EXISTS semantic_scholar_author_enrichment_status (
+                        paper_id INTEGER PRIMARY KEY REFERENCES papers(paper_id) ON DELETE CASCADE,
+                        work_id VARCHAR(200),
+                        source_name VARCHAR(64),
+                        doi VARCHAR(200),
+                        status VARCHAR(64) NOT NULL,
+                        current_author_count INTEGER,
+                        semantic_author_count INTEGER,
+                        semantic_scholar_paper_id VARCHAR(100),
+                        attempts INTEGER NOT NULL DEFAULT 1,
+                        last_error TEXT,
+                        last_manifest JSONB,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+            )
+            conn.execute(
+                text("""
+                    CREATE INDEX IF NOT EXISTS idx_ss_author_enrichment_status
+                    ON semantic_scholar_author_enrichment_status(status, updated_at)
+                """)
+            )
+
+    def record_author_enrichment_status(self, item: Dict[str, Any]) -> None:
+        """Record one Semantic Scholar enrichment attempt for resumable backfill."""
+        with self.engine.begin() as conn:
+            conn.execute(
+                text("""
+                    INSERT INTO semantic_scholar_author_enrichment_status (
+                        paper_id, work_id, source_name, doi, status,
+                        current_author_count, semantic_author_count,
+                        semantic_scholar_paper_id, attempts, last_error, last_manifest
+                    )
+                    VALUES (
+                        :paper_id, :work_id, :source_name, :doi, :status,
+                        :current_author_count, :semantic_author_count,
+                        :semantic_scholar_paper_id, 1, :last_error,
+                        CAST(:last_manifest AS jsonb)
+                    )
+                    ON CONFLICT (paper_id) DO UPDATE SET
+                        work_id = EXCLUDED.work_id,
+                        source_name = EXCLUDED.source_name,
+                        doi = EXCLUDED.doi,
+                        status = EXCLUDED.status,
+                        current_author_count = EXCLUDED.current_author_count,
+                        semantic_author_count = EXCLUDED.semantic_author_count,
+                        semantic_scholar_paper_id = EXCLUDED.semantic_scholar_paper_id,
+                        attempts = semantic_scholar_author_enrichment_status.attempts + 1,
+                        last_error = EXCLUDED.last_error,
+                        last_manifest = EXCLUDED.last_manifest,
+                        updated_at = CURRENT_TIMESTAMP
+                """),
+                {
+                    "paper_id": item.get("paper_id"),
+                    "work_id": item.get("work_id"),
+                    "source_name": item.get("source_name"),
+                    "doi": item.get("doi"),
+                    "status": item.get("status") or "unknown",
+                    "current_author_count": item.get("current_author_count"),
+                    "semantic_author_count": item.get("semantic_author_count"),
+                    "semantic_scholar_paper_id": item.get("semantic_scholar_paper_id"),
+                    "last_error": item.get("error"),
+                    "last_manifest": json.dumps(item, ensure_ascii=False),
+                },
+            )
 
     def get_keywords_by_paper_id(self, paper_id: int) -> List[Dict[str, Any]]:
         """获取论文的关键词信息

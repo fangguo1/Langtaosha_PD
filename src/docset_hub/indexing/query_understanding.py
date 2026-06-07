@@ -11,6 +11,8 @@ import re
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
+from .query_expansion import LLMQueryExpansionService
+
 
 TOPIC_HINT_WORDS = {
     "learning",
@@ -98,6 +100,7 @@ class QueryUnderstandingResult:
     confidence: float = 0.0
     candidates: List[Dict[str, Any]] = field(default_factory=list)
     corrections: List[Dict[str, Any]] = field(default_factory=list)
+    expansion: Optional[Dict[str, Any]] = None
     reason: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
@@ -723,6 +726,7 @@ class QueryUnderstandingService:
         self.normalizer = QueryNormalizer()
         self.author_matcher = AuthorMatcher(metadata_db)
         self.query_corrector = PhraseAwareQueryCorrector(metadata_db)
+        self.query_expander = LLMQueryExpansionService()
 
     def analyze(self, query: str) -> QueryUnderstandingResult:
         normalized = self.normalizer.normalize(query)
@@ -769,6 +773,8 @@ class QueryUnderstandingService:
         semantic_confidence = max(float(author_match["confidence"]), float(correction["confidence"]))
         semantic_candidates = correction["candidates"] or author_match["candidates"]
         semantic_reason = correction["reason"] if correction["reason"] != "no_query_term_candidates" else author_match["reason"]
+        expansion_query = corrected_query or normalized.normalized_query
+        expansion = self.query_expander.expand(expansion_query).to_dict()
 
         return QueryUnderstandingResult(
             original_query=normalized.original_query,
@@ -779,5 +785,6 @@ class QueryUnderstandingService:
             confidence=semantic_confidence,
             candidates=semantic_candidates,
             corrections=correction.get("corrections", []),
+            expansion=expansion,
             reason=semantic_reason,
         )

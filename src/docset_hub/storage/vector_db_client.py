@@ -249,6 +249,74 @@ class VectorDBClient:
 
         return self._request('POST', '/collection/create', request_data)
 
+    def create_sparse_collection(
+        self,
+        database: str,
+        collection: str,
+        replica_num: int = 1,
+        shard_num: int = 1,
+        disk_swap_enabled: Optional[bool] = None
+    ) -> Dict[str, Any]:
+        """创建仅包含 BM25 sparse_vector 索引的 Collection。
+
+        Args:
+            database: 数据库名称
+            collection: Collection 名称
+            replica_num: 副本数量
+            shard_num: 分片数量
+            disk_swap_enabled: 是否启用稀疏向量磁盘交换（默认不传）
+
+        Returns:
+            Dict: API 响应
+        """
+        logging.info(f"创建 sparse collection: {database}.{collection}")
+
+        sparse_index = {
+            "fieldName": "sparse_vector",
+            "fieldType": "sparseVector",
+            "indexType": "inverted",
+            "metricType": "IP"
+        }
+        if disk_swap_enabled is not None:
+            sparse_index["diskSwapEnabled"] = disk_swap_enabled
+
+        request_data = {
+            "database": database,
+            "collection": collection,
+            "replicaNum": replica_num,
+            "shardNum": shard_num,
+            "indexes": [
+                {
+                    "fieldName": "id",
+                    "fieldType": "string",
+                    "indexType": "primaryKey"
+                },
+                sparse_index,
+                {
+                    "fieldName": "work_id",
+                    "fieldType": "string",
+                    "indexType": "filter"
+                },
+                {
+                    "fieldName": "paper_id",
+                    "fieldType": "string",
+                    "indexType": "filter"
+                },
+                {
+                    "fieldName": "source_name",
+                    "fieldType": "string",
+                    "indexType": "filter"
+                },
+                {
+                    "fieldName": "text_type",
+                    "fieldType": "string",
+                    "indexType": "filter"
+                }
+            ]
+        }
+
+        return self._request('POST', '/collection/create', request_data)
+
     def drop_collection(self, database: str, collection: str) -> Dict[str, Any]:
         """删除 Collection
 
@@ -505,6 +573,59 @@ class VectorDBClient:
         logging.info(f"搜索返回 {len(search_results)} 个结果")
 
         # 返回原始结果，但添加提取的文档列表便于访问
+        result['_extracted_documents'] = search_results
+        return result
+
+    def fulltext_search_documents(
+        self,
+        database: str,
+        collection: str,
+        sparse_vector: List[List[float]],
+        limit: int = 10,
+        output_fields: Optional[List[str]] = None,
+        retrieve_vector: bool = False,
+        terminate_after: Optional[int] = None,
+        cutoff_frequency: Optional[float] = None,
+        filter: Optional[str] = None,
+        read_consistency: str = "eventualConsistency"
+    ) -> Dict[str, Any]:
+        """稀疏向量全文检索（BM25 fullTextSearch）。"""
+        if output_fields is None:
+            output_fields = ["work_id", "paper_id", "source_name", "text_type"]
+
+        logging.info(f"在 {database}.{collection} 中执行 BM25 fullTextSearch")
+
+        match = {
+            "fieldName": "sparse_vector",
+            "data": [sparse_vector]
+        }
+        if terminate_after is not None:
+            match["terminateAfter"] = terminate_after
+        if cutoff_frequency is not None:
+            match["cutoffFrequency"] = cutoff_frequency
+
+        search = {
+            "match": match,
+            "limit": limit,
+            "retrieveVector": retrieve_vector,
+            "outputFields": output_fields
+        }
+        if filter:
+            search["filter"] = filter
+
+        request_data = {
+            "database": database,
+            "collection": collection,
+            "readConsistency": read_consistency,
+            "search": search
+        }
+
+        result = self._request('POST', '/document/fullTextSearch', request_data)
+
+        raw_documents = result.get('documents', [[]])
+        search_results = raw_documents[0] if raw_documents and len(raw_documents) > 0 else []
+        logging.info(f"BM25 fullTextSearch 返回 {len(search_results)} 个结果")
+
         result['_extracted_documents'] = search_results
         return result
 
