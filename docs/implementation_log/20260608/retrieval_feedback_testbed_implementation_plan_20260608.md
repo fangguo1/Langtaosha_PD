@@ -547,3 +547,88 @@ git commit -m "docs: update retrieval testbed plan for json-first flow"
 5. Task 5 (docs)
 
 Task 4 comes before Task 3 in execution even though the file order above is different, because the runner must expose per-query payloads before the CLI can serialize them cleanly.
+
+---
+
+## Follow-up Plan: Feedback Review Page on Testbed JSON
+
+**Date:** 2026-06-08
+
+**Goal:** Move `/feedback-review` out of `app/main.py` into a dedicated module and switch its data source from the legacy case-study JSONL export to `local_data/retrieval_testbed/import_topic_v1_mimic.json`, with metadata hydrated from the current metadata DB by `work_id`.
+
+**Architecture:** The feedback review page becomes a query-level testbed review surface instead of a historical search-event replay surface. Query IDs, annotators, and labels come from the frozen testbed JSON. Human-readable paper metadata comes from a batch database lookup keyed by the labeled `work_id` values. The page URL and route stay unchanged.
+
+**Files:**
+- Create: `app/feedback_review_page.py`
+- Modify: `app/main.py`
+- Modify: `templates/feedback_review.html`
+- Create: `tests/app/test_feedback_review_page.py`
+
+### Task 6: Split Feedback Review into a Dedicated Module
+
+- [x] Add `app/feedback_review_page.py` with:
+  - `DEFAULT_FEEDBACK_REVIEW_TESTBED_PATH`
+  - `load_feedback_review_testbed(path)`
+  - `hydrate_feedback_review_queries(testbed_payload, engine)`
+  - `register_feedback_review_routes(app, api_success, api_error)`
+- [x] Keep `/feedback-review` and `/api/study/feedback-review-data` URLs unchanged.
+- [x] Change the API payload from:
+  - `searches`
+  to:
+  - `testbed_name`
+  - `summary`
+  - `queries`
+  - `source`
+- [x] Batch-query metadata DB by labeled `work_id` to attach:
+  - `title`
+  - `abstract`
+  - `authors`
+  - `source`
+  - `online_date`
+  - `doi`
+  - `link`
+- [x] Update `templates/feedback_review.html` to use query-level testbed fields:
+  - `query_id`
+  - `annotator_ids`
+  - `annotator_count`
+  - `query_text`
+  - `label_summary`
+  - `results[{work_id,label,title,...}]`
+- [x] Remove UI controls that depend on legacy search-event structure:
+  - `User ID`
+  - `Search Event`
+  - `Qualified feedback only`
+- [x] Add backend tests that prove:
+  - the loader reads the configured testbed JSON
+  - metadata hydration joins `work_id` to display fields
+  - the API returns `queries`, not legacy `searches`
+
+### Task 6 Execution Note
+
+**Implemented on:** 2026-06-08
+
+What landed:
+
+- `/feedback-review` now renders through `app/feedback_review_page.py` instead of carrying the page logic directly inside `app/main.py`.
+- Added standalone entrypoints:
+  - `app/feedback_review_app.py`
+  - `app/run_feedback_review.py`
+- `/api/study/feedback-review-data` now reads the frozen testbed JSON artifact, defaulting to `local_data/retrieval_testbed/import_topic_v1_mimic.json`.
+- The route supports override through `FEEDBACK_REVIEW_TESTBED_PATH`, so we can point the page at another frozen artifact without changing code.
+- Query-level labels still come from JSON only; display metadata is hydrated in batch from the current metadata DB by `work_id`.
+- The page is now aligned with the retrieval-testbed workflow rather than the older search-event replay workflow.
+
+Standalone run command:
+
+```bash
+cd /home/wnlab/langtaosha/Langtaosha_PD
+export PD_BACKEND_CONFIG=src/config/config_tecent_backend_server_mimic.yaml
+export FEEDBACK_REVIEW_TESTBED_PATH=/home/wnlab/langtaosha/Langtaosha_PD/local_data/retrieval_testbed/import_topic_v1_mimic.json
+python app/run_feedback_review.py
+```
+
+Verification:
+
+- `python -m py_compile app/feedback_review_page.py app/main.py`
+- `PYTHONPATH=/home/wnlab/langtaosha/Langtaosha_PD:/home/wnlab/langtaosha/Langtaosha_PD/src python -m pytest tests/app/test_feedback_review_page.py -v`
+- `PYTHONPATH=/home/wnlab/langtaosha/Langtaosha_PD:/home/wnlab/langtaosha/Langtaosha_PD/src python -m pytest tests/app/test_search_api_contract.py -v`
