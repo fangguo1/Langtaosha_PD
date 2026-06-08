@@ -3,13 +3,18 @@ from __future__ import annotations
 from argparse import Namespace
 from pathlib import Path
 
+import pytest
+
 import scripts.backfill_sparse_collections as sparse_backfill
 from scripts.backfill_sparse_collections import (
     build_index_text,
     build_sparse_documents,
+    load_state,
     parse_sources,
     run_backfill,
+    save_state,
 )
+from src.docset_hub.storage.vector_db_client import VectorDBError
 
 
 class FakeMetadataDB:
@@ -99,8 +104,9 @@ def test_build_sparse_documents_skips_empty_text():
     ]
 
 
-def test_run_backfill_dry_run_does_not_write_sparse_collection():
+def test_run_backfill_dry_run_does_not_write_sparse_collection(tmp_path):
     fake_vector_db = FakeVectorDB()
+    state_file = tmp_path / "state.json"
 
     def fake_fetcher(_metadata_db, source_name, limit, after_paper_id):
         assert source_name == "biorxiv_history"
@@ -117,7 +123,7 @@ def test_run_backfill_dry_run_does_not_write_sparse_collection():
         ]
 
     summary = run_backfill(
-        _args(dry_run=True, limit=1),
+        _args(dry_run=True, resume=True, limit=1, state_file=state_file),
         metadata_db=FakeMetadataDB(),
         vector_db=fake_vector_db,
         fetcher=fake_fetcher,
@@ -127,6 +133,99 @@ def test_run_backfill_dry_run_does_not_write_sparse_collection():
     assert summary.indexed == 1
     assert fake_vector_db.ensured == []
     assert fake_vector_db.upserts == []
+    assert not state_file.exists()
+    assert summary.by_source["biorxiv_history"] == {
+        "fetched": 1,
+        "indexed": 1,
+        "skipped": 0,
+        "failed": 0,
+        "last_paper_id": 1,
+    }
+
+
+def test_save_state_replaces_file_atomically(tmp_path, monkeypatch):
+    state_file = tmp_path / "state.json"
+    state_file.write_text('{"old": true}\n', encoding="utf-8")
+    replacements = []
+    real_replace = sparse_backfill.os.replace
+
+    def record_replace(source, destination):
+        replacements.append((Path(source), Path(destination)))
+        real_replace(source, destination)
+
+    monkeypatch.setattr(sparse_backfill.os, "replace", record_replace)
+
+    save_state(state_file, {"biorxiv_history": {"last_paper_id": 42}})
+
+    assert load_state(state_file) == {"biorxiv_history": {"last_paper_id": 42}}
+    assert len(replacements) == 1
+    assert replacements[0][0].parent == state_file.parent
+    assert replacements[0][1] == state_file
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_run_backfill_resume_starts_after_saved_paper_id(tmp_path):
+    state_file = tmp_path / "state.json"
+    save_state(state_file, {"biorxiv_history": {"last_paper_id": 9}})
+    seen_after_ids = []
+
+    def fake_fetcher(_metadata_db, source_name, limit, after_paper_id):
+        seen_after_ids.append(after_paper_id)
+        if after_paper_id > 9:
+            return []
+        return [
+            {
+                "paper_id": 10,
+                "work_id": "W10",
+                "canonical_title": "single-cell RNA-seq",
+                "canonical_abstract": "",
+                "source_name": source_name,
+            }
+        ]
+
+    run_backfill(
+        _args(resume=True, limit=None, state_file=state_file),
+        metadata_db=FakeMetadataDB(),
+        vector_db=FakeVectorDB(),
+        fetcher=fake_fetcher,
+    )
+
+    assert seen_after_ids == [9, 10]
+    assert load_state(state_file) == {"biorxiv_history": {"last_paper_id": 10}}
+
+
+def test_run_backfill_memory_limit_error_includes_recovery_command(tmp_path):
+    state_file = tmp_path / "state.json"
+    save_state(state_file, {"biorxiv_history": {"last_paper_id": 9}})
+
+    class MemoryLimitedVectorDB(FakeVectorDB):
+        def add_sparse_documents(self, source_name, documents):
+            raise VectorDBError("API 返回错误: code=19100, msg=memory used more than 8192M")
+
+    def fake_fetcher(_metadata_db, source_name, limit, after_paper_id):
+        return [
+            {
+                "paper_id": 10,
+                "work_id": "W10",
+                "canonical_title": "single-cell RNA-seq",
+                "canonical_abstract": "",
+                "source_name": source_name,
+            }
+        ]
+
+    with pytest.raises(VectorDBError) as exc_info:
+        run_backfill(
+            _args(resume=True, state_file=state_file),
+            metadata_db=FakeMetadataDB(),
+            vector_db=MemoryLimitedVectorDB(),
+            fetcher=fake_fetcher,
+        )
+
+    message = str(exc_info.value)
+    assert "configure_sparse_disk_swap.py" in message
+    assert "--sources biorxiv_history --apply" in message
+    assert "last_paper_id=9" in message
+    assert load_state(state_file) == {"biorxiv_history": {"last_paper_id": 9}}
 
 
 def test_run_backfill_upserts_batches():
