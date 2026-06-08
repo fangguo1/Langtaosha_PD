@@ -21,7 +21,6 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.docset_hub.storage.metadata_db import MetadataDB
 from src.docset_hub.storage.vector_db import VectorDB
-from src.docset_hub.storage.vector_db_client import VectorDBError
 
 try:
     from tqdm import tqdm
@@ -259,19 +258,7 @@ def run_backfill(
             if args.dry_run:
                 indexed_count = len(documents)
             else:
-                try:
-                    result = vector_db.add_sparse_documents(source_name=source_name, documents=documents)
-                except VectorDBError as exc:
-                    if "code=19100" in str(exc) and "memory used more than" in str(exc).lower():
-                        raise VectorDBError(
-                            f"{exc}\n"
-                            f"Sparse collection 内存索引已达到实例上限。当前 source={source_name}, "
-                            f"安全恢复游标 last_paper_id={after_paper_id}。先执行：\n"
-                            f"  {sys.executable} scripts/configure_sparse_disk_swap.py "
-                            f"--config-path {args.config_path} --sources {source_name} --apply\n"
-                            "等待索引状态恢复 ready 后，再使用原命令和 state file 继续 --resume。"
-                        ) from exc
-                    raise
+                result = vector_db.add_sparse_documents(source_name=source_name, documents=documents)
                 indexed_count = result.get("document_count", len(documents))
 
             summary.indexed += indexed_count

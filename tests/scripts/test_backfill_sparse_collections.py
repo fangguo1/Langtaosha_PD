@@ -3,8 +3,6 @@ from __future__ import annotations
 from argparse import Namespace
 from pathlib import Path
 
-import pytest
-
 import scripts.backfill_sparse_collections as sparse_backfill
 from scripts.backfill_sparse_collections import (
     build_index_text,
@@ -14,7 +12,6 @@ from scripts.backfill_sparse_collections import (
     run_backfill,
     save_state,
 )
-from src.docset_hub.storage.vector_db_client import VectorDBError
 
 
 class FakeMetadataDB:
@@ -192,40 +189,6 @@ def test_run_backfill_resume_starts_after_saved_paper_id(tmp_path):
 
     assert seen_after_ids == [9, 10]
     assert load_state(state_file) == {"biorxiv_history": {"last_paper_id": 10}}
-
-
-def test_run_backfill_memory_limit_error_includes_recovery_command(tmp_path):
-    state_file = tmp_path / "state.json"
-    save_state(state_file, {"biorxiv_history": {"last_paper_id": 9}})
-
-    class MemoryLimitedVectorDB(FakeVectorDB):
-        def add_sparse_documents(self, source_name, documents):
-            raise VectorDBError("API 返回错误: code=19100, msg=memory used more than 8192M")
-
-    def fake_fetcher(_metadata_db, source_name, limit, after_paper_id):
-        return [
-            {
-                "paper_id": 10,
-                "work_id": "W10",
-                "canonical_title": "single-cell RNA-seq",
-                "canonical_abstract": "",
-                "source_name": source_name,
-            }
-        ]
-
-    with pytest.raises(VectorDBError) as exc_info:
-        run_backfill(
-            _args(resume=True, state_file=state_file),
-            metadata_db=FakeMetadataDB(),
-            vector_db=MemoryLimitedVectorDB(),
-            fetcher=fake_fetcher,
-        )
-
-    message = str(exc_info.value)
-    assert "configure_sparse_disk_swap.py" in message
-    assert "--sources biorxiv_history --apply" in message
-    assert "last_paper_id=9" in message
-    assert load_state(state_file) == {"biorxiv_history": {"last_paper_id": 9}}
 
 
 def test_run_backfill_upserts_batches():
