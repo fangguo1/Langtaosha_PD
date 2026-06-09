@@ -4,6 +4,7 @@
 import json
 import os
 import sys
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,6 +28,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "src"))
 
+from app.feedback_review_page import register_feedback_review_routes
 from config.config_loader import get_db_engine, init_config
 from src.docset_hub.indexing import (
     CompositeSpanMatcher,
@@ -41,6 +43,7 @@ from src.docset_hub.indexing import (
     SpanMatchResult,
     build_search_highlight,
 )
+from src.docset_hub.logging import record_frontend_search_request
 
 
 def _resolve_config_path() -> Path:
@@ -67,6 +70,7 @@ app = Flask(
     root_path=str(ROOT),
     template_folder="templates",
 )
+app.json.ensure_ascii = False
 
 LANGTAOSHA_SOURCES = ("langtaosha",)
 BIORXIV_SOURCES = ("biorxiv_history", "biorxiv_daily")
@@ -74,7 +78,6 @@ SOURCE_SEARCH_TOP_K = 100
 DEFAULT_INDEXER_SEARCH_TYPE = "hybrid_retrieval"
 STUDY_SESSION_COOKIE = "study_session_id"
 STUDY_SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
-FEEDBACK_REVIEW_DATA_PATH = ROOT / "docs" / "implementation_log" / "20260511" / "user_study_case_study_searches_20260511.jsonl"
 DEFAULT_SPAN_SCISPACY_MODEL = "en_core_sci_lg"
 DEFAULT_ONTOLOGY_LINKER_URL = "http://127.0.0.1:8765"
 SPAN_MATCH_DISPLAY_THRESHOLD = 0.9
@@ -91,6 +94,8 @@ GRANT_TRENDS_REVIEWS_PATH = (
 )
 GRANT_TRENDS_REVIEW_DECISIONS = frozenset({"accept", "reject", "recategorize"})
 API_SERVICE_NAME = "langtaosha-api"
+CLIENT_SURFACE_HEADER = "X-Langtaosha-Client-Surface"
+DEFAULT_CLIENT_SURFACE = "unknown"
 DEFAULT_FRONTEND_ALLOWED_ORIGINS = (
     "http://localhost:5004",
     "http://127.0.0.1:5004",
@@ -101,7 +106,6 @@ PROTECTED_API_PREFIXES = (
     "/api/ready",
     "/api/scholar/search",
 )
-
 
 def _request_id() -> str:
     return getattr(g, "request_id", uuid.uuid4().hex)
@@ -166,11 +170,7 @@ def _api_token_authorized() -> bool:
 
 @app.before_request
 def assign_request_id():
-    g.request_id = (
-        request.headers.get("X-Request-Id")
-        or request.headers.get("X-Correlation-Id")
-        or uuid.uuid4().hex
-    )
+    g.request_id = uuid.uuid4().hex
     if request.path.startswith("/api/"):
         if _api_path_requires_auth(request.path) and not _api_token_authorized():
             return _api_error(
@@ -197,7 +197,7 @@ def attach_api_headers(response):
             response.headers["Access-Control-Allow-Credentials"] = "true"
             response.headers["Vary"] = "Origin"
         response.headers["Access-Control-Allow-Headers"] = (
-            "Authorization, Content-Type, X-Request-Id, X-Correlation-Id"
+            f"Authorization, Content-Type, X-Request-Id, X-Correlation-Id, {CLIENT_SURFACE_HEADER}"
         )
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
 
@@ -231,6 +231,9 @@ def _api_error(
     if extra:
         body.update(extra)
     return jsonify(body), status_code
+
+
+register_feedback_review_routes(app, _api_success, _api_error)
 
 
 def _extract_doi(metadata: Dict[str, Any]) -> Optional[str]:
@@ -334,6 +337,8 @@ def _format_date_ymd(value: Any) -> Optional[str]:
 
 def _get_similarity_score(item: Dict[str, Any]) -> Optional[float]:
     score = item.get("similarity_score", item.get("similarity"))
+    if score is None:
+        score = item.get("score")
     if score is None:
         return None
     try:
@@ -718,6 +723,7 @@ def _prioritized_vector_search(
 
 def _map_search_item(
     item: Dict[str, Any],
+    rank: Optional[int] = None,
     highlight: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     metadata = item.get("metadata") or item
@@ -730,9 +736,11 @@ def _map_search_item(
     mapped = {
         "work_id": item.get("work_id"),
         "paper_id": item.get("paper_id"),
+        "rank": rank,
         "source_name": item.get("source_name"),
         "similarity": similarity_score,
         "similarity_score": similarity_score,
+        "ranking_score": similarity_score,
         "title": metadata.get("canonical_title"),
         "abstract": metadata.get("canonical_abstract"),
         "authors": _extract_authors(metadata),
@@ -742,6 +750,7 @@ def _map_search_item(
         "source_key": _normalize_source_key(raw_source_name),
         "link": _extract_paper_link(metadata, doi),
         "retrieval_reasons": retrieval_reasons,
+        "match_reasons": retrieval_reasons,
         "retrieval_reason_tags": [reason["key"] for reason in retrieval_reasons],
     }
     if highlight:
@@ -759,6 +768,7 @@ def _build_query_notice(
         return {
             "type": "vector",
             "message": "已按原 query 执行向量检索。",
+            "action": None,
         }
 
     if not understanding:
@@ -775,27 +785,33 @@ def _build_query_notice(
         return {
             "type": "author_name",
             "message": f"已识别为作者名，正在根据作者 {matched_author} 完成搜索。",
-            "action_label": "改用向量检索",
-            "fallback_mode": "vector",
-            "fallback_query": query,
+            "action": {
+                "label": "改用向量检索",
+                "mode": "vector",
+                "query": query,
+            },
         }
 
     if intent == "author_name" and route == "author_suggestion" and suggested_author:
         return {
             "type": "author_suggestion",
             "message": f'未找到 "{query}" 的高置信作者匹配，是否搜索作者 {suggested_author}？',
-            "action_label": f"搜索作者 {suggested_author}",
-            "fallback_mode": "smart",
-            "fallback_query": suggested_author,
+            "action": {
+                "label": f"搜索作者 {suggested_author}",
+                "mode": "smart",
+                "query": suggested_author,
+            },
         }
 
     if corrected_query and corrected_query != normalized_query:
         return {
             "type": "query_correction",
             "message": f"已识别到可能的拼写错误，实际搜索 query 为: {corrected_query}",
-            "action_label": "使用原 query 检索",
-            "fallback_mode": "vector",
-            "fallback_query": query,
+            "action": {
+                "label": "使用原 query 检索",
+                "mode": "vector",
+                "query": query,
+            },
         }
 
     return None
@@ -809,6 +825,54 @@ def _normalize_top_k(top_k: Any) -> int:
     if normalized_top_k <= 0:
         return 100
     return min(normalized_top_k, 100)
+
+
+def _normalize_limit(limit: Any = None, top_k: Any = None) -> int:
+    if limit is not None and str(limit).strip() != "":
+        return _normalize_top_k(limit)
+    return _normalize_top_k(top_k)
+
+
+def _normalize_offset(offset: Any) -> int:
+    try:
+        normalized_offset = int(offset)
+    except (TypeError, ValueError):
+        return 0
+    return max(normalized_offset, 0)
+
+
+def _build_search_query_payload(
+    input_query: str,
+    executed_query: Optional[str],
+    search_mode: str,
+    understanding: Dict[str, Any],
+) -> Dict[str, Any]:
+    return {
+        "input": input_query,
+        "executed": executed_query,
+        "mode": search_mode,
+        "intent": understanding.get("intent") or "unknown",
+        "route": understanding.get("route") or "none",
+        "corrected_query": understanding.get("corrected_query"),
+        "matched_author": understanding.get("matched_author"),
+        "suggested_author": understanding.get("suggested_author"),
+    }
+
+
+def _build_search_meta_payload(
+    returned_count: int,
+    limit: int,
+    offset: int,
+    total_count: int,
+    elapsed_ms: int,
+) -> Dict[str, Any]:
+    return {
+        "count": returned_count,
+        "limit": limit,
+        "offset": offset,
+        "has_more": offset + returned_count < total_count,
+        "elapsed_ms": elapsed_ms,
+    }
 
 
 def _parse_source_list(source_list_raw: Optional[str]) -> Optional[List[str]]:
@@ -865,6 +929,21 @@ def _json_payload(payload: Dict[str, Any]) -> str:
     return json.dumps(payload, ensure_ascii=False, default=str)
 
 
+def _resolve_client_surface() -> str:
+    return _optional_limited_text(request.headers.get(CLIENT_SURFACE_HEADER), 64) or DEFAULT_CLIENT_SURFACE
+
+
+def _collect_frontend_search_request_args() -> Dict[str, Any]:
+    return {
+        "query": (request.args.get("query") or "").strip(),
+        "mode": request.args.get("mode") or "smart",
+        "limit": request.args.get("limit", default=None, type=int),
+        "offset": request.args.get("offset", default=0, type=int),
+        "source_list": request.args.get("source_list"),
+        "top_k": request.args.get("top_k", default=None, type=int),
+    }
+
+
 def _coerce_required_int(payload: Dict[str, Any], field_name: str) -> int:
     raw_value = payload.get(field_name)
     if raw_value is None or raw_value == "":
@@ -906,22 +985,26 @@ def _validate_search_mode(search_mode: Any) -> str:
 def run_scholar_search(
     query: str,
     top_k: int = 100,
+    limit: Any = None,
+    offset: Any = 0,
     source_list: Optional[List[str]] = None,
     search_mode: str = "smart",
 ) -> Dict[str, Any]:
     """Run the existing PaperIndexer search flow and return the API body."""
+    started_at = time.time()
     normalized_query = (query or "").strip()
     if not normalized_query:
         raise ValueError("query 不能为空")
 
-    normalized_top_k = _normalize_top_k(top_k)
+    normalized_limit = _normalize_limit(limit=limit, top_k=top_k)
+    normalized_offset = _normalize_offset(offset)
     normalized_mode = _validate_search_mode(search_mode)
 
     if normalized_mode == "vector":
         results = _prioritized_vector_search(
             query=normalized_query,
             source_list=source_list,
-            per_source_top_k=normalized_top_k,
+            per_source_top_k=normalized_limit,
         )
         search_query = normalized_query
         understanding = {
@@ -952,7 +1035,7 @@ def run_scholar_search(
             )
             results = indexer.metadata_db.search_by_author(
                 author_name=search_query,
-                limit=normalized_top_k,
+                limit=normalized_limit,
                 source_list=resolved_sources,
                 fuzzy=True,
             )
@@ -967,7 +1050,7 @@ def run_scholar_search(
             results = _prioritized_vector_search(
                 query=search_query,
                 source_list=source_list,
-                per_source_top_k=normalized_top_k,
+                per_source_top_k=normalized_limit,
             )
 
     highlight = build_search_highlight(
@@ -976,27 +1059,48 @@ def run_scholar_search(
         understanding=understanding,
         search_mode=normalized_mode,
     )
-    mapped_results = [_map_search_item(item, highlight=highlight) for item in results]
+    paged_results = results[normalized_offset: normalized_offset + normalized_limit]
+    mapped_results = [
+        _map_search_item(
+            item,
+            rank=normalized_offset + index + 1,
+            highlight=highlight,
+        )
+        for index, item in enumerate(paged_results)
+    ]
     notice = _build_query_notice(
         query=normalized_query,
         search_query=search_query,
         understanding=understanding,
         search_mode=normalized_mode,
     )
+    elapsed_ms = int((time.time() - started_at) * 1000)
     return {
         "success": True,
-        "query": normalized_query,
+        "query": _build_search_query_payload(
+            input_query=normalized_query,
+            executed_query=search_query,
+            search_mode=normalized_mode,
+            understanding=understanding,
+        ),
         "search_query": search_query,
         "search_mode": normalized_mode,
         "query_understanding": understanding,
         "result_policy": {
-            "langtaosha_top_k": normalized_top_k,
-            "biorxiv_top_k": normalized_top_k,
+            "langtaosha_top_k": normalized_limit,
+            "biorxiv_top_k": normalized_limit,
             "dedupe_key": "work_id",
             "default_frontend_source": "langtaosha",
             "search_type": DEFAULT_INDEXER_SEARCH_TYPE,
             "display": "show_langtaosha_first_then_biorxiv",
         },
+        "meta": _build_search_meta_payload(
+            returned_count=len(mapped_results),
+            limit=normalized_limit,
+            offset=normalized_offset,
+            total_count=len(results),
+            elapsed_ms=elapsed_ms,
+        ),
         "notice": notice,
         "count": len(mapped_results),
         "results": mapped_results,
@@ -1009,7 +1113,21 @@ def insert_user_study_search_event(
     search_data: Dict[str, Any],
 ) -> Tuple[int, int]:
     engine = get_db_engine(db_key="metadata_db")
-    understanding = search_data.get("query_understanding") or {}
+    query_payload = search_data.get("query") or {}
+    understanding = search_data.get("query_understanding") or {
+        "intent": query_payload.get("intent"),
+        "route": query_payload.get("route"),
+        "corrected_query": query_payload.get("corrected_query"),
+        "matched_author": query_payload.get("matched_author"),
+        "suggested_author": query_payload.get("suggested_author"),
+    }
+    result_count = (
+        (search_data.get("meta") or {}).get("count")
+        if isinstance(search_data.get("meta"), dict)
+        else None
+    )
+    if result_count is None:
+        result_count = search_data.get("count")
     payload = {
         "query_understanding": understanding,
         "notice": search_data.get("notice"),
@@ -1063,11 +1181,11 @@ def insert_user_study_search_event(
                 "study_session_id": study_session_id,
                 "participant_id": participant_id,
                 "query_index": query_index,
-                "query": search_data.get("query"),
-                "search_mode": search_data.get("search_mode"),
-                "search_query": search_data.get("search_query"),
+                "query": query_payload.get("input", search_data.get("query")),
+                "search_mode": query_payload.get("mode", search_data.get("search_mode")),
+                "search_query": query_payload.get("executed", search_data.get("search_query")),
                 "query_understanding_route": understanding.get("route"),
-                "result_count": search_data.get("count"),
+                "result_count": result_count,
                 "payload": _json_payload(payload),
             },
         ).scalar_one()
@@ -1411,20 +1529,6 @@ def _get_daily_new_papers(limit: int = 10) -> List[Dict[str, Any]]:
     return rows
 
 
-def load_feedback_review_searches() -> List[Dict[str, Any]]:
-    if not FEEDBACK_REVIEW_DATA_PATH.exists():
-        raise FileNotFoundError(f"feedback review data not found: {FEEDBACK_REVIEW_DATA_PATH}")
-
-    searches: List[Dict[str, Any]] = []
-    with FEEDBACK_REVIEW_DATA_PATH.open("r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            searches.append(json.loads(line))
-    return searches
-
-
 @app.route("/")
 def index() -> str:
     return render_template("welcome.html")
@@ -1671,15 +1775,15 @@ def search_page() -> str:
     )
 
 
+@app.route("/search-api-test")
+def search_api_test_page() -> str:
+    return render_template("search_api_test.html")
+
+
 @app.route("/span-matcher")
 def span_matcher_page() -> str:
     query = (request.args.get("q") or "").strip()
     return render_template("span_matcher.html", initial_query=query)
-
-
-@app.route("/feedback-review")
-def feedback_review_page() -> str:
-    return render_template("feedback_review.html")
 
 
 @app.route("/study")
@@ -1777,15 +1881,47 @@ def api_scholar_search():
     try:
         data = run_scholar_search(
             query=(request.args.get("query") or "").strip(),
-            top_k=request.args.get("top_k", default=100, type=int),
+            top_k=request.args.get("top_k", default=None, type=int),
+            limit=request.args.get("limit", default=None, type=int),
+            offset=request.args.get("offset", default=0, type=int),
             source_list=_parse_source_list(request.args.get("source_list")),
             search_mode=request.args.get("mode") or "smart",
         )
+        if isinstance(data.get("meta"), dict):
+            data["meta"]["request_id"] = _request_id()
+        response_body = dict(data)
+        response_body["request_id"] = _request_id()
+        record_frontend_search_request(
+            request_args=_collect_frontend_search_request_args(),
+            response_body=response_body,
+            status_code=200,
+            client_surface=_resolve_client_surface(),
+            request_path=request.path,
+            request_method=request.method,
+        )
         return _api_success(data)
     except ValueError as exc:
-        return _api_error(str(exc), status_code=400, code="INVALID_REQUEST")
+        response, status_code = _api_error(str(exc), status_code=400, code="INVALID_REQUEST")
+        record_frontend_search_request(
+            request_args=_collect_frontend_search_request_args(),
+            response_body=response.get_json() or {},
+            status_code=status_code,
+            client_surface=_resolve_client_surface(),
+            request_path=request.path,
+            request_method=request.method,
+        )
+        return response, status_code
     except Exception as exc:
-        return _api_error(str(exc), status_code=500, code="SEARCH_FAILED")
+        response, status_code = _api_error(str(exc), status_code=500, code="SEARCH_FAILED")
+        record_frontend_search_request(
+            request_args=_collect_frontend_search_request_args(),
+            response_body=response.get_json() or {},
+            status_code=status_code,
+            client_surface=_resolve_client_surface(),
+            request_path=request.path,
+            request_method=request.method,
+        )
+        return response, status_code
 
 
 @app.route("/api/span-matcher", methods=["GET"])
@@ -1820,10 +1956,14 @@ def api_study_search():
         )
         data = run_scholar_search(
             query=(request.args.get("query") or "").strip(),
-            top_k=request.args.get("top_k", default=100, type=int),
+            top_k=request.args.get("top_k", default=None, type=int),
+            limit=request.args.get("limit", default=None, type=int),
+            offset=request.args.get("offset", default=0, type=int),
             source_list=_parse_source_list(request.args.get("source_list")),
             search_mode=request.args.get("mode") or "smart",
         )
+        if isinstance(data.get("meta"), dict):
+            data["meta"]["request_id"] = _request_id()
         search_event_id, query_index = insert_user_study_search_event(
             study_session_id=study_session_id,
             participant_id=participant_id,
@@ -1862,23 +2002,6 @@ def api_study_feedback():
         return _api_error(str(exc), status_code=400, code="INVALID_REQUEST")
     except Exception as exc:
         return _api_error(str(exc), status_code=500, code="FEEDBACK_FAILED")
-
-
-@app.route("/api/study/feedback-review-data", methods=["GET"])
-def api_feedback_review_data():
-    try:
-        searches = load_feedback_review_searches()
-        return _api_success(
-            {
-                "count": len(searches),
-                "source": str(FEEDBACK_REVIEW_DATA_PATH.relative_to(ROOT)),
-                "searches": searches,
-            }
-        )
-    except FileNotFoundError as exc:
-        return _api_error(str(exc), status_code=404, code="NOT_FOUND")
-    except Exception as exc:
-        return _api_error(str(exc), status_code=500, code="FEEDBACK_REVIEW_FAILED")
 
 
 @app.route("/api/recommend", methods=["GET"])

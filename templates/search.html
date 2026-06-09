@@ -768,7 +768,14 @@
       }
       const endpoint = isStudyMode ? "/api/study/search" : "/api/scholar/search";
       const url = `${endpoint}?${params.toString()}`;
-      const resp = await fetch(url, { credentials: "same-origin" });
+      const headers = {};
+      if (!isStudyMode) {
+        headers["X-Langtaosha-Client-Surface"] = "search_page";
+      }
+      const resp = await fetch(url, {
+        credentials: "same-origin",
+        headers,
+      });
       const data = await resp.json();
       if (!resp.ok || !data.success) {
         throw new Error(data.error || "搜索失败");

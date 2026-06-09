@@ -521,6 +521,297 @@ API response 如果暂时不能改字段名，也至少在 debug 中明确：
 
 ---
 
+## 4.8 与 `/api/scholar/search` 正式 API 对齐的 logging 方案
+
+当前 `frontend_api_0608_xiongye.md` 是给前端开发者看的正式契约文档，因此不应在该文档中引入 logging 设计说明。
+
+logging 方案应只放在 implementation log 中，并且尽量复用正式 API 已经定义好的 response 结构，降低联调和排障时的理解成本。
+
+本阶段范围明确为：
+
+```text
+只覆盖 GET /api/scholar/search
+不覆盖 /api/study/search
+不改变正式 API 输入输出契约
+```
+
+---
+
+## 4.9 两层记录策略
+
+针对 `/api/scholar/search`，每次请求产出两层记录：
+
+```text
+1. 完整信息 JSON structured log
+2. 数据库 summary 记录
+```
+
+分工如下：
+
+```text
+structured log：用于排障、复盘、联调
+DB summary：用于统计、筛选、聚合分析
+```
+
+不再要求把 logging 信息暴露给前端 response，也不以 `debug=true` 作为本期核心目标。
+
+---
+
+## 4.10 完整信息 JSON 设计原则
+
+完整信息 JSON 的主体直接按正式 API response 组织。
+
+也就是说，日志中的核心 payload 应尽量复用：
+
+```text
+success
+query
+meta
+notice
+results
+```
+
+但为了满足排障需求，需要在 response 外再补一层观测字段：
+
+```text
+event_type
+timestamp
+request_id
+client_surface
+http.path
+http.method
+http.status_code
+request_args
+status
+```
+
+目标不是“复制一份前端文档”，而是：
+
+```text
+以 API response body 为核心
+再补齐 response 外部不可见的调用上下文
+```
+
+---
+
+## 4.11 完整信息 JSON 标准结构
+
+建议结构：
+
+```json
+{
+  "event_type": "frontend_scholar_search",
+  "timestamp": "2026-06-08T15:04:05+08:00",
+  "request_id": "frontend-search-001",
+  "client_surface": "search_page",
+  "http": {
+    "path": "/api/scholar/search",
+    "method": "GET",
+    "status_code": 200
+  },
+  "request_args": {
+    "query": "Nav1.7",
+    "mode": "smart",
+    "limit": 5,
+    "offset": 0,
+    "source_list": "langtaosha",
+    "top_k": null
+  },
+  "response_body": {
+    "success": true,
+    "query": {
+      "input": "Nav1.7",
+      "executed": "Nav1.7",
+      "mode": "smart",
+      "intent": "semantic_search",
+      "route": "vector",
+      "corrected_query": null,
+      "matched_author": null,
+      "suggested_author": null
+    },
+    "meta": {
+      "count": 2,
+      "limit": 5,
+      "offset": 0,
+      "has_more": false,
+      "elapsed_ms": 182,
+      "request_id": "frontend-search-001"
+    },
+    "notice": null,
+    "results": [
+      {
+        "work_id": "W_langtaosha_0001",
+        "rank": 1,
+        "title": "Paper title"
+      }
+    ]
+  },
+  "results_truncated": false,
+  "results_logged_count": 2,
+  "results_full_count": 2,
+  "status": "ok"
+}
+```
+
+---
+
+## 4.12 `results` 截断策略
+
+完整信息 JSON 中的 `results` 不保存全部结果，只保留前 10 条。
+
+规则：
+
+```text
+最多记录前 10 条 response_body.results
+完整返回数量仍以 response_body.meta.count 为准
+```
+
+新增辅助字段：
+
+| 字段 | 含义 |
+|---|---|
+| `results_truncated` | 是否发生结果截断 |
+| `results_logged_count` | 实际写入日志的 result 条数 |
+| `results_full_count` | 本次 API 实际返回条数 |
+
+判定规则：
+
+```python
+MAX_LOGGED_RESULTS = 10
+
+results_truncated = len(results) > MAX_LOGGED_RESULTS
+results_logged_count = min(len(results), MAX_LOGGED_RESULTS)
+results_full_count = len(results)
+```
+
+这样既保留了“日志与 API response 同构”的优点，又避免 `limit=100` 时日志过大。
+
+---
+
+## 4.13 client_surface 记录方案
+
+为了区分是谁在调用 `/api/scholar/search`，前端页面增加一个可选 header：
+
+```text
+X-Langtaosha-Client-Surface
+```
+
+建议值：
+
+```text
+/search -> search_page
+/search-api-test -> search_api_test
+未传 -> unknown
+```
+
+该 header：
+
+```text
+不属于正式业务参数
+不影响现有 API 契约
+不要求前端 response 展示
+```
+
+仅用于后端 logging 和后续统计分析。
+
+---
+
+## 4.14 数据库 summary 结构
+
+数据库只保留一条 request-level 摘要，不保存完整 results。
+
+建议字段：
+
+```text
+id
+created_at
+request_id
+client_surface
+query_input
+query_executed
+search_mode
+query_intent
+query_route
+corrected_query
+matched_author
+suggested_author
+notice_type
+result_count
+limit_count
+offset_count
+has_more
+elapsed_ms
+status
+payload_json
+```
+
+其中：
+
+```text
+payload_json 只存 compact summary
+不存完整 response_body.results
+不存完整 request headers
+```
+
+summary 应从 structured log 或 API response body 中抽取，避免重新定义另一套语义。
+
+---
+
+## 4.15 `/api/scholar/search` 状态语义
+
+本专项先使用以下 request 级状态：
+
+```text
+ok
+empty
+degraded
+failed
+```
+
+含义：
+
+| 状态 | 含义 |
+|---|---|
+| `ok` | 请求成功，且有结果 |
+| `empty` | 请求成功，但结果为空 |
+| `degraded` | 请求成功，但内部存在降级现象 |
+| `failed` | 请求异常，返回错误 |
+
+本期如果还没有完善 branch 级摘要，可先最小落地：
+
+```text
+ok
+empty
+failed
+```
+
+`degraded` 作为后续补充目标预留。
+
+---
+
+## 4.16 与正式 API 契约的关系
+
+本方案默认不改变 `/api/scholar/search` 的正式输入输出定义。
+
+明确约束：
+
+```text
+不新增必填 query 参数
+不删除已有 response 字段
+不重命名已有 response 字段
+不把内部 logging/debug payload 暴露给普通前端调用方
+```
+
+唯一允许新增的是可选 header：
+
+```text
+X-Langtaosha-Client-Surface
+```
+
+它只影响日志，不影响业务逻辑。
+
+---
+
 # 5. 实施任务拆解
 
 ## Phase 1：Orchestrator manifest 修正
@@ -592,7 +883,7 @@ error_summary
 
 ---
 
-## Phase 2：搜索 request_id 与 retrieval_debug
+## Phase 2：`/api/scholar/search` request logging
 
 ### 任务 2.1：API 入口生成 request_id
 
@@ -605,7 +896,7 @@ app/main.py::api_scholar_search
 实现：
 
 ```python
-request_id = request.headers.get("X-Request-ID") or f"req_{uuid.uuid4().hex[:12]}"
+request_id = uuid.uuid4().hex
 ```
 
 验收标准：
@@ -616,7 +907,97 @@ request_id = request.headers.get("X-Request-ID") or f"req_{uuid.uuid4().hex[:12]
 
 ---
 
-### 任务 2.2：记录 query_understanding 摘要
+### 任务 2.2：记录 client_surface 与 request_args
+
+在：
+
+```text
+templates/search.html
+templates/search_api_test.html
+app/main.py::api_scholar_search
+```
+
+实现：
+
+```text
+search 页面请求头带 X-Langtaosha-Client-Surface=search_page
+search-api-test 页面请求头带 X-Langtaosha-Client-Surface=search_api_test
+后端未收到时默认 unknown
+```
+
+验收标准：
+
+- [ ] `/search` 请求日志中可见 `client_surface=search_page`
+- [ ] `/search-api-test` 请求日志中可见 `client_surface=search_api_test`
+- [ ] 未传 header 时仍可正常请求，并记为 `unknown`
+
+---
+
+### 任务 2.3：记录 query/notice/meta 摘要
+
+直接复用正式 API response 中的字段：
+
+```text
+query
+meta
+notice
+```
+
+验收标准：
+
+- [ ] structured log 中 `response_body.query` 与正式 response 一致
+- [ ] structured log 中 `response_body.meta` 与正式 response 一致
+- [ ] structured log 中 `response_body.notice` 与正式 response 一致
+
+---
+
+### 任务 2.4：完整信息 JSON 生成器
+
+目标：
+
+```text
+以 API response body 为核心
+补齐 event_type / timestamp / client_surface / http / request_args / status
+```
+
+验收标准：
+
+- [ ] 一次 `/api/scholar/search` 生成一条 request-level JSON
+- [ ] JSON 中包含 `request_args`
+- [ ] JSON 中包含 `response_body`
+- [ ] JSON 中包含 request 级 `status`
+
+---
+
+### 任务 2.5：results 截断
+
+规则：
+
+```text
+structured log 中最多保留前 10 条 results
+```
+
+验收标准：
+
+- [ ] `results <= 10` 时完整写入
+- [ ] `results > 10` 时只保留前 10 条
+- [ ] `results_truncated / results_logged_count / results_full_count` 正确
+
+---
+
+### 任务 2.6：数据库 summary 写入
+
+新增 request-level summary 记录，字段与 4.14 保持一致。
+
+验收标准：
+
+- [ ] 每次 `/api/scholar/search` 成功请求写入一条 summary
+- [ ] failed 请求可选择写入 failed summary 或至少输出 failed log
+- [ ] summary 中不保存完整 `results` 列表
+
+---
+
+### 任务 2.7：补充 query_understanding 摘要
 
 在：
 
@@ -645,7 +1026,7 @@ query_debug = {
 
 ---
 
-### 任务 2.3：记录三路召回摘要
+### 任务 2.8：记录三路召回摘要
 
 在：
 
@@ -669,7 +1050,7 @@ keyword_lookup.status / count / latency / error_summary
 
 ---
 
-### 任务 2.4：记录 fusion 摘要
+### 任务 2.9：记录 fusion 摘要
 
 记录：
 
@@ -690,7 +1071,7 @@ score_type = rrf_score
 
 ---
 
-### 任务 2.5：记录 hydration 摘要
+### 任务 2.10：记录 hydration 摘要
 
 在 hydrate 阶段记录：
 
@@ -714,28 +1095,27 @@ latency_ms
 
 ### 任务 3.1：structured log 输出
 
-搜索完成后输出一条结构化日志：
+搜索完成后输出一条结构化日志。
+
+推荐优先输出完整信息 JSON：
 
 ```python
-logger.info("search_completed", extra={"retrieval_debug": retrieval_debug})
-```
-
-如果当前 logger 不支持 JSON，先直接：
-
-```python
-logger.info("search_completed %s", json.dumps(retrieval_debug, ensure_ascii=False))
+logger.info("frontend_scholar_search %s", json.dumps(search_log_payload, ensure_ascii=False))
 ```
 
 验收标准：
 
-- [ ] 一次搜索只输出一条完整 summary log
+- [ ] 一次搜索只输出一条 request-level 完整日志
+- [ ] 日志主体以正式 API response body 为核心
 - [ ] 出错时输出 `search_failed`，包含 request_id 和 error_summary
 
 ---
 
-### 任务 3.2：API debug 参数
+### 任务 3.2：API debug 参数（降级为可选）
 
-支持：
+`debug=true` 不再是本期主目标。
+
+如果后续需要支持：
 
 ```text
 GET /api/scholar/search?q=xxx&debug=true
@@ -892,12 +1272,15 @@ warnings 包含 metadata_missing
 - [x] Orchestrator manifest 状态语义修正
 - [x] run_id 生成与写入
 - [ ] search request_id 生成与 header 返回
-- [ ] retrieval_debug 构建器
+- [ ] `/api/scholar/search` structured JSON log 构建器
+- [ ] `client_surface` 透传与记录
+- [ ] `results` 截断逻辑
+- [ ] request-level DB summary 写入
 - [ ] query_understanding debug summary
 - [ ] branch summary
 - [ ] fusion summary
 - [ ] hydration summary
-- [ ] debug=true response 开关
+- [ ] debug=true response 开关（可选）
 
 ## 8.2 文档交付
 
@@ -924,13 +1307,16 @@ Day 1:
 
 Day 2:
 - Search request_id
-- query_understanding debug summary
-- branch summary
+- client_surface header
+- structured JSON log
+- DB summary
 
 Day 3:
+- query_understanding debug summary
+- branch summary
 - fusion summary
 - hydration summary
-- debug=true response
+- debug=true response（可选）
 - 基础测试
 ```
 
@@ -944,7 +1330,7 @@ Day 3:
 
 ```text
 Orchestrator：把本地 manifest 做准。
-Search：给每次请求一个 request_id，并输出 compact retrieval_debug。
+Search：对 /api/scholar/search 输出一条以正式 API response 为核心的完整 JSON log，再写一条 DB summary。
 ```
 
 这样已经可以覆盖 80% 的上线前排障与评估需求。

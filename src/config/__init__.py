@@ -7,6 +7,7 @@ from .config_loader import (
     get_db_engine,
     get_db_connection,
     get_default_sources,
+    get_frontend_search_logging_config,
     _reset_config,
 )
 
@@ -17,6 +18,6 @@ __all__ = [
     'get_db_engine',
     'get_db_connection',
     'get_default_sources',
+    'get_frontend_search_logging_config',
     '_reset_config',
 ]
-
