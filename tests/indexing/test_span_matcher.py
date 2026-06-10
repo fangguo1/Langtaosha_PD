@@ -169,6 +169,97 @@ def test_remote_ontology_span_matcher_promotes_nested_payload_aliases_to_evidenc
     assert evidence.payload["payload"]["definition"] == "A malignant neoplasm of melanocytes."
 
 
+def test_remote_ontology_span_matcher_filters_disallowed_ontology_evidence_for_retrieval():
+    session = FakeSession(
+        FakeResponse(
+            payload={
+                "results": [
+                    {
+                        "candidate_id": "c0",
+                        "evidence": [
+                            {
+                                "source": "umls",
+                                "concept_id": "C1700001",
+                                "canonical": "Method",
+                                "confidence": 0.97,
+                                "semantic_types": ["T170"],
+                            },
+                            {
+                                "source": "umls",
+                                "concept_id": "C0025202",
+                                "canonical": "Melanoma",
+                                "confidence": 0.96,
+                                "semantic_types": ["T191"],
+                            },
+                            {
+                                "source": "mesh",
+                                "concept_id": "D000001",
+                                "canonical": "Databases as Topic",
+                                "confidence": 0.95,
+                                "semantic_types": ["T170"],
+                            },
+                            {
+                                "source": "mesh",
+                                "concept_id": "D008545",
+                                "canonical": "Melanoma",
+                                "confidence": 0.94,
+                                "semantic_types": ["T191"],
+                            },
+                        ],
+                    }
+                ]
+            }
+        )
+    )
+    matcher = RemoteOntologySpanMatcher("http://127.0.0.1:8765/", session=session)
+
+    evidence = matcher.match(candidate("melanoma"))
+
+    assert [(item.source, item.concept_id) for item in evidence] == [
+        ("umls", "C0025202"),
+        ("mesh", "D008545"),
+    ]
+    mesh_evidence = [item for item in evidence if item.source == "mesh"][0]
+    assert mesh_evidence.payload["filter_status"] == "allow"
+    assert mesh_evidence.payload["filter_reason"] == "mesh_tui_group:DISO"
+
+
+def test_remote_ontology_span_matcher_keeps_unknown_category_ontology_evidence():
+    session = FakeSession(
+        FakeResponse(
+            payload={
+                "results": [
+                    {
+                        "candidate_id": "c0",
+                        "evidence": [
+                            {
+                                "source": "umls",
+                                "concept_id": "C0017428",
+                                "canonical": "Genome",
+                                "confidence": 0.91,
+                            },
+                            {
+                                "source": "mesh",
+                                "concept_id": "D005823",
+                                "canonical": "Genome",
+                                "confidence": 0.9,
+                            },
+                        ],
+                    }
+                ]
+            }
+        )
+    )
+    matcher = RemoteOntologySpanMatcher("http://127.0.0.1:8765/", session=session)
+
+    evidence = matcher.match(candidate("genome"))
+
+    assert [(item.source, item.concept_id) for item in evidence] == [
+        ("umls", "C0017428"),
+        ("mesh", "D005823"),
+    ]
+
+
 def test_remote_ontology_span_matcher_disables_environment_proxies_by_default():
     matcher = RemoteOntologySpanMatcher("http://127.0.0.1:8765")
 

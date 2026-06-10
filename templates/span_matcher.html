@@ -368,6 +368,12 @@
     async function runMatcher(query) {
       const url = `/api/span-matcher?query=${encodeURIComponent(query)}`;
       const resp = await fetch(url);
+      const contentType = resp.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        const bodyText = await resp.text();
+        const bodyPreview = bodyText.trim().slice(0, 120);
+        throw new Error(`接口返回了非 JSON 响应（HTTP ${resp.status}）: ${bodyPreview || "empty response"}`);
+      }
       const data = await resp.json();
       if (!resp.ok || !data.success) {
         throw new Error(data.error || "匹配失败");
