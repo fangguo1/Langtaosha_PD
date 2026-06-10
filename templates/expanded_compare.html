@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Expanded Sparse Compare</title>
+  <style>
+    :root {
+      --bg: #f6f7f8;
+      --panel: #ffffff;
+      --text: #171717;
+      --muted: #5f6368;
+      --line: #d9dee3;
+      --blue: #2f6f9f;
+      --green: #2f7d64;
+      --gold: #b18412;
+      --red: #b54747;
+      --soft-blue: #eef6fb;
+      --soft-green: #eef8f4;
+      --soft-gold: #fff8e5;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .shell {
+      width: min(1440px, 100%);
+      margin: 0 auto;
+      padding: 24px 16px 48px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 26px;
+      line-height: 1.25;
+    }
+
+    .nav-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      color: var(--text);
+      padding: 7px 12px;
+      font-size: 14px;
+      font-weight: 700;
+      text-decoration: none;
+    }
+
+    .searchbar {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) 96px 136px;
+      gap: 10px;
+      align-items: center;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+    }
+
+    input {
+      width: 100%;
+      min-height: 42px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-size: 15px;
+      outline: none;
+      background: #ffffff;
+    }
+
+    input:focus {
+      border-color: var(--blue);
+      box-shadow: 0 0 0 3px rgba(47, 111, 159, 0.14);
+    }
+
+    button {
+      min-height: 42px;
+      border: 0;
+      border-radius: 6px;
+      background: var(--blue);
+      color: #ffffff;
+      font-size: 15px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      opacity: 0.65;
+      cursor: not-allowed;
+    }
+
+    .status {
+      min-height: 24px;
+      margin: 12px 2px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .terms-panel,
+    .plan-panel {
+      display: none;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      margin-bottom: 12px;
+    }
+
+    .panel-title {
+      margin: 0 0 10px;
+      font-size: 15px;
+      font-weight: 900;
+    }
+
+    .term-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .term-chip {
+      display: inline-flex;
+      align-items: center;
+      max-width: 100%;
+      border: 1px solid #9bc2d9;
+      border-radius: 999px;
+      background: var(--soft-blue);
+      color: #174b6f;
+      padding: 4px 9px;
+      font-size: 12px;
+      line-height: 1.4;
+      overflow-wrap: anywhere;
+    }
+
+    .term-chip.prefix {
+      border-color: #94c8b5;
+      background: var(--soft-green);
+      color: #195b46;
+    }
+
+    .plan-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 10px;
+    }
+
+    .span-box {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+      background: #fbfcfd;
+    }
+
+    .span-title {
+      font-size: 14px;
+      font-weight: 900;
+      margin-bottom: 8px;
+    }
+
+    .compare-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      align-items: start;
+    }
+
+    .column {
+      min-width: 0;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+    }
+
+    .column h2 {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+      margin: 0 0 12px;
+      font-size: 18px;
+    }
+
+    .count {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .results {
+      display: grid;
+      gap: 10px;
+    }
+
+    .result-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: #ffffff;
+    }
+
+    .result-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .rank {
+      flex: 0 0 auto;
+      color: var(--blue);
+      font-weight: 900;
+      font-size: 13px;
+    }
+
+    .score {
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .title {
+      margin: 0 0 8px;
+      font-size: 15px;
+      line-height: 1.45;
+      font-weight: 900;
+      overflow-wrap: anywhere;
+    }
+
+    .abstract {
+      margin: 0;
+      color: #303134;
+      font-size: 13px;
+      line-height: 1.55;
+      max-height: 124px;
+      overflow: auto;
+    }
+
+    .keywords {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 10px;
+    }
+
+    .keyword {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 3px 7px;
+      color: #303134;
+      background: #f8fafb;
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+
+    mark {
+      border-radius: 4px;
+      padding: 0 2px;
+      background: var(--soft-gold);
+      color: #4c3700;
+      font-weight: 800;
+    }
+
+    mark.prefix-hit {
+      background: var(--soft-green);
+      color: #174d3c;
+    }
+
+    .matched-spans {
+      display: grid;
+      gap: 6px;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px dashed var(--line);
+    }
+
+    .span-match {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    .empty,
+    .error {
+      border: 1px dashed var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      color: var(--muted);
+      background: #fbfcfd;
+      font-size: 14px;
+    }
+
+    .error {
+      border-color: #e3a6a6;
+      color: var(--red);
+      background: #fff7f7;
+    }
+
+    @media (max-width: 860px) {
+      .searchbar,
+      .compare-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <div class="topbar">
+      <h1>Expanded Sparse Compare</h1>
+      <a class="nav-link" href="/">Develop Tools</a>
+    </div>
+
+    <form class="searchbar" id="compare-form">
+      <input id="query-input" name="query" value="{{ initial_query }}" placeholder="adhesion protein in kidney" autocomplete="off" />
+      <input id="top-k-input" name="top_k" type="number" min="1" max="50" value="{{ default_top_k }}" />
+      <button id="run-button" type="submit">Run</button>
+    </form>
+
+    <div class="status" id="status"></div>
+
+    <section class="terms-panel" id="terms-panel">
+      <h2 class="panel-title">MetadataDB terms</h2>
+      <div class="term-grid" id="term-grid"></div>
+    </section>
+
+    <section class="plan-panel" id="plan-panel">
+      <h2 class="panel-title">Semantic spans</h2>
+      <div class="plan-grid" id="plan-grid"></div>
+    </section>
+
+    <section class="compare-grid">
+      <div class="column">
+        <h2>Sparse <span class="count" id="sparse-count">0</span></h2>
+        <div class="results" id="sparse-results"></div>
+      </div>
+      <div class="column">
+        <h2>Expanded sparse <span class="count" id="expanded-count">0</span></h2>
+        <div class="results" id="expanded-results"></div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const form = document.getElementById("compare-form");
+    const queryInput = document.getElementById("query-input");
+    const topKInput = document.getElementById("top-k-input");
+    const runButton = document.getElementById("run-button");
+    const statusEl = document.getElementById("status");
+    const termPanel = document.getElementById("terms-panel");
+    const termGrid = document.getElementById("term-grid");
+    const planPanel = document.getElementById("plan-panel");
+    const planGrid = document.getElementById("plan-grid");
+    const sparseResults = document.getElementById("sparse-results");
+    const expandedResults = document.getElementById("expanded-results");
+    const sparseCount = document.getElementById("sparse-count");
+    const expandedCount = document.getElementById("expanded-count");
+
+    function escapeHtml(value) {
+      return String(value || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function escapeRegExp(value) {
+      return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+
+    function highlightText(value, terms) {
+      let html = escapeHtml(value || "");
+      const sorted = [...terms].sort((a, b) => b.text.length - a.text.length);
+      sorted.forEach((term, index) => {
+        if (!term.text) return;
+        const cssClass = term.match_mode === "prefix" ? "prefix-hit" : "";
+        const pattern = term.match_mode === "prefix"
+          ? new RegExp("(^|[^a-zA-Z0-9])(" + escapeRegExp(term.text) + "[a-zA-Z0-9_-]*)", "gi")
+          : new RegExp("(" + escapeRegExp(term.text) + ")", "gi");
+        html = html.replace(pattern, (match, lead, body) => {
+          if (term.match_mode === "prefix") {
+            return `${lead}<mark class="${cssClass}" data-term="${index}">${body}</mark>`;
+          }
+          return `<mark data-term="${index}">${match}</mark>`;
+        });
+      });
+      return html;
+    }
+
+    function renderTerms(terms) {
+      termPanel.style.display = terms.length ? "block" : "none";
+      termGrid.innerHTML = terms.map((term) => {
+        const className = term.match_mode === "prefix" ? "term-chip prefix" : "term-chip";
+        return `<span class="${className}">${escapeHtml(term.text)} [${escapeHtml(term.match_mode)}]</span>`;
+      }).join("");
+    }
+
+    function renderPlan(plan) {
+      if (!plan || !Array.isArray(plan.spans) || !plan.spans.length) {
+        planPanel.style.display = "none";
+        planGrid.innerHTML = "";
+        return;
+      }
+      planPanel.style.display = "block";
+      planGrid.innerHTML = plan.spans.map((span) => {
+        const tier1 = (span.own_terms?.tier1 || []).map((term) => `${escapeHtml(term.text)} [${escapeHtml(term.match_mode)}]`).join(", ") || "-";
+        const tier2 = (span.own_terms?.tier2 || []).map((term) => `${escapeHtml(term.text)} [${escapeHtml(term.match_mode)}]`).join(", ") || "-";
+        const children = (span.children || []).map((child) => `<div>${escapeHtml(child.span_id)} ${escapeHtml(child.surface_text)}</div>`).join("");
+        return `
+          <div class="span-box">
+            <div class="span-title">${escapeHtml(span.span_id)} ${escapeHtml(span.surface_text)}</div>
+            <div>tier1: ${tier1}</div>
+            <div>tier2: ${tier2}</div>
+            ${children ? `<div>${children}</div>` : ""}
+          </div>
+        `;
+      }).join("");
+    }
+
+    function renderResults(container, countEl, items, terms, mode, errorMessage) {
+      countEl.textContent = String(items.length);
+      if (errorMessage) {
+        container.innerHTML = `<div class="error">${escapeHtml(errorMessage)}</div>`;
+        return;
+      }
+      if (!items.length) {
+        container.innerHTML = `<div class="empty">No results</div>`;
+        return;
+      }
+      container.innerHTML = items.map((item) => {
+        const score = Number(item.coverage_ratio ?? item.score ?? 0);
+        const scoreLabel = mode === "expanded"
+          ? `coverage ${score.toFixed(2)}`
+          : `score ${score.toFixed(4)}`;
+        const keywords = (item.keywords || []).slice(0, 18).map((keyword) => (
+          `<span class="keyword">${highlightText(keyword, terms)}</span>`
+        )).join("");
+        const spans = (item.matched_spans || []).map((span) => {
+          const termsText = (span.matched_terms || []).join(", ") || "-";
+          const fieldsText = (span.matched_fields || []).join(", ") || "-";
+          return `<div class="span-match">${escapeHtml(span.span_id)} ${escapeHtml(span.canonical_text)} | ${escapeHtml(termsText)} | ${escapeHtml(fieldsText)}</div>`;
+        }).join("");
+        return `
+          <article class="result-card">
+            <div class="result-head">
+              <span class="rank">#${escapeHtml(item.rank)}</span>
+              <span class="score">${escapeHtml(scoreLabel)}</span>
+            </div>
+            <h3 class="title">${highlightText(item.title || "(untitled)", terms)}</h3>
+            <p class="abstract">${highlightText(item.abstract || "", terms)}</p>
+            ${keywords ? `<div class="keywords">${keywords}</div>` : ""}
+            ${spans ? `<div class="matched-spans">${spans}</div>` : ""}
+          </article>
+        `;
+      }).join("");
+    }
+
+    async function runCompare() {
+      const query = queryInput.value.trim();
+      if (!query) {
+        statusEl.textContent = "query required";
+        return;
+      }
+      runButton.disabled = true;
+      statusEl.textContent = "running...";
+      sparseResults.innerHTML = "";
+      expandedResults.innerHTML = "";
+      try {
+        const params = new URLSearchParams({
+          query,
+          top_k: topKInput.value || "10",
+        });
+        const response = await fetch(`/api/expanded-compare?${params.toString()}`);
+        const payload = await response.json();
+        if (!response.ok || !payload.success) {
+          throw new Error(payload.error || `HTTP ${response.status}`);
+        }
+        const terms = payload.highlight_terms || [];
+        renderTerms(terms);
+        renderPlan(payload.semantic_plan);
+        renderResults(sparseResults, sparseCount, payload.results?.sparse || [], terms, "sparse", payload.errors?.sparse);
+        renderResults(expandedResults, expandedCount, payload.results?.expanded_sparse || [], terms, "expanded");
+        statusEl.textContent = `${payload.query} | ${payload.expanded_query_rows?.length || 0} DB rows`;
+      } catch (error) {
+        statusEl.innerHTML = `<span class="error">${escapeHtml(error.message || error)}</span>`;
+      } finally {
+        runButton.disabled = false;
+      }
+    }
+
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      runCompare();
+    });
+
+    if (queryInput.value.trim()) {
+      runCompare();
+    }
+  </script>
+</body>
+</html>

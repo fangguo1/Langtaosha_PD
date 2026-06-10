@@ -7,7 +7,7 @@ import argparse
 import os
 import sys
 from pathlib import Path
-from typing import Dict, Iterable, List, Mapping, Optional, Sequence
+from typing import List, Mapping, Sequence
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -15,20 +15,18 @@ SRC_ROOT = PROJECT_ROOT / "src"
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(SRC_ROOT))
 
-from docset_hub.indexing.entity_filter_policy import filter_ontology_evidence_items  # noqa: E402
 from docset_hub.indexing.query_phrase_analyzer import (  # noqa: E402
-    MetadataDBPhraseLexicon,
     PhraseCandidate,
-    QueryPhraseAnalyzer,
 )
+from docset_hub.indexing.query_semantic_plan import QuerySemanticPlan  # noqa: E402
 from docset_hub.indexing.span_matcher import (  # noqa: E402
-    CompositeSpanMatcher,
     ConceptMatchEvidence,
-    KeywordSurfaceSpanMatcher,
-    MaximalConceptSelector,
-    RemoteOntologySpanMatcher,
-    SpanMatcherExecutor,
     SpanMatchResult,
+)
+from docset_hub.indexing.span_matcher_pipeline import (  # noqa: E402
+    SpanMatcherPipeline,
+    SpanMatcherProfile,
+    SpanMatcherTrace,
 )
 from docset_hub.storage.metadata_db import MetadataDB  # noqa: E402
 
@@ -63,7 +61,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--ontology-threshold",
         type=float,
-        default=float(os.environ.get("ONTOLOGY_THRESHOLD", "0.7")),
+        default=float(os.environ.get("ONTOLOGY_THRESHOLD", "0.9")),
         help="Minimum ontology linker confidence.",
     )
     parser.add_argument(
@@ -100,77 +98,6 @@ def parse_csv(value: str) -> List[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
-def load_scispacy(model_name: str):
-    try:
-        import spacy
-    except ImportError:
-        print("spaCy is not installed; continuing with rule-only candidates.", file=sys.stderr)
-        return None
-
-    try:
-        return spacy.load(model_name)
-    except OSError:
-        print(
-            f"Could not load '{model_name}'; continuing with rule-only candidates.",
-            file=sys.stderr,
-        )
-        return None
-
-
-def build_analyzer(args: argparse.Namespace) -> QueryPhraseAnalyzer:
-    scispacy_pipeline = None if args.skip_scispacy else load_scispacy(args.scispacy_model)
-    return QueryPhraseAnalyzer(lexicon=None, scispacy_pipeline=scispacy_pipeline)
-
-
-def build_keyword_matcher(args: argparse.Namespace) -> Optional[KeywordSurfaceSpanMatcher]:
-    if not args.use_db_keywords:
-        return None
-    metadata_db = MetadataDB(config_path=args.config_path)
-    lexicon = MetadataDBPhraseLexicon(
-        metadata_db=metadata_db,
-        paper_source_names=parse_csv(args.paper_source_list),
-    )
-    return KeywordSurfaceSpanMatcher(lexicon=lexicon)
-
-
-def collect_ontology_trace(
-    matcher: RemoteOntologySpanMatcher,
-    candidates: Sequence[PhraseCandidate],
-) -> tuple[Dict[str, List[Mapping[str, object]]], Dict[str, List[ConceptMatchEvidence]]]:
-    candidate_ids = [f"c{index}" for index in range(len(candidates))]
-    payload = {
-        "sources": list(matcher.sources),
-        "top_k": matcher.top_k,
-        "threshold": matcher.threshold,
-        "candidates": [
-            {
-                "id": candidate_id,
-                "text": candidate.text,
-                "normalized_text": candidate.normalized_text,
-                "kind": candidate.kind,
-                "start": candidate.start,
-                "end": candidate.end,
-            }
-            for candidate_id, candidate in zip(candidate_ids, candidates)
-        ],
-    }
-    response_payload = matcher._post(payload)
-    raw_results = matcher._results_by_candidate_id(response_payload)
-
-    raw_by_surface: Dict[str, List[Mapping[str, object]]] = {}
-    filtered_by_surface: Dict[str, List[ConceptMatchEvidence]] = {}
-    for candidate_id, candidate in zip(candidate_ids, candidates):
-        raw_items = raw_results.get(candidate_id, [])
-        label = candidate_label(candidate)
-        raw_by_surface[label] = list(raw_items)
-        filtered_items = filter_ontology_evidence_items(raw_items)
-        filtered_by_surface[label] = [
-            matcher._to_evidence(candidate, item)
-            for item in filtered_items
-        ]
-    return raw_by_surface, filtered_by_surface
-
-
 def render_trace_report(
     *,
     query: str,
@@ -182,6 +109,7 @@ def render_trace_report(
     keyword_evidence: Mapping[str, Sequence[ConceptMatchEvidence]],
     span_results: Sequence[SpanMatchResult],
     selected_concepts,
+    semantic_plan: QuerySemanticPlan,
 ) -> str:
     lines: List[str] = []
     lines.append(f"> {query}")
@@ -223,6 +151,10 @@ def render_trace_report(
 
     lines.append("=== Selected Concepts ===")
     lines.extend(_format_selected_concepts(selected_concepts))
+    lines.append("")
+
+    lines.append("=== Query Semantic Plan ===")
+    lines.extend(_format_semantic_plan(semantic_plan))
     lines.append("")
     return "\n".join(lines)
 
@@ -310,6 +242,40 @@ def _format_selected_concepts(selected_concepts: Sequence[object]) -> List[str]:
     return lines
 
 
+def _format_semantic_plan(semantic_plan: QuerySemanticPlan) -> List[str]:
+    lines: List[str] = []
+    for span in semantic_plan.spans:
+        lines.append(
+            f"- {span.span_id}: {span.surface_text} "
+            f"(canonical={span.canonical_text}, span={span.start}:{span.end})"
+        )
+        lines.append(f"  own.tier1={_format_semantic_terms(span.own_terms.tier1)}")
+        lines.append(f"  own.tier2={_format_semantic_terms(span.own_terms.tier2)}")
+        if not span.children:
+            lines.append("  children=-")
+            continue
+        lines.append("  children:")
+        for child in span.children:
+            lines.append(
+                f"    - {child.span_id}: {child.surface_text} "
+                f"(canonical={child.canonical_text}, span={child.start}:{child.end})"
+            )
+            lines.append(f"      own.tier1={_format_semantic_terms(child.own_terms.tier1)}")
+            lines.append(f"      own.tier2={_format_semantic_terms(child.own_terms.tier2)}")
+    if not lines:
+        lines.append("(none)")
+    return lines
+
+
+def _format_semantic_terms(terms: Sequence[object]) -> str:
+    if not terms:
+        return "-"
+    formatted: List[str] = []
+    for term in terms:
+        formatted.append(f"{getattr(term, 'text', '-')} [{getattr(term, 'match_mode', 'exact')}]")
+    return ", ".join(formatted)
+
+
 def candidate_label(candidate: PhraseCandidate) -> str:
     return (
         f"{candidate.normalized_text} "
@@ -317,65 +283,44 @@ def candidate_label(candidate: PhraseCandidate) -> str:
     )
 
 
-def build_final_results(
-    expanded_candidates: Sequence[PhraseCandidate],
-    ontology_evidence: Mapping[str, Sequence[ConceptMatchEvidence]],
-    keyword_matcher: Optional[KeywordSurfaceSpanMatcher],
-) -> tuple[List[SpanMatchResult], List[object], Dict[str, List[ConceptMatchEvidence]]]:
-    keyword_buckets: Dict[str, List[ConceptMatchEvidence]] = {}
-    keyword_items = keyword_matcher.match_many(expanded_candidates) if keyword_matcher is not None else [[] for _ in expanded_candidates]
-    composite = CompositeSpanMatcher([])
-    span_results: List[SpanMatchResult] = []
-    for candidate, keyword_evidence in zip(expanded_candidates, keyword_items):
-        label = candidate_label(candidate)
-        bucket = list(ontology_evidence.get(label, [])) + list(keyword_evidence)
-        bucket.sort(key=composite._sort_key)
-        keyword_buckets[label] = list(keyword_evidence)
-        span_results.append(SpanMatchResult(candidate=candidate, evidence=bucket))
-    selector = MaximalConceptSelector()
-    selected = selector.select(span_results)
-    return span_results, selected, keyword_buckets
-
-
-def run_trace(args: argparse.Namespace, query: str) -> str:
-    analyzer = build_analyzer(args)
-    keyword_matcher = build_keyword_matcher(args)
-    ontology_matcher = RemoteOntologySpanMatcher(
-        base_url=args.ontology_linker_url,
-        sources=parse_csv(args.ontology_source_list),
-        top_k=args.ontology_top_k,
-        threshold=args.ontology_threshold,
-    )
-    executor = SpanMatcherExecutor(
-        matcher=CompositeSpanMatcher([ontology_matcher] + ([keyword_matcher] if keyword_matcher else [])),
+def build_profile(args: argparse.Namespace) -> SpanMatcherProfile:
+    factory = SpanMatcherProfile.ontology_plus_keyword if args.use_db_keywords else SpanMatcherProfile.ontology_only
+    return factory(
+        enable_scispacy=not args.skip_scispacy,
+        scispacy_model=args.scispacy_model,
+        ontology_base_url=args.ontology_linker_url,
+        ontology_sources=tuple(parse_csv(args.ontology_source_list)),
+        ontology_top_k=args.ontology_top_k,
+        ontology_threshold=args.ontology_threshold,
+        paper_sources=tuple(parse_csv(args.paper_source_list)),
         include_subphrases=not args.no_subphrase_ngram,
     )
 
-    normalized = analyzer.normalizer.normalize_query(query)
-    scispacy_doc = None
-    if analyzer.scispacy_pipeline is not None and normalized.normalized_query:
-        scispacy_doc = analyzer.scispacy_pipeline(normalized.normalized_query)
-    extractor_candidates = analyzer.extractor.extract(
-        normalized.normalized_query,
-        scispacy_doc=scispacy_doc,
-    )
-    expanded_candidates = executor.expand_candidates(extractor_candidates)
-    raw_ontology_items, filtered_ontology_evidence = collect_ontology_trace(ontology_matcher, expanded_candidates)
-    span_results, selected_concepts, keyword_evidence = build_final_results(
-        expanded_candidates,
-        filtered_ontology_evidence,
-        keyword_matcher,
+
+def run_trace(args: argparse.Namespace, query: str) -> str:
+    profile = build_profile(args)
+    metadata_db = MetadataDB(config_path=args.config_path) if profile.enable_keyword else None
+    result = SpanMatcherPipeline.from_profile(
+        profile=profile,
+        metadata_db=metadata_db,
+    ).run(query, trace=True)
+    trace = result.trace or SpanMatcherTrace()
+    semantic_plan = result.semantic_plan or QuerySemanticPlan(
+        original_query=result.query,
+        normalized_query=result.normalized_query,
+        spans=[],
     )
     return render_trace_report(
-        query=query,
-        normalized_query=normalized.normalized_query,
-        extractor_candidates=extractor_candidates,
-        expanded_candidates=expanded_candidates,
-        raw_ontology_items=raw_ontology_items,
-        filtered_ontology_evidence=filtered_ontology_evidence,
-        keyword_evidence=keyword_evidence,
-        span_results=span_results,
-        selected_concepts=selected_concepts,
+        query=result.query,
+        normalized_query=result.normalized_query,
+        extractor_candidates=result.extractor_candidates,
+        expanded_candidates=result.expanded_candidates,
+        raw_ontology_items=trace.raw_ontology_items,
+        filtered_ontology_evidence=trace.filtered_ontology_evidence,
+        keyword_evidence=trace.keyword_evidence,
+        span_results=result.span_results,
+        selected_concepts=result.selected_concepts,
+        semantic_plan=semantic_plan,
     )
 
 

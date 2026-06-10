@@ -1,5 +1,6 @@
 import pytest
 
+from src.docset_hub.indexing.query_semantic_plan import build_query_semantic_plan
 from src.docset_hub.indexing.query_phrase_analyzer import (
     InMemoryPhraseLexicon,
     PhraseCandidate,
@@ -258,6 +259,84 @@ def test_remote_ontology_span_matcher_keeps_unknown_category_ontology_evidence()
         ("umls", "C0017428"),
         ("mesh", "D005823"),
     ]
+
+
+def test_selected_concepts_from_span_matcher_can_be_promoted_to_query_semantic_plan():
+    results = [
+        SpanMatchResult(
+            candidate("adhesion protein", kind="connector_split", start=0),
+            [
+                ConceptMatchEvidence(
+                    candidate_text="adhesion protein",
+                    normalized_text="adhesion protein",
+                    start=0,
+                    end=16,
+                    candidate_kind="connector_split",
+                    source="umls",
+                    canonical="Adhesion protein",
+                    concept_id="C100",
+                    confidence=0.96,
+                    aliases=["Cell adhesion protein", "Adhesion molecule"],
+                ),
+                ConceptMatchEvidence(
+                    candidate_text="adhesion protein",
+                    normalized_text="adhesion protein",
+                    start=0,
+                    end=16,
+                    candidate_kind="connector_split",
+                    source="mesh",
+                    canonical="Cell adhesion molecule",
+                    concept_id="D100",
+                    confidence=0.94,
+                    aliases=["Cell adhesion molecule"],
+                ),
+            ],
+        ),
+        SpanMatchResult(
+            candidate("kidney", kind="connector_split", start=20),
+            [
+                ConceptMatchEvidence(
+                    candidate_text="kidney",
+                    normalized_text="kidney",
+                    start=20,
+                    end=26,
+                    candidate_kind="connector_split",
+                    source="umls",
+                    canonical="Kidney",
+                    concept_id="C200",
+                    confidence=0.95,
+                    aliases=["Renal"],
+                ),
+                ConceptMatchEvidence(
+                    candidate_text="kidney",
+                    normalized_text="kidney",
+                    start=20,
+                    end=26,
+                    candidate_kind="connector_split",
+                    source="keyword",
+                    canonical="Kidney",
+                    concept_id="keyword:kidney",
+                    confidence=1.0,
+                ),
+            ],
+        ),
+    ]
+    selected = MaximalConceptSelector().select(results)
+
+    plan = build_query_semantic_plan(
+        original_query="adhesion protein in kidney",
+        normalized_query="adhesion protein in kidney",
+        selected_concepts=selected,
+        span_results=results,
+    )
+
+    assert [group.surface_text for group in plan.spans] == ["adhesion protein", "kidney"]
+    assert plan.spans[0].tier2_terms == [
+        "adhesion molecule",
+        "cell adhesion molecule",
+        "cell adhesion protein",
+    ]
+    assert plan.spans[1].tier2_terms == ["renal"]
 
 
 def test_remote_ontology_span_matcher_disables_environment_proxies_by_default():

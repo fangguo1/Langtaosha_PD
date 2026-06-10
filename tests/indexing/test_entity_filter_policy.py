@@ -16,6 +16,11 @@ from src.docset_hub.indexing.entity_filter_policy import (
         ({"source": "umls", "semantic_types": ["T060"]}, ("allow", "umls_group:PROC")),
         ({"source": "umls", "semantic_types": ["T038"]}, ("allow", "umls_group:PHEN")),
         ({"source": "umls", "semantic_types": ["T008"]}, ("allow", "umls_group:LIVB")),
+        ({"source": "umls", "semantic_types": ["T074"]}, ("allow", "umls_tui_allowlist:T074")),
+        ({"source": "umls", "semantic_types": ["T075"]}, ("allow", "umls_tui_allowlist:T075")),
+        ({"source": "umls", "semantic_types": ["T091"]}, ("allow", "umls_tui_allowlist:T091")),
+        ({"source": "umls", "semantic_types": ["T093"]}, ("allow", "umls_tui_allowlist:T093")),
+        ({"source": "umls", "semantic_types": ["T203"]}, ("allow", "umls_tui_allowlist:T203")),
         ({"source": "umls", "semantic_types": ["T170"]}, ("drop", "umls_group:CONC")),
         ({"source": "umls", "semantic_types": ["T171"]}, ("drop", "umls_group:CONC")),
         ({"source": "umls"}, ("unknown_keep", "missing_tui")),
@@ -33,9 +38,15 @@ from src.docset_hub.indexing.entity_filter_policy import (
         ({"source": "mesh", "semantic_types": ["T063"]}, ("allow", "mesh_tui_group:PROC")),
         ({"source": "mesh", "semantic_types": ["T038"]}, ("allow", "mesh_tui_group:PHEN")),
         ({"source": "mesh", "semantic_types": ["T015"]}, ("allow", "mesh_tui_group:LIVB")),
+        ({"source": "mesh", "semantic_types": ["T074"]}, ("allow", "mesh_tui_allowlist:T074")),
+        ({"source": "mesh", "semantic_types": ["T075"]}, ("allow", "mesh_tui_allowlist:T075")),
+        ({"source": "mesh", "semantic_types": ["T091"]}, ("allow", "mesh_tui_allowlist:T091")),
+        ({"source": "mesh", "semantic_types": ["T093"]}, ("allow", "mesh_tui_allowlist:T093")),
+        ({"source": "mesh", "semantic_types": ["T203"]}, ("allow", "mesh_tui_allowlist:T203")),
         ({"source": "mesh", "semantic_types": ["T170"]}, ("drop", "mesh_tui_group:CONC")),
         ({"source": "mesh", "semantic_types": ["T171"]}, ("drop", "mesh_tui_group:CONC")),
-        ({"source": "mesh", "semantic_types": ["T091"]}, ("drop", "mesh_tui_group:OCCU")),
+        ({"source": "mesh", "semantic_types": ["T090"]}, ("drop", "mesh_tui_group:OCCU")),
+        ({"source": "mesh", "semantic_types": ["T092"]}, ("drop", "mesh_tui_group:ORGA")),
         ({"source": "mesh"}, ("unknown_keep", "missing_tree_number")),
     ],
 )
@@ -87,3 +98,71 @@ def test_filter_ontology_evidence_items_keeps_allowed_and_unknown_but_drops_conc
     assert filtered[0]["filter_reason"] == "umls_group:DISO"
     assert filtered[1]["filter_reason"] == "mesh_tui_group:DISO"
     assert filtered[2]["filter_status"] == "unknown_keep"
+
+
+def test_filter_ontology_evidence_items_retains_only_explicit_allowlist_tuis_from_blocked_groups():
+    filtered = filter_ontology_evidence_items(
+        [
+            {
+                "source": "umls",
+                "concept_id": "U074",
+                "canonical": "Medical Device",
+                "semantic_types": ["T074"],
+            },
+            {
+                "source": "umls",
+                "concept_id": "U090",
+                "canonical": "Professional Role",
+                "semantic_types": ["T090"],
+            },
+            {
+                "source": "umls",
+                "concept_id": "U203",
+                "canonical": "Drug Delivery Device",
+                "semantic_types": ["T203"],
+            },
+            {
+                "source": "umls",
+                "concept_id": "U092",
+                "canonical": "Organization",
+                "semantic_types": ["T092"],
+            },
+            {
+                "source": "mesh",
+                "concept_id": "M091",
+                "canonical": "Biomedical Occupation",
+                "semantic_types": ["T091"],
+            },
+            {
+                "source": "mesh",
+                "concept_id": "M094",
+                "canonical": "Regulation",
+                "semantic_types": ["T094"],
+            },
+            {
+                "source": "mesh",
+                "concept_id": "M093",
+                "canonical": "Health Organization",
+                "semantic_types": ["T093"],
+            },
+            {
+                "source": "mesh",
+                "concept_id": "M095",
+                "canonical": "Self-help Group",
+                "semantic_types": ["T095"],
+            },
+        ]
+    )
+
+    assert [(item["source"], item["concept_id"]) for item in filtered] == [
+        ("umls", "U074"),
+        ("umls", "U203"),
+        ("mesh", "M091"),
+        ("mesh", "M093"),
+    ]
+    assert [item["filter_reason"] for item in filtered] == [
+        "umls_tui_allowlist:T074",
+        "umls_tui_allowlist:T203",
+        "mesh_tui_allowlist:T091",
+        "mesh_tui_allowlist:T093",
+    ]

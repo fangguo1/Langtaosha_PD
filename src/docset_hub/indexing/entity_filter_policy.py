@@ -25,6 +25,14 @@ RETRIEVAL_MESH_PREFIXES = {
     "G",
 }
 
+RETRIEVAL_EXPLICIT_TUIS = {
+    "T203",
+    "T074",
+    "T075",
+    "T091",
+    "T093",
+}
+
 UMLS_TUI_TO_GROUP = {
     "T052": "ACTI",
     "T053": "ACTI",
@@ -184,6 +192,9 @@ def _classify_umls(item: Mapping[str, Any]) -> Tuple[str, str]:
     tuis = _extract_string_list(item, "semantic_types", "types")
     if not tuis:
         return "unknown_keep", "missing_tui"
+    allowed_tui = _first_allowed_tui(tuis)
+    if allowed_tui:
+        return "allow", f"umls_tui_allowlist:{allowed_tui}"
     groups = {UMLS_TUI_TO_GROUP[tui] for tui in tuis if tui in UMLS_TUI_TO_GROUP}
     if not groups:
         return "unknown_keep", f"unmapped_tui:{tuis[0]}"
@@ -206,6 +217,9 @@ def _classify_mesh(item: Mapping[str, Any]) -> Tuple[str, str]:
     tuis = _extract_string_list(item, "semantic_types", "types")
     if not tuis:
         return "unknown_keep", "missing_tree_number"
+    allowed_tui = _first_allowed_tui(tuis)
+    if allowed_tui:
+        return "allow", f"mesh_tui_allowlist:{allowed_tui}"
 
     groups = {UMLS_TUI_TO_GROUP[tui] for tui in tuis if tui in UMLS_TUI_TO_GROUP}
     if not groups:
@@ -236,6 +250,13 @@ def _coerce_string_list(value: Any) -> List[str]:
     if isinstance(value, Sequence):
         return [str(item) for item in value if item is not None]
     return [str(value)]
+
+
+def _first_allowed_tui(tuis: Sequence[str]) -> str:
+    for tui in tuis:
+        if tui in RETRIEVAL_EXPLICIT_TUIS:
+            return tui
+    return ""
 
 
 def _mesh_prefix(value: str) -> str:

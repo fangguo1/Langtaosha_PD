@@ -15,6 +15,16 @@ from ..metadata.utils import generate_work_id
 
 import logging
 
+
+def _sql_exact_word_match(column_expr: str, term_expr: str) -> str:
+    return (
+        f"({column_expr} ~ ("
+        f"'(^|[^a-z0-9])' || "
+        f"regexp_replace({term_expr}, '([.^$*+?(){{}}\\[\\]|\\\\-])', '\\\\\\1', 'g') || "
+        f"'([^a-z0-9]|$)'"
+        f"))"
+    )
+
 class MetadataDB:
     """元数据库操作类 - 新架构（多源支持）
 
@@ -1785,6 +1795,236 @@ class MetadataDB:
 
         return [self._keyword_lookup_plan_row_to_dict(row) for row in rows]
 
+    def lookup_papers_by_expanded_sparse_groups(
+        self,
+        span_groups: Sequence[Mapping[str, Any]],
+        source_list: Optional[Sequence[str]] = None,
+        keyword_sources: Optional[Sequence[str]] = None,
+        top_k: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """Recall papers by grouped semantic span terms across title/abstract/keywords."""
+
+        normalized_groups = self._normalize_expanded_sparse_groups(span_groups)
+        if not normalized_groups:
+            return []
+
+        total_span_count = len({row["group_id"] for row in normalized_groups})
+        params: Dict[str, Any] = {
+            "top_k": max(1, int(top_k)),
+            "total_span_count": total_span_count,
+        }
+        values_sql = []
+        for index, row in enumerate(normalized_groups):
+            placeholders = []
+            for field in (
+                "group_id",
+                "span_id",
+                "canonical_text",
+                "span_scope",
+                "child_span_id",
+                "term",
+                "term_tier",
+                "match_mode",
+            ):
+                param_name = f"expanded_{field}_{index}"
+                placeholders.append(f":{param_name}")
+                params[param_name] = row[field]
+            values_sql.append(f"({', '.join(placeholders)})")
+
+        keyword_source_filter = self._keyword_lookup_in_filter(
+            column="pk.source",
+            prefix="expanded_keyword_source",
+            values=keyword_sources or [],
+            params=params,
+        )
+        keyword_source_clause = f" AND {keyword_source_filter}" if keyword_source_filter else ""
+
+        paper_source_filter = self._expanded_sparse_paper_source_filter(
+            paper_id_column="p.paper_id",
+            source_list=source_list or [],
+            params=params,
+        )
+        paper_source_clause = f" AND {paper_source_filter}" if paper_source_filter else ""
+
+        sql = text(
+            f"""
+            WITH query_terms(
+                group_id,
+                span_id,
+                canonical_text,
+                span_scope,
+                child_span_id,
+                term,
+                term_tier,
+                match_mode
+            ) AS (
+                VALUES {", ".join(values_sql)}
+            ),
+            title_matches AS (
+                SELECT
+                    p.paper_id,
+                    p.work_id,
+                    qt.group_id,
+                    qt.span_id,
+                    qt.canonical_text,
+                    qt.span_scope,
+                    qt.child_span_id,
+                    qt.term,
+                    qt.term_tier,
+                    qt.match_mode,
+                    'title' AS matched_field
+                FROM query_terms qt
+                JOIN papers p
+                  ON (
+                    (qt.match_mode = 'exact' AND {_sql_exact_word_match("lower(COALESCE(p.canonical_title, ''))", "qt.term")})
+                    OR
+                    (
+                      qt.match_mode = 'prefix'
+                      AND lower(COALESCE(p.canonical_title, '')) ~ (
+                        '(^|[^a-z0-9])'
+                        || regexp_replace(qt.term, '([.^$*+?(){{}}\\[\\]|\\\\-])', '\\\\\\1', 'g')
+                        || '[a-z0-9_-]*'
+                      )
+                    )
+                  )
+                WHERE 1 = 1 {paper_source_clause}
+            ),
+            abstract_matches AS (
+                SELECT
+                    p.paper_id,
+                    p.work_id,
+                    qt.group_id,
+                    qt.span_id,
+                    qt.canonical_text,
+                    qt.span_scope,
+                    qt.child_span_id,
+                    qt.term,
+                    qt.term_tier,
+                    qt.match_mode,
+                    'abstract' AS matched_field
+                FROM query_terms qt
+                JOIN papers p
+                  ON (
+                    (qt.match_mode = 'exact' AND {_sql_exact_word_match("lower(COALESCE(p.canonical_abstract, ''))", "qt.term")})
+                    OR
+                    (
+                      qt.match_mode = 'prefix'
+                      AND lower(COALESCE(p.canonical_abstract, '')) ~ (
+                        '(^|[^a-z0-9])'
+                        || regexp_replace(qt.term, '([.^$*+?(){{}}\\[\\]|\\\\-])', '\\\\\\1', 'g')
+                        || '[a-z0-9_-]*'
+                      )
+                    )
+                  )
+                WHERE 1 = 1 {paper_source_clause}
+            ),
+            keyword_matches AS (
+                SELECT
+                    p.paper_id,
+                    p.work_id,
+                    qt.group_id,
+                    qt.span_id,
+                    qt.canonical_text,
+                    qt.span_scope,
+                    qt.child_span_id,
+                    qt.term,
+                    qt.term_tier,
+                    qt.match_mode,
+                    'paper_keywords' AS matched_field
+                FROM query_terms qt
+                JOIN paper_keywords pk
+                  ON (
+                    (qt.match_mode = 'exact' AND lower(pk.keyword) = qt.term)
+                    OR
+                    (
+                      qt.match_mode = 'prefix'
+                      AND lower(pk.keyword) ~ (
+                        '^'
+                        || regexp_replace(qt.term, '([.^$*+?(){{}}\\[\\]|\\\\-])', '\\\\\\1', 'g')
+                        || '[a-z0-9_-]*$'
+                      )
+                    )
+                  )
+                JOIN papers p
+                  ON p.paper_id = pk.paper_id
+                WHERE 1 = 1
+                  {keyword_source_clause}
+                  {paper_source_clause}
+            ),
+            raw_matches AS (
+                SELECT * FROM title_matches
+                UNION ALL
+                SELECT * FROM abstract_matches
+                UNION ALL
+                SELECT * FROM keyword_matches
+            ),
+            group_metadata AS (
+                SELECT
+                    group_id,
+                    MIN(span_id) AS span_id,
+                    MIN(canonical_text) AS canonical_text,
+                    COUNT(DISTINCT child_span_id) FILTER (WHERE child_span_id IS NOT NULL) AS total_child_count
+                FROM query_terms
+                GROUP BY group_id
+            ),
+            span_matches AS (
+                SELECT
+                    rm.paper_id,
+                    MIN(rm.work_id) AS work_id,
+                    rm.group_id,
+                    MIN(gm.span_id) AS span_id,
+                    MIN(gm.canonical_text) AS canonical_text,
+                    BOOL_OR(rm.span_scope = 'parent') AS own_term_matched,
+                    COUNT(DISTINCT rm.child_span_id) FILTER (WHERE rm.child_span_id IS NOT NULL) AS matched_child_count,
+                    MIN(gm.total_child_count) AS total_child_count,
+                    CASE
+                        WHEN BOOL_OR(rm.span_scope = 'parent') THEN 1.0
+                        WHEN MIN(gm.total_child_count) > 0 THEN
+                            COUNT(DISTINCT rm.child_span_id) FILTER (WHERE rm.child_span_id IS NOT NULL)::float
+                            / MIN(gm.total_child_count)
+                        ELSE 0.0
+                    END AS span_score,
+                    JSONB_AGG(DISTINCT span_scope ORDER BY span_scope) AS matched_scopes,
+                    JSONB_AGG(DISTINCT rm.child_span_id ORDER BY rm.child_span_id)
+                      FILTER (WHERE rm.child_span_id IS NOT NULL) AS matched_child_span_ids,
+                    JSONB_AGG(DISTINCT rm.term ORDER BY rm.term) AS matched_terms,
+                    JSONB_AGG(DISTINCT rm.matched_field ORDER BY rm.matched_field) AS matched_fields
+                FROM raw_matches rm
+                JOIN group_metadata gm
+                  ON gm.group_id = rm.group_id
+                GROUP BY rm.paper_id, rm.group_id
+            )
+            SELECT
+                paper_id,
+                MIN(work_id) AS work_id,
+                COUNT(DISTINCT group_id) AS matched_span_count,
+                :total_span_count AS total_span_count,
+                COALESCE(SUM(span_score), 0.0) / NULLIF(:total_span_count, 0) AS coverage_ratio,
+                JSONB_AGG(JSONB_BUILD_OBJECT(
+                    'group_id', group_id,
+                    'span_id', span_id,
+                    'canonical_text', canonical_text,
+                    'matched_scopes', COALESCE(matched_scopes, '[]'::jsonb),
+                    'matched_child_span_ids', COALESCE(matched_child_span_ids, '[]'::jsonb),
+                    'matched_terms', matched_terms,
+                    'matched_fields', matched_fields,
+                    'own_term_matched', own_term_matched,
+                    'matched_child_count', matched_child_count,
+                    'total_child_count', total_child_count,
+                    'span_score', span_score
+                ) ORDER BY group_id) AS matched_spans
+            FROM span_matches
+            GROUP BY paper_id
+            ORDER BY matched_span_count DESC, coverage_ratio DESC, paper_id DESC
+            LIMIT :top_k
+            """
+        )
+
+        with self.engine.connect() as conn:
+            rows = conn.execute(sql, params).mappings().fetchall()
+
+        return [self._expanded_sparse_row_to_dict(row) for row in rows]
+
     @staticmethod
     def _normalize_keyword_lookup_terms(
         query_terms: Sequence[Mapping[str, Any]],
@@ -1866,6 +2106,29 @@ class MetadataDB:
             ")"
         )
 
+    @classmethod
+    def _expanded_sparse_paper_source_filter(
+        cls,
+        paper_id_column: str,
+        source_list: Sequence[str],
+        params: Dict[str, Any],
+    ) -> str:
+        source_filter = cls._keyword_lookup_in_filter(
+            column="ps.source_name",
+            prefix="expanded_paper_source",
+            values=source_list,
+            params=params,
+        )
+        if not source_filter:
+            return ""
+        return (
+            "EXISTS ("
+            "SELECT 1 FROM paper_sources ps "
+            f"WHERE ps.paper_id = {paper_id_column} "
+            f"AND {source_filter}"
+            ")"
+        )
+
     @staticmethod
     def _keyword_lookup_row_to_dict(row: Mapping[str, Any]) -> Dict[str, Any]:
         matched_concepts = row.get("matched_concepts") or []
@@ -1914,6 +2177,119 @@ class MetadataDB:
                 "keyword_lookup_score": keyword_lookup_score,
             },
         }
+
+    @staticmethod
+    def _expanded_sparse_row_to_dict(row: Mapping[str, Any]) -> Dict[str, Any]:
+        matched_spans = row.get("matched_spans") or []
+        matched_span_count = int(row.get("matched_span_count") or 0)
+        total_span_count = int(row.get("total_span_count") or 0)
+        coverage_ratio = float(row.get("coverage_ratio") or 0.0)
+        return {
+            "paper_id": row.get("paper_id"),
+            "work_id": row.get("work_id"),
+            "matched_span_count": matched_span_count,
+            "total_span_count": total_span_count,
+            "coverage_ratio": coverage_ratio,
+            "matched_spans": matched_spans,
+            "recall_sources": ["expanded_sparse"],
+            "retrieval_debug": {
+                "retriever": "expanded_sparse",
+                "matched_span_count": matched_span_count,
+                "total_span_count": total_span_count,
+                "coverage_ratio": coverage_ratio,
+            },
+        }
+
+    @staticmethod
+    def _normalize_expanded_sparse_groups(
+        span_groups: Sequence[Mapping[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        normalized: List[Dict[str, Any]] = []
+        seen = set()
+        for index, row in enumerate(span_groups, start=1):
+            try:
+                group_id = int(row.get("group_id") or index)
+            except (TypeError, ValueError):
+                group_id = index
+            span_id = str(row.get("span_id") or f"s{group_id}")
+            canonical_text = str(row.get("canonical_text") or "")
+            if row.get("term") is not None:
+                normalized_term = re.sub(r"\s+", " ", str(row.get("term") or "").strip().lower())
+                if not normalized_term:
+                    continue
+                span_scope = str(row.get("span_scope") or "parent")
+                child_span_id_raw = row.get("child_span_id")
+                child_span_id = str(child_span_id_raw).strip() if child_span_id_raw not in (None, "") else None
+                term_tier = str(row.get("term_tier") or "tier1")
+                match_mode = str(row.get("match_mode") or "exact")
+                key = (
+                    group_id,
+                    span_id,
+                    span_scope,
+                    child_span_id,
+                    normalized_term,
+                    term_tier,
+                    match_mode,
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                normalized.append(
+                    {
+                        "group_id": group_id,
+                        "span_id": span_id,
+                        "canonical_text": canonical_text,
+                        "span_scope": span_scope,
+                        "child_span_id": child_span_id,
+                        "term": normalized_term,
+                        "term_tier": term_tier,
+                        "match_mode": match_mode,
+                    }
+                )
+                continue
+            tier1_terms = row.get("tier1_terms") or []
+            tier2_terms = row.get("tier2_terms") or []
+            for term in tier1_terms:
+                normalized_term = re.sub(r"\s+", " ", str(term or "").strip().lower())
+                if not normalized_term:
+                    continue
+                key = (group_id, span_id, normalized_term, "tier1")
+                if key in seen:
+                    continue
+                seen.add(key)
+                normalized.append(
+                    {
+                        "group_id": group_id,
+                        "span_id": span_id,
+                        "canonical_text": canonical_text,
+                        "span_scope": "parent",
+                        "child_span_id": None,
+                        "term": normalized_term,
+                        "term_tier": "tier1",
+                        "match_mode": "exact",
+                    }
+                )
+            for term in tier2_terms:
+                normalized_term = re.sub(r"\s+", " ", str(term or "").strip().lower())
+                if not normalized_term:
+                    continue
+                key = (group_id, span_id, normalized_term, "tier2")
+                if key in seen:
+                    continue
+                seen.add(key)
+                normalized.append(
+                    {
+                        "group_id": group_id,
+                        "span_id": span_id,
+                        "canonical_text": canonical_text,
+                        "span_scope": "parent",
+                        "child_span_id": None,
+                        "term": normalized_term,
+                        "term_tier": "tier2",
+                        "match_mode": "exact",
+                    }
+                )
+        return normalized
 
     def _has_pg_trgm(self) -> bool:
         """Return whether pg_trgm is available for fuzzy keyword recall."""

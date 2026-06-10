@@ -10,5 +10,14 @@ export ONTOLOGY_SOURCE_LIST="${ONTOLOGY_SOURCE_LIST:-umls,mesh}"
 export CONFIG_PATH="${CONFIG_PATH:-src/config/config_tecent_backend_server_mimic.yaml}"
 export PAPER_SOURCES="${PAPER_SOURCES:-langtaosha,biorxiv_history,biorxiv_daily}"
 
-exec scripts/run_query_analyzer_db.sh "$@"
+if [[ "${1:-}" == "--trace" ]]; then
+  shift
+  exec python3 scripts/run_span_matcher_trace.py \
+    --config-path "$CONFIG_PATH" \
+    --paper-source-list "$PAPER_SOURCES" \
+    --ontology-linker-url "$ONTOLOGY_LINKER_URL" \
+    --ontology-source-list "$ONTOLOGY_SOURCE_LIST" \
+    "$@"
+fi
 
+exec scripts/run_query_analyzer_db.sh "$@"

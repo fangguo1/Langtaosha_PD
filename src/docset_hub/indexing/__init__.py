@@ -1,5 +1,17 @@
 """Indexing模块 - 文档索引和搜索功能"""
 from .paper_indexer import PaperIndexer
+from .expanded_sparse_retrieval import (
+    ExpandedSparseCandidate,
+    ExpandedSparseGroup,
+    build_expanded_sparse_groups,
+    build_expanded_sparse_query_rows,
+    match_papers_by_expanded_sparse_plan,
+)
+from .coverage_engine import (
+    CoverageReport,
+    analyze_document_coverage,
+    summarize_expanded_sparse_matches,
+)
 from .paper_keyword_lookup import (
     KeywordLookupItem,
     KeywordLookupTerm,
@@ -36,6 +48,14 @@ from .query_phrase_analyzer import (
     QueryPhraseNormalizer,
     QueryTypeClassifier,
 )
+from .query_semantic_plan import (
+    QuerySemanticPlan,
+    SemanticChildSpan,
+    SemanticSpanGroup,
+    SemanticTerm,
+    SemanticTermBucket,
+    build_query_semantic_plan,
+)
 from .search_highlighting import build_search_highlight
 from .span_matcher import (
     CompositeSpanMatcher,
@@ -51,6 +71,12 @@ from .span_matcher import (
     SpanMatchResult,
     SubphraseCandidateGenerator,
 )
+from .span_matcher_pipeline import (
+    SpanMatcherPipeline,
+    SpanMatcherProfile,
+    SpanMatcherRunResult,
+    SpanMatcherTrace,
+)
 
 __all__ = [
     'AtomicPhrase',
@@ -58,6 +84,9 @@ __all__ = [
     'AuthorMatcher',
     'CompositeSpanMatcher',
     'ConceptMatchEvidence',
+    'CoverageReport',
+    'ExpandedSparseCandidate',
+    'ExpandedSparseGroup',
     'InMemoryPhraseLexicon',
     'KeywordLookupItem',
     'KeywordSurfaceSpanMatcher',
@@ -79,22 +108,37 @@ __all__ = [
     'QueryPhraseAnalysisResult',
     'QueryPhraseAnalyzer',
     'QueryPhraseNormalizer',
+    'QuerySemanticPlan',
     'QueryTypeClassifier',
     'QueryNormalizer',
     'QueryUnderstandingResult',
     'QueryUnderstandingService',
+    'SemanticChildSpan',
+    'SemanticSpanGroup',
+    'SemanticTerm',
+    'SemanticTermBucket',
     'RemoteOntologySpanMatcher',
     'SelectedConcept',
     'SpanMatcherError',
     'SpanMatcherExecutor',
+    'SpanMatcherPipeline',
+    'SpanMatcherProfile',
+    'SpanMatcherRunResult',
+    'SpanMatcherTrace',
     'SpanMatchResult',
     'SubphraseCandidateGenerator',
+    'analyze_document_coverage',
     'build_search_highlight',
+    'build_expanded_sparse_groups',
+    'build_expanded_sparse_query_rows',
     'build_keyword_lookup_plan',
     'build_keyword_lookup_terms_from_selected_concepts',
+    'summarize_expanded_sparse_matches',
+    'match_papers_by_expanded_sparse_plan',
     'match_paper_keywords_with_lookup_plan',
     'match_paper_keywords_using_span_matcher',
     'ROUTE_WEIGHTS',
+    'build_query_semantic_plan',
     'normalize_author_name',
     'normalize_query',
 ]

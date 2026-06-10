@@ -193,7 +193,13 @@ def build_feedback_review_payload(testbed_payload: dict[str, Any], engine: Engin
     }
 
 
-def register_feedback_review_routes(
+def register_feedback_review_page_routes(app) -> None:
+    @app.route("/feedback-review")
+    def feedback_review_page() -> str:
+        return render_template("feedback_review.html")
+
+
+def register_feedback_review_api_routes(
     app,
     api_success: Callable[..., Any],
     api_error: Callable[..., Any],
@@ -204,10 +210,6 @@ def register_feedback_review_routes(
     from config.config_loader import get_db_engine
 
     resolved_engine_factory = engine_factory or (lambda: get_db_engine(db_key="metadata_db"))
-
-    @app.route("/feedback-review")
-    def feedback_review_page() -> str:
-        return render_template("feedback_review.html")
 
     @app.route("/api/study/feedback-review-data", methods=["GET"])
     def api_feedback_review_data():
@@ -227,6 +229,24 @@ def register_feedback_review_routes(
             return api_error(str(exc), status_code=404, code="NOT_FOUND")
         except Exception as exc:  # noqa: BLE001
             return api_error(str(exc), status_code=500, code="FEEDBACK_REVIEW_FAILED")
+
+
+def register_feedback_review_routes(
+    app,
+    api_success: Callable[..., Any],
+    api_error: Callable[..., Any],
+    *,
+    testbed_path: Optional[Path] = None,
+    engine_factory: Optional[Callable[[], Engine]] = None,
+) -> None:
+    register_feedback_review_page_routes(app)
+    register_feedback_review_api_routes(
+        app,
+        api_success,
+        api_error,
+        testbed_path=testbed_path,
+        engine_factory=engine_factory,
+    )
 
 
 """

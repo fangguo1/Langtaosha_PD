@@ -16,9 +16,7 @@ from src.docset_hub.indexing.entity_filter_policy import (
     filter_ontology_evidence_items,
 )
 from src.docset_hub.indexing.query_phrase_analyzer import PhraseCandidate
-from src.docset_hub.indexing.span_matcher import (
-    RemoteOntologySpanMatcher,
-)
+from src.docset_hub.indexing.span_matcher import RemoteOntologySpanMatcher
 
 
 def _candidate(text: str, kind: str = "probe") -> PhraseCandidate:
@@ -56,6 +54,16 @@ POSITIVE_FILTER_CASES = [
     ("adhesion protein in kidney", "umls", "kidney", ["T023"], "umls_group:ANAT"),
     ("adhesion protein in kidney", "mesh", "Proteins", ["T116"], "mesh_tui_group:CHEM"),
     ("adhesion protein in kidney", "mesh", "Kidney", ["T023"], "mesh_tui_group:ANAT"),
+    ("catheter-associated infection surveillance", "umls", "catheter", ["T074"], "umls_tui_allowlist:T074"),
+    ("catheter-associated infection surveillance", "mesh", "Catheters", ["T074"], "mesh_tui_allowlist:T074"),
+    ("surgical instrument tracking workflow", "umls", "surgical instrument", ["T075"], "umls_tui_allowlist:T075"),
+    ("surgical instrument tracking workflow", "mesh", "Surgical Instruments", ["T075"], "mesh_tui_allowlist:T075"),
+    ("nurse-led chronic care coordination", "umls", "nurse", ["T091"], "umls_tui_allowlist:T091"),
+    ("nurse-led chronic care coordination", "mesh", "Nurses", ["T091"], "mesh_tui_allowlist:T091"),
+    ("hospital consortium quality improvement", "umls", "hospital consortium", ["T093"], "umls_tui_allowlist:T093"),
+    ("hospital consortium quality improvement", "mesh", "Hospital Consortia", ["T093"], "mesh_tui_allowlist:T093"),
+    ("implantable drug delivery device study", "umls", "drug delivery device", ["T203"], "umls_tui_allowlist:T203"),
+    ("implantable drug delivery device study", "mesh", "Drug Delivery Systems", ["T203"], "mesh_tui_allowlist:T203"),
     ("EGFR expression in lung cancer", "umls", "EGFR", ["T028"], "umls_group:GENE"),
     ("EGFR expression in lung cancer", "umls", "lung cancer", ["T191"], "umls_group:DISO"),
     ("EGFR expression in lung cancer", "mesh", "Receptor, Epidermal Growth Factor", ["T116"], "mesh_tui_group:CHEM"),
@@ -127,6 +135,14 @@ NEGATIVE_FILTER_CASES = [
     ("novel method for biological study", "umls", "method", ["T170"], "umls_group:CONC"),
     ("novel method for biological study", "umls", "study", ["T171"], "umls_group:CONC"),
     ("novel method for biological study", "mesh", "Research Design", ["T170"], "mesh_tui_group:CONC"),
+    ("clinic staffing model", "umls", "occupational role", ["T090"], "umls_group:OCCU"),
+    ("clinic staffing model", "mesh", "Occupations", ["T090"], "mesh_tui_group:OCCU"),
+    ("regional health authority coordination", "umls", "organization", ["T092"], "umls_group:ORGA"),
+    ("regional health authority coordination", "mesh", "Organizations", ["T092"], "mesh_tui_group:ORGA"),
+    ("policy and workforce planning", "umls", "professional society policy", ["T094"], "umls_group:ORGA"),
+    ("policy and workforce planning", "mesh", "Policy Group", ["T094"], "mesh_tui_group:ORGA"),
+    ("peer support referral program", "umls", "peer support group", ["T095"], "umls_group:ORGA"),
+    ("peer support referral program", "mesh", "Self-Help Groups", ["T095"], "mesh_tui_group:ORGA"),
     ("role of protein in disease", "umls", "role", ["T170"], "umls_group:CONC"),
     ("data analysis approach", "umls", "approach", ["T170"], "umls_group:CONC"),
     ("data analysis approach", "mesh", "Data Analysis", ["T170"], "mesh_tui_group:CONC"),
@@ -174,7 +190,8 @@ def test_entity_filter_drops_generic_umls_and_mesh_concepts(
         ]
     )
     assert len(decision) == 1
-    assert decision[0]["filter_reason"] != expected_reason
+    expected_kept_reason = "umls_group:ANAT" if source == "umls" else "mesh_tui_group:ANAT"
+    assert decision[0]["filter_reason"] == expected_kept_reason
 
 
 def test_remote_ontology_span_matcher_applies_mesh_semantic_type_filtering():

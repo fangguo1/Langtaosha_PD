@@ -1,27 +1,17 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Any, Callable, Dict, List, Optional
 
 from flask import render_template, request
 
-from src.docset_hub.indexing import (
-    CompositeSpanMatcher,
-    KeywordSurfaceSpanMatcher,
-    MaximalConceptSelector,
-    MetadataDBPhraseLexicon,
-    QueryPhraseAnalyzer,
-    RemoteOntologySpanMatcher,
-    SpanMatcherError,
-    SpanMatcherExecutor,
-    SpanMatchResult,
-)
+from src.docset_hub.indexing import SpanMatcherError, SpanMatcherPipeline, SpanMatcherProfile
 
 
 DEFAULT_SPAN_SCISPACY_MODEL = "en_core_sci_lg"
 DEFAULT_ONTOLOGY_LINKER_URL = "http://127.0.0.1:8765"
 SPAN_MATCH_DISPLAY_THRESHOLD = 0.9
-_SPAN_MATCHER_CONTEXTS: dict[int, dict[str, Any]] = {}
 
 
 def _parse_csv_items(value: Optional[str], default: Optional[List[str]] = None) -> List[str]:
@@ -45,97 +35,11 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
-def _load_span_scispacy_pipeline() -> Optional[Any]:
-    if os.environ.get("SKIP_SCISPACY", "0") == "1":
-        return None
-
-    model_name = os.environ.get("SCISPACY_MODEL", DEFAULT_SPAN_SCISPACY_MODEL)
-    try:
-        import spacy
-    except ImportError:
-        return None
-
-    try:
-        return spacy.load(model_name)
-    except OSError:
-        return None
-
-
-def _get_span_matcher_context(paper_indexer: Any) -> Dict[str, Any]:
-    context_key = id(paper_indexer)
-    cached_context = _SPAN_MATCHER_CONTEXTS.get(context_key)
-    if cached_context is not None:
-        return cached_context
-
-    paper_sources = _parse_csv_items(
-        os.environ.get("PAPER_SOURCES"),
-        default=list(paper_indexer.default_sources),
-    )
-    keyword_sources = _parse_csv_items(os.environ.get("KEYWORD_SOURCE"))
-    lexicon = MetadataDBPhraseLexicon(
-        metadata_db=paper_indexer.metadata_db,
-        paper_source_names=paper_sources,
-        keyword_sources=keyword_sources,
-    )
-
-    matchers = []
-    ontology_linker_url = (
-        os.environ.get("ONTOLOGY_LINKER_URL", DEFAULT_ONTOLOGY_LINKER_URL)
-        or ""
-    ).strip()
-    if ontology_linker_url:
-        matchers.append(
-            RemoteOntologySpanMatcher(
-                base_url=ontology_linker_url,
-                sources=_parse_csv_items(
-                    os.environ.get("ONTOLOGY_SOURCE_LIST"),
-                    default=["umls", "mesh"],
-                ),
-                top_k=_env_int("ONTOLOGY_TOP_K", 2),
-                threshold=_env_float("ONTOLOGY_THRESHOLD", 0.9),
-                timeout=_env_float("ONTOLOGY_TIMEOUT", 20.0),
-            )
-        )
-    matchers.append(KeywordSurfaceSpanMatcher(lexicon))
-
-    context = {
-        "analyzer": QueryPhraseAnalyzer(
-            lexicon=lexicon,
-            scispacy_pipeline=_load_span_scispacy_pipeline(),
-        ),
-        "executor": SpanMatcherExecutor(
-            matcher=CompositeSpanMatcher(matchers),
-            include_subphrases=os.environ.get("NO_SUBPHRASE_NGRAM", "0") != "1",
-        ),
-        "selector": MaximalConceptSelector(),
-        "paper_sources": paper_sources,
-        "keyword_sources": keyword_sources,
-        "ontology_linker_url": ontology_linker_url,
-    }
-    _SPAN_MATCHER_CONTEXTS[context_key] = context
-    return context
-
-
 def _serialize_span_aliases(evidence: Any) -> List[str]:
     aliases = [str(alias) for alias in (evidence.aliases or []) if alias]
     if not aliases and evidence.match_type.endswith("_alias"):
         aliases.append(evidence.candidate_text)
     return aliases
-
-
-def _filter_span_results_for_display(results: List[SpanMatchResult]) -> List[SpanMatchResult]:
-    return [
-        SpanMatchResult(
-            candidate=result.candidate,
-            evidence=[
-                evidence
-                for evidence in result.evidence
-                if float(evidence.confidence) > SPAN_MATCH_DISPLAY_THRESHOLD
-            ],
-        )
-        for result in results
-    ]
-
 
 def _serialize_selected_candidate(concept: Any) -> Dict[str, Any]:
     candidate = concept.candidate
@@ -159,39 +63,110 @@ def _serialize_selected_candidate(concept: Any) -> Dict[str, Any]:
     }
 
 
+def _serialize_semantic_plan(plan: Any) -> Dict[str, Any]:
+    def serialize_terms(terms: Any) -> List[Dict[str, Any]]:
+        return [
+            {
+                "text": getattr(term, "text", ""),
+                "match_mode": getattr(term, "match_mode", "exact"),
+            }
+            for term in list(terms or [])
+        ]
+
+    def serialize_child(child: Any) -> Dict[str, Any]:
+        return {
+            "span_id": child.span_id,
+            "surface_text": child.surface_text,
+            "normalized_text": child.normalized_text,
+            "start": child.start,
+            "end": child.end,
+            "canonical_text": child.canonical_text,
+            "own_terms": {
+                "tier1": serialize_terms(getattr(child.own_terms, "tier1", [])),
+                "tier2": serialize_terms(getattr(child.own_terms, "tier2", [])),
+            },
+        }
+
+    return {
+        "original_query": plan.original_query,
+        "normalized_query": plan.normalized_query,
+        "spans": [
+            {
+                "span_id": span.span_id,
+                "surface_text": span.surface_text,
+                "normalized_text": span.normalized_text,
+                "start": span.start,
+                "end": span.end,
+                "canonical_text": span.canonical_text,
+                "own_terms": {
+                    "tier1": serialize_terms(getattr(span.own_terms, "tier1", [])),
+                    "tier2": serialize_terms(getattr(span.own_terms, "tier2", [])),
+                },
+                "children": [
+                    serialize_child(child)
+                    for child in list(getattr(span, "children", []) or [])
+                ],
+            }
+            for span in plan.spans
+        ],
+    }
+
+
+def _build_span_matcher_profile(paper_indexer: Any) -> SpanMatcherProfile:
+    return SpanMatcherProfile.ontology_plus_keyword(
+        enable_scispacy=os.environ.get("SKIP_SCISPACY", "0") != "1",
+        scispacy_model=os.environ.get("SCISPACY_MODEL", DEFAULT_SPAN_SCISPACY_MODEL),
+        ontology_base_url=(
+            os.environ.get("ONTOLOGY_LINKER_URL", DEFAULT_ONTOLOGY_LINKER_URL)
+            or ""
+        ).strip(),
+        ontology_sources=tuple(
+            _parse_csv_items(
+                os.environ.get("ONTOLOGY_SOURCE_LIST"),
+                default=["umls", "mesh"],
+            )
+        ),
+        ontology_top_k=_env_int("ONTOLOGY_TOP_K", 2),
+        ontology_threshold=_env_float("ONTOLOGY_THRESHOLD", 0.9),
+        ontology_timeout=_env_float("ONTOLOGY_TIMEOUT", 20.0),
+        paper_sources=tuple(
+            _parse_csv_items(
+                os.environ.get("PAPER_SOURCES"),
+                default=list(paper_indexer.default_sources),
+            )
+        ),
+        keyword_sources=tuple(_parse_csv_items(os.environ.get("KEYWORD_SOURCE"))),
+        include_subphrases=os.environ.get("NO_SUBPHRASE_NGRAM", "0") != "1",
+        evidence_threshold=SPAN_MATCH_DISPLAY_THRESHOLD,
+    )
+
+
 def run_span_matcher_test(query: str, *, paper_indexer: Any) -> Dict[str, Any]:
     normalized_query = (query or "").strip()
     if not normalized_query:
         raise ValueError("query 不能为空")
 
-    context = _get_span_matcher_context(paper_indexer)
-    analyzer = context["analyzer"]
-    executor = context["executor"]
-    selector = context["selector"]
-
-    normalized = analyzer.normalizer.normalize_query(normalized_query)
-    scispacy_doc = None
-    if analyzer.scispacy_pipeline is not None and normalized.normalized_query:
-        scispacy_doc = analyzer.scispacy_pipeline(normalized.normalized_query)
-
-    candidates = analyzer.extractor.extract(
-        normalized.normalized_query,
-        scispacy_doc=scispacy_doc,
-    )
-    span_results = executor.match_candidates(candidates)
-    display_results = _filter_span_results_for_display(span_results)
-    selected_concepts = selector.select(display_results)
+    started_at = time.perf_counter()
+    profile = _build_span_matcher_profile(paper_indexer)
+    result = SpanMatcherPipeline.from_profile(
+        profile=profile,
+        metadata_db=paper_indexer.metadata_db,
+    ).run(normalized_query)
     selected_candidates = [
         _serialize_selected_candidate(concept)
-        for concept in selected_concepts
+        for concept in result.selected_concepts
     ]
+    elapsed_ms = round((time.perf_counter() - started_at) * 1000.0, 3)
 
     return {
         "success": True,
-        "query": normalized.original_query,
-        "normalized_query": normalized.normalized_query,
+        "query": result.query,
+        "normalized_query": result.normalized_query,
         "count": len(selected_candidates),
         "selected_candidates": selected_candidates,
+        "semantic_plan": _serialize_semantic_plan(result.semantic_plan),
+        "elapsed_ms": elapsed_ms,
+        "timings_ms": result.timings_ms,
     }
 
 

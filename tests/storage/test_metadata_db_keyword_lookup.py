@@ -478,6 +478,37 @@ def test_lookup_papers_by_keyword_lookup_terms_groups_support_scores():
     assert group_one["has_primary_match"] is False
 
 
+def test_lookup_papers_by_expanded_sparse_groups_uses_whole_word_exact_matching():
+    metadata_db = _metadata_db_with_fake_engine()
+    metadata_db.engine.papers[5] = "W5"
+    metadata_db.engine.paper_sources[5] = ["langtaosha"]
+    metadata_db.engine.keywords.append(_keyword(5, "ren", "generated", 1.0))
+    metadata_db.engine.lookup_rows = lambda params: []
+
+    rows = metadata_db.lookup_papers_by_expanded_sparse_groups(
+        [
+            {
+                "group_id": 1,
+                "span_id": "s1",
+                "canonical_text": "Ren",
+                "term": "ren",
+                "span_scope": "parent",
+                "child_span_id": None,
+                "term_tier": "tier1",
+                "match_mode": "exact",
+            }
+        ],
+        source_list=["langtaosha"],
+        keyword_sources=["generated"],
+        top_k=10,
+    )
+
+    assert "POSITION(qt.term IN lower(COALESCE(p.canonical_title, ''))) > 0" not in metadata_db.engine.last_sql
+    assert "POSITION(qt.term IN lower(COALESCE(p.canonical_abstract, ''))) > 0" not in metadata_db.engine.last_sql
+    assert "regexp_replace(qt.term" in metadata_db.engine.last_sql
+    assert rows == []
+
+
 @pytest.fixture(scope="module")
 def mimic_metadata_db():
     if not MIMIC_CONFIG_PATH.exists():

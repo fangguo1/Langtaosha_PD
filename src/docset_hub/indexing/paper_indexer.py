@@ -45,6 +45,7 @@
 
 import logging
 import math
+import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, Any, List, Mapping, Optional, Sequence, Union
@@ -57,21 +58,13 @@ from .dense_result_filter import (
     DENSE_DEFAULT_MIN_SIMILARITY,
     filter_dense_results_by_hard_rules,
 )
+from .expanded_sparse_retrieval import match_papers_by_expanded_sparse_plan
 from .keyword_enrichment import KeywordEnrichmentService
 from .paper_keyword_lookup import (
     PaperKeywordLookupResult,
     match_paper_keywords_with_lookup_plan,
 )
-from .query_phrase_analyzer import (
-    AtomicPhraseExtractor,
-    MetadataDBPhraseLexicon,
-    QueryPhraseNormalizer,
-)
-from .span_matcher import (
-    KeywordSurfaceSpanMatcher,
-    MaximalConceptSelector,
-    SpanMatcherExecutor,
-)
+from .span_matcher_pipeline import SpanMatcherPipeline, SpanMatcherProfile
 from .query_understanding import QueryUnderstandingService
 
 
@@ -676,33 +669,22 @@ class PaperIndexer:
         keyword_sources: Optional[Sequence[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Run DB-backed keyword lookup recall from query span matches."""
-        normalizer = QueryPhraseNormalizer()
-        normalized = normalizer.normalize_query(query)
-        if not normalized.normalized_query:
-            return []
-
-        lexicon = MetadataDBPhraseLexicon(
-            metadata_db=self.metadata_db,
-            paper_source_names=source_list,
+        profile = self._build_span_matcher_profile(
+            source_list=source_list,
             keyword_sources=keyword_sources,
-            normalizer=normalizer,
+            profile_name="keyword_only",
         )
-        extractor = AtomicPhraseExtractor(normalizer=normalizer)
-        candidates = extractor.extract(normalized.normalized_query)
-        if not candidates:
-            return []
-
-        matcher = KeywordSurfaceSpanMatcher(lexicon=lexicon, normalizer=normalizer)
-        executor = SpanMatcherExecutor(matcher=matcher)
-        span_results = executor.match_candidates(candidates)
-        selected_concepts = MaximalConceptSelector(normalizer=normalizer).select(span_results)
-        if not selected_concepts:
+        result = SpanMatcherPipeline.from_profile(
+            profile=profile,
+            metadata_db=self.metadata_db,
+        ).run(query)
+        if not result.selected_concepts:
             return []
 
         lookup_results = match_paper_keywords_with_lookup_plan(
             metadata_db=self.metadata_db,
-            selected_concepts=selected_concepts,
-            span_results=span_results,
+            selected_concepts=result.selected_concepts,
+            span_results=result.span_results,
             source_list=source_list,
             keyword_sources=keyword_sources,
             top_k=top_k,
@@ -710,6 +692,74 @@ class PaperIndexer:
             include_substring_candidates=True,
         )
         return self._adapt_keyword_lookup_results_to_branch_results(lookup_results)
+
+    def _build_span_matcher_profile(
+        self,
+        *,
+        source_list: Sequence[str],
+        keyword_sources: Optional[Sequence[str]] = None,
+        profile_name: str = "ontology_plus_keyword",
+    ) -> SpanMatcherProfile:
+        if profile_name == "keyword_only":
+            factory = SpanMatcherProfile.keyword_only
+        elif profile_name == "ontology_only":
+            factory = SpanMatcherProfile.ontology_only
+        else:
+            factory = SpanMatcherProfile.ontology_plus_keyword
+
+        return factory(
+            enable_scispacy=os.environ.get("SKIP_SCISPACY", "0") != "1",
+            ontology_base_url=os.environ.get("ONTOLOGY_LINKER_URL", "http://127.0.0.1:8765"),
+            ontology_sources=tuple(self._parse_csv(os.environ.get("ONTOLOGY_SOURCE_LIST", "umls,mesh"))),
+            ontology_top_k=self._env_int("ONTOLOGY_TOP_K", 2),
+            ontology_threshold=self._env_float("ONTOLOGY_THRESHOLD", 0.9),
+            ontology_timeout=self._env_float("ONTOLOGY_TIMEOUT", 20.0),
+            paper_sources=tuple(source_list or self.default_sources),
+            keyword_sources=tuple(keyword_sources or ()),
+        )
+
+    def _build_query_semantic_plan(
+        self,
+        query: str,
+        source_list: List[str],
+        keyword_sources: Optional[Sequence[str]] = None,
+        profile_name: str = "ontology_plus_keyword",
+    ):
+        profile = self._build_span_matcher_profile(
+            source_list=source_list,
+            keyword_sources=keyword_sources,
+            profile_name=profile_name,
+        )
+        result = SpanMatcherPipeline.from_profile(
+            profile=profile,
+            metadata_db=self.metadata_db,
+        ).run(query)
+        if not result.selected_concepts:
+            return None
+        return result.semantic_plan
+
+    def _run_expanded_sparse_retrieval_branch(
+        self,
+        query: str,
+        source_list: List[str],
+        top_k: int,
+        keyword_sources: Optional[Sequence[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        plan = self._build_query_semantic_plan(
+            query=query,
+            source_list=source_list,
+            keyword_sources=keyword_sources,
+        )
+        if plan is None:
+            return []
+        results = match_papers_by_expanded_sparse_plan(
+            metadata_db=self.metadata_db,
+            plan=plan,
+            source_list=source_list,
+            keyword_sources=keyword_sources,
+            top_k=top_k,
+        )
+        return self._adapt_expanded_sparse_results_to_branch_results(results)
 
     @staticmethod
     def _resolve_hybrid_retrieval_weights(
@@ -768,6 +818,39 @@ class PaperIndexer:
                     "rank": rank,
                     "payload": dict(item),
                     "retrieval_debug": retrieval_debug,
+                }
+            )
+        return branch_results
+
+    @staticmethod
+    def _adapt_expanded_sparse_results_to_branch_results(
+        results: Sequence[Any],
+    ) -> List[Dict[str, Any]]:
+        branch_results: List[Dict[str, Any]] = []
+        rank = 0
+        for result in results:
+            paper_id = getattr(result, "paper_id", None)
+            work_id = getattr(result, "work_id", None)
+            matched_span_count = int(getattr(result, "matched_span_count", 0) or 0)
+            total_span_count = int(getattr(result, "total_span_count", 0) or 0)
+            coverage_ratio = float(getattr(result, "coverage_ratio", 0.0) or 0.0)
+            if matched_span_count <= 0:
+                continue
+            rank += 1
+            branch_results.append(
+                {
+                    "paper_id": paper_id,
+                    "work_id": work_id,
+                    "score": coverage_ratio,
+                    "raw_score": coverage_ratio,
+                    "rank": rank,
+                    "retrieval_debug": {
+                        "retriever": "expanded_sparse",
+                        "matched_span_count": matched_span_count,
+                        "total_span_count": total_span_count,
+                        "coverage_ratio": coverage_ratio,
+                        "matched_spans": list(getattr(result, "matched_spans", []) or []),
+                    },
                 }
             )
         return branch_results
@@ -944,6 +1027,24 @@ class PaperIndexer:
             return float(value)
         except (TypeError, ValueError):
             return float("nan")
+
+    @staticmethod
+    def _parse_csv(value: Optional[str]) -> List[str]:
+        return [item.strip() for item in str(value or "").split(",") if item.strip()]
+
+    @staticmethod
+    def _env_int(name: str, default: int) -> int:
+        try:
+            return int(os.environ.get(name, str(default)))
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _env_float(name: str, default: float) -> float:
+        try:
+            return float(os.environ.get(name, str(default)))
+        except (TypeError, ValueError):
+            return default
 
     @staticmethod
     def _search_results_to_lightweight_dicts(search_results: Sequence[SearchResult]) -> List[Dict[str, Any]]:
