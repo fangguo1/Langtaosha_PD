@@ -5,6 +5,7 @@
 按功能梳理的 `PaperIndexer` 调用关系、决策与边界见
 [PAPER_INDEXER_FUNCTION_MAP.md](PAPER_INDEXER_FUNCTION_MAP.md)；详细 API 与示例见
 [PAPER_INDEXER_README.md](PAPER_INDEXER_README.md)。
+`span_matcher` 的专页说明见 [SPAN_MATCHER_README.md](SPAN_MATCHER_README.md)。
 
 ## 1. 核心职责
 
