@@ -18,6 +18,7 @@ if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
 from app.dev.develop_api_proxy import register_develop_api_cors, register_develop_api_proxy
+from app.dev.semantic_plan_api import register_semantic_plan_api_routes
 from app.pages.expanded_compare_page import (
     register_expanded_compare_api_routes,
     register_expanded_compare_page_routes,
@@ -176,6 +177,12 @@ def _register_develop_api_routes(
         _api_success,
         _api_error,
         paper_indexer=resolved_indexer,
+    )
+    register_semantic_plan_api_routes(
+        app,
+        resolved_indexer,
+        _api_success,
+        _api_error,
     )
 
 
