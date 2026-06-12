@@ -505,6 +505,63 @@
       }).join("");
     }
 
+    function firstText(...values) {
+      for (const value of values) {
+        const candidate = Array.isArray(value) ? value.find(Boolean) : value;
+        if (candidate) return String(candidate);
+      }
+      return "";
+    }
+
+    function extractKeywords(metadata) {
+      const raw = metadata.paper_keywords || metadata.keywords || [];
+      const items = typeof raw === "string" ? [raw] : raw;
+      const keywords = [];
+      for (const entry of items) {
+        const value = (entry && typeof entry === "object")
+          ? (entry.keyword || entry.text || entry.name)
+          : entry;
+        const text = String(value || "").trim();
+        if (text && !keywords.includes(text)) keywords.push(text);
+      }
+      return keywords;
+    }
+
+    function adaptSearchItem(item, rank) {
+      const metadata = item.metadata || {};
+      return {
+        rank,
+        score: Number(item.similarity ?? item.score ?? 0),
+        coverage_ratio: item.coverage_ratio,
+        coverage: item.coverage,
+        matched_span_count: item.matched_span_count,
+        total_span_count: item.total_span_count,
+        matched_spans: item.matched_spans || [],
+        title: firstText(metadata.canonical_title, metadata.title),
+        abstract: firstText(metadata.canonical_abstract, metadata.abstract),
+        keywords: extractKeywords(metadata),
+      };
+    }
+
+    async function fetchJson(url) {
+      const response = await fetch(url);
+      const payload = await response.json();
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error || `HTTP ${response.status}`);
+      }
+      return payload;
+    }
+
+    function buildSearchUrl(query, searchType, topK, withCoverage) {
+      const params = new URLSearchParams({
+        query,
+        top_k: topK,
+        search_type: searchType,
+      });
+      if (withCoverage) params.set("include_coverage", "1");
+      return `/api/search?${params.toString()}`;
+    }
+
     async function runCompare() {
       const query = queryInput.value.trim();
       if (!query) {
@@ -516,28 +573,51 @@
       denseResults.innerHTML = "";
       sparseResults.innerHTML = "";
       expandedResults.innerHTML = "";
-      try {
-        const params = new URLSearchParams({
-          query,
-          top_k: topKInput.value || "10",
-        });
-        const response = await fetch(`/api/expanded-compare?${params.toString()}`);
-        const payload = await response.json();
-        if (!response.ok || !payload.success) {
-          throw new Error(payload.error || `HTTP ${response.status}`);
-        }
-        const terms = payload.highlight_terms || [];
+
+      const topK = topKInput.value || "10";
+      const planParams = new URLSearchParams({ query });
+
+      const [planOutcome, denseOutcome, sparseOutcome, expandedOutcome] =
+        await Promise.allSettled([
+          fetchJson(`/api/semantic-plan?${planParams.toString()}`),
+          fetchJson(buildSearchUrl(query, "dense", topK, true)),
+          fetchJson(buildSearchUrl(query, "sparse", topK, true)),
+          fetchJson(buildSearchUrl(query, "expanded_sparse", topK, false)),
+        ]);
+
+      let terms = [];
+      let rowCount = 0;
+      if (planOutcome.status === "fulfilled") {
+        terms = planOutcome.value.highlight_terms || [];
+        rowCount = planOutcome.value.expanded_query_rows?.length || 0;
         renderTerms(terms);
-        renderPlan(payload.semantic_plan);
-        renderResults(denseResults, denseCount, payload.results?.dense || [], terms, "dense", payload.errors?.dense);
-        renderResults(sparseResults, sparseCount, payload.results?.sparse || [], terms, "sparse", payload.errors?.sparse);
-        renderResults(expandedResults, expandedCount, payload.results?.expanded_sparse || [], terms, "expanded");
-        statusEl.textContent = `${payload.query} | ${payload.expanded_query_rows?.length || 0} DB rows`;
-      } catch (error) {
-        statusEl.innerHTML = `<span class="error">${escapeHtml(error.message || error)}</span>`;
-      } finally {
-        runButton.disabled = false;
+        renderPlan(planOutcome.value.semantic_plan);
+      } else {
+        renderTerms([]);
+        planPanel.style.display = "block";
+        planGrid.innerHTML =
+          `<div class="error">${escapeHtml(planOutcome.reason?.message || planOutcome.reason)}</div>`;
       }
+
+      const renderColumn = (outcome, container, countEl, mode) => {
+        if (outcome.status === "fulfilled") {
+          const items = (outcome.value.results || []).map(
+            (item, index) => adaptSearchItem(item, index + 1),
+          );
+          renderResults(container, countEl, items, terms, mode);
+        } else {
+          renderResults(
+            container, countEl, [], terms, mode,
+            outcome.reason?.message || String(outcome.reason),
+          );
+        }
+      };
+      renderColumn(denseOutcome, denseResults, denseCount, "dense");
+      renderColumn(sparseOutcome, sparseResults, sparseCount, "sparse");
+      renderColumn(expandedOutcome, expandedResults, expandedCount, "expanded");
+
+      statusEl.textContent = `${query} | ${rowCount} DB rows`;
+      runButton.disabled = false;
     }
 
     form.addEventListener("submit", (event) => {
