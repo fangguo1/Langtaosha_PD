@@ -19,10 +19,7 @@ if str(ROOT / "src") not in sys.path:
 
 from app.dev.develop_api_proxy import register_develop_api_cors, register_develop_api_proxy
 from app.dev.semantic_plan_api import register_semantic_plan_api_routes
-from app.pages.expanded_compare_page import (
-    register_expanded_compare_api_routes,
-    register_expanded_compare_page_routes,
-)
+from app.pages.expanded_compare_page import register_expanded_compare_page_routes
 from app.pages.feedback_review_page import (
     register_feedback_review_api_routes,
     register_feedback_review_page_routes,
@@ -161,12 +158,6 @@ def _register_develop_api_routes(
         engine_factory=metadata_engine_factory,
     )
     register_paper_indexer_api_routes(
-        app,
-        resolved_indexer,
-        _api_success,
-        _api_error,
-    )
-    register_expanded_compare_api_routes(
         app,
         resolved_indexer,
         _api_success,
