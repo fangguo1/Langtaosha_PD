@@ -58,6 +58,7 @@ from .dense_result_filter import (
     DENSE_DEFAULT_MIN_SIMILARITY,
     filter_dense_results_by_hard_rules,
 )
+from .coverage_engine import analyze_document_coverage, summarize_expanded_sparse_matches
 from .expanded_sparse_retrieval import match_papers_by_expanded_sparse_plan
 from .keyword_enrichment import KeywordEnrichmentService
 from .paper_keyword_lookup import (
@@ -338,7 +339,9 @@ class PaperIndexer:
         source_list: Optional[List[str]] = None,
         top_k: int = 10,
         hydrate: bool = True,
-        search_type: str = "dense"
+        search_type: str = "dense",
+        keyword_sources: Optional[Sequence[str]] = None,
+        include_coverage: bool = False,
     ) -> List[Dict[str, Any]]:
         """搜索论文
 
@@ -347,7 +350,9 @@ class PaperIndexer:
             source_list: 来源列表（如果不提供则使用 default_sources）
             top_k: 返回结果数量
             hydrate: 是否补全完整 metadata（默认 True）
-            search_type: 检索类型，支持 dense / sparse / hybrid / hybrid_retrieval
+            search_type: 检索类型，支持 dense / sparse / hybrid / hybrid_retrieval / expanded_sparse
+            keyword_sources: 关键词来源过滤（expanded_sparse 与 coverage 注解使用）
+            include_coverage: dense/sparse 结果附加 span coverage 字段（需 hydrate=True）
 
         Returns:
             List[Dict[str, Any]]: 搜索结果列表，每个结果包含:
@@ -361,6 +366,15 @@ class PaperIndexer:
         Raises:
             ValueError: vector_db 未启用或参数错误
         """
+        if search_type == "expanded_sparse":
+            return self.expanded_sparse_search(
+                query=query,
+                source_list=source_list,
+                top_k=top_k,
+                hydrate=hydrate,
+                keyword_sources=keyword_sources,
+            )
+
         if not self.vector_db:
             raise ValueError("向量数据库未启用，无法执行搜索")
 
@@ -513,6 +527,66 @@ class PaperIndexer:
         if hydrate:
             return self._hydrate_search_results(merged_results)
         return self._search_results_to_lightweight_dicts(merged_results)
+
+    def expanded_sparse_search(
+        self,
+        query: str,
+        source_list: Optional[List[str]] = None,
+        top_k: int = 10,
+        hydrate: bool = True,
+        keyword_sources: Optional[Sequence[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Expanded sparse 检索：semantic plan 展开词项匹配 + span coverage 评分。
+
+        结果按 coverage_ratio 作为 similarity 返回，形状与 search() 其他
+        检索类型保持一致（metadata 嵌套，hydrate 可关）。
+        """
+        resolved_source_list = self._resolve_source_list(source_list)
+        plan = self.build_query_semantic_plan(
+            query=query,
+            source_list=resolved_source_list,
+            keyword_sources=keyword_sources,
+        )
+        if plan is None:
+            return []
+
+        candidates = match_papers_by_expanded_sparse_plan(
+            metadata_db=self.metadata_db,
+            plan=plan,
+            source_list=resolved_source_list,
+            keyword_sources=keyword_sources,
+            top_k=top_k,
+        )
+
+        results: List[Dict[str, Any]] = []
+        for candidate in candidates:
+            coverage = summarize_expanded_sparse_matches(
+                plan=plan,
+                matched_spans=list(getattr(candidate, "matched_spans", []) or []),
+            )
+            item: Dict[str, Any] = {
+                "work_id": getattr(candidate, "work_id", None),
+                "paper_id": getattr(candidate, "paper_id", None),
+                "similarity": float(coverage.coverage_ratio or 0.0),
+                "coverage_ratio": float(coverage.coverage_ratio or 0.0),
+                "coverage": coverage.to_dict(),
+                "matched_span_count": int(coverage.matched_span_count or 0),
+                "total_span_count": int(coverage.total_span_count or 0),
+                "matched_spans": list(coverage.matched_spans or []),
+                "retrieval_debug": dict(getattr(candidate, "retrieval_debug", {}) or {}),
+            }
+            if hydrate:
+                metadata: Dict[str, Any] = {}
+                work_id = item["work_id"]
+                if work_id:
+                    try:
+                        metadata = dict(self.metadata_db.read_paper_by_work_id(work_id) or {})
+                    except Exception:  # noqa: BLE001
+                        metadata = {}
+                item["metadata"] = metadata
+                item["source_name"] = metadata.get("source_name")
+            results.append(item)
+        return results
 
     def smart_search(
         self,

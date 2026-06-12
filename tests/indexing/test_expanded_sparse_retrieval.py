@@ -387,3 +387,98 @@ def test_paper_indexer_runs_expanded_sparse_retrieval_branch(monkeypatch):
     assert branch_results[0]["retrieval_debug"]["retriever"] == "expanded_sparse"
     assert branch_results[0]["retrieval_debug"]["matched_span_count"] == 2
     assert branch_results[0]["retrieval_debug"]["matched_spans"][0]["matched_scopes"] == ["parent", "child"]
+
+
+def test_expanded_sparse_search_returns_coverage_annotated_results(monkeypatch):
+    indexer = PaperIndexer.__new__(PaperIndexer)
+    indexer.default_sources = ["langtaosha"]
+
+    class FakeMetadataDB:
+        def read_paper_by_work_id(self, work_id):
+            return {
+                "paper_id": 101,
+                "work_id": work_id,
+                "source_name": "langtaosha",
+                "canonical_title": "Kidney adhesion paper",
+                "canonical_abstract": "Renal epithelial adhesion study.",
+                "paper_keywords": [{"keyword": "kidney"}],
+            }
+
+    indexer.metadata_db = FakeMetadataDB()
+    plan = _plan()
+
+    monkeypatch.setattr(
+        indexer,
+        "build_query_semantic_plan",
+        lambda query, source_list, keyword_sources=None: plan,
+    )
+    monkeypatch.setattr(
+        "src.docset_hub.indexing.paper_indexer.match_papers_by_expanded_sparse_plan",
+        lambda metadata_db, plan, source_list, keyword_sources=None, top_k=50: [
+            type(
+                "Candidate",
+                (),
+                {
+                    "paper_id": 101,
+                    "work_id": "W101",
+                    "matched_span_count": 1,
+                    "total_span_count": 2,
+                    "coverage_ratio": 0.5,
+                    "matched_spans": [
+                        {
+                            "span_id": "s1",
+                            "canonical_text": "Renal",
+                            "matched_terms": ["kidney"],
+                            "matched_scopes": ["parent"],
+                            "own_term_matched": True,
+                            "matched_child_count": 0,
+                            "total_child_count": 0,
+                            "span_score": 1.0,
+                        }
+                    ],
+                    "retrieval_debug": {"retriever": "expanded_sparse"},
+                },
+            )()
+        ],
+    )
+
+    results = indexer.expanded_sparse_search(
+        query="adhesion protein in kidney",
+        source_list=["langtaosha"],
+        top_k=5,
+        hydrate=True,
+    )
+
+    assert len(results) == 1
+    assert results[0]["work_id"] == "W101"
+    assert results[0]["paper_id"] == 101
+    assert results[0]["similarity"] == results[0]["coverage_ratio"]
+    assert results[0]["coverage"]["matched_span_count"] == 1
+    assert results[0]["matched_spans"][0]["matched_terms"] == ["kidney"]
+    assert results[0]["metadata"]["canonical_title"] == "Kidney adhesion paper"
+    assert results[0]["source_name"] == "langtaosha"
+
+
+def test_search_dispatches_expanded_sparse_without_vector_db(monkeypatch):
+    indexer = PaperIndexer.__new__(PaperIndexer)
+    indexer.default_sources = ["langtaosha"]
+    indexer.metadata_db = object()
+    indexer.vector_db = None  # expanded_sparse 不依赖向量库
+    captured = {}
+
+    def fake_expanded_sparse_search(**kwargs):
+        captured.update(kwargs)
+        return [{"work_id": "W1"}]
+
+    monkeypatch.setattr(indexer, "expanded_sparse_search", fake_expanded_sparse_search)
+
+    results = indexer.search(
+        query="renal adhesion",
+        source_list=["langtaosha"],
+        top_k=7,
+        search_type="expanded_sparse",
+    )
+
+    assert results == [{"work_id": "W1"}]
+    assert captured["query"] == "renal adhesion"
+    assert captured["top_k"] == 7
