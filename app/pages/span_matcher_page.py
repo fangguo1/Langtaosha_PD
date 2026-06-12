@@ -6,7 +6,12 @@ from typing import Any, Callable, Dict, List, Optional
 
 from flask import render_template, request
 
-from src.docset_hub.indexing import SpanMatcherError, SpanMatcherPipeline, SpanMatcherProfile
+from src.docset_hub.indexing import (
+    SpanMatcherError,
+    SpanMatcherPipeline,
+    SpanMatcherProfile,
+    serialize_semantic_plan,
+)
 
 
 DEFAULT_SPAN_SCISPACY_MODEL = "en_core_sci_lg"
@@ -63,55 +68,6 @@ def _serialize_selected_candidate(concept: Any) -> Dict[str, Any]:
     }
 
 
-def _serialize_semantic_plan(plan: Any) -> Dict[str, Any]:
-    def serialize_terms(terms: Any) -> List[Dict[str, Any]]:
-        return [
-            {
-                "text": getattr(term, "text", ""),
-                "match_mode": getattr(term, "match_mode", "exact"),
-            }
-            for term in list(terms or [])
-        ]
-
-    def serialize_child(child: Any) -> Dict[str, Any]:
-        return {
-            "span_id": child.span_id,
-            "surface_text": child.surface_text,
-            "normalized_text": child.normalized_text,
-            "start": child.start,
-            "end": child.end,
-            "canonical_text": child.canonical_text,
-            "own_terms": {
-                "tier1": serialize_terms(getattr(child.own_terms, "tier1", [])),
-                "tier2": serialize_terms(getattr(child.own_terms, "tier2", [])),
-            },
-        }
-
-    return {
-        "original_query": plan.original_query,
-        "normalized_query": plan.normalized_query,
-        "spans": [
-            {
-                "span_id": span.span_id,
-                "surface_text": span.surface_text,
-                "normalized_text": span.normalized_text,
-                "start": span.start,
-                "end": span.end,
-                "canonical_text": span.canonical_text,
-                "own_terms": {
-                    "tier1": serialize_terms(getattr(span.own_terms, "tier1", [])),
-                    "tier2": serialize_terms(getattr(span.own_terms, "tier2", [])),
-                },
-                "children": [
-                    serialize_child(child)
-                    for child in list(getattr(span, "children", []) or [])
-                ],
-            }
-            for span in plan.spans
-        ],
-    }
-
-
 def _build_span_matcher_profile(paper_indexer: Any) -> SpanMatcherProfile:
     return SpanMatcherProfile.ontology_plus_keyword(
         enable_scispacy=os.environ.get("SKIP_SCISPACY", "0") != "1",
@@ -164,7 +120,7 @@ def run_span_matcher_test(query: str, *, paper_indexer: Any) -> Dict[str, Any]:
         "normalized_query": result.normalized_query,
         "count": len(selected_candidates),
         "selected_candidates": selected_candidates,
-        "semantic_plan": _serialize_semantic_plan(result.semantic_plan),
+        "semantic_plan": serialize_semantic_plan(result.semantic_plan),
         "elapsed_ms": elapsed_ms,
         "timings_ms": result.timings_ms,
     }

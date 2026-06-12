@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from src.docset_hub.indexing.query_semantic_plan import build_query_semantic_plan
 from src.docset_hub.indexing.query_phrase_analyzer import PhraseCandidate
 from src.docset_hub.indexing.span_matcher import ConceptMatchEvidence, SelectedConcept, SpanMatchResult
@@ -250,3 +252,51 @@ def test_build_query_semantic_plan_keeps_keyword_only_span_but_without_tier2_ter
         ("deep learning", "exact")
     ]
     assert plan.spans[0].own_terms.tier2 == []
+
+
+def test_serialize_semantic_plan_serializes_spans_terms_and_children():
+    from src.docset_hub.indexing.query_semantic_plan import serialize_semantic_plan
+
+    plan = SimpleNamespace(
+        original_query="renal adhesion",
+        normalized_query="renal adhesion",
+        spans=[
+            SimpleNamespace(
+                span_id="s1",
+                surface_text="renal",
+                normalized_text="renal",
+                start=0,
+                end=5,
+                canonical_text="Renal",
+                own_terms=SimpleNamespace(
+                    tier1=[SimpleNamespace(text="renal", match_mode="exact")],
+                    tier2=[SimpleNamespace(text="kidney", match_mode="exact")],
+                ),
+                children=[
+                    SimpleNamespace(
+                        span_id="s1.1",
+                        surface_text="ren",
+                        normalized_text="ren",
+                        start=0,
+                        end=3,
+                        canonical_text="Ren",
+                        own_terms=SimpleNamespace(
+                            tier1=[SimpleNamespace(text="ren", match_mode="prefix")],
+                            tier2=[],
+                        ),
+                    )
+                ],
+            )
+        ],
+    )
+
+    payload = serialize_semantic_plan(plan)
+
+    assert payload["original_query"] == "renal adhesion"
+    assert payload["spans"][0]["span_id"] == "s1"
+    assert payload["spans"][0]["own_terms"]["tier1"] == [{"text": "renal", "match_mode": "exact"}]
+    assert payload["spans"][0]["own_terms"]["tier2"] == [{"text": "kidney", "match_mode": "exact"}]
+    assert payload["spans"][0]["children"][0]["span_id"] == "s1.1"
+    assert payload["spans"][0]["children"][0]["own_terms"]["tier1"] == [
+        {"text": "ren", "match_mode": "prefix"}
+    ]

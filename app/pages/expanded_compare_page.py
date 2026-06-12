@@ -4,7 +4,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 
 from flask import render_template, request
 
-from app.pages.span_matcher_page import _serialize_semantic_plan
+from src.docset_hub.indexing import serialize_semantic_plan
 from src.docset_hub.indexing.coverage_engine import (
     analyze_document_coverage,
     summarize_expanded_sparse_matches,
@@ -109,7 +109,7 @@ def register_expanded_compare_api_routes(
                 {
                     "query": query,
                     "top_k": top_k,
-                    "semantic_plan": _serialize_semantic_plan(plan),
+                    "semantic_plan": serialize_semantic_plan(plan),
                     "expanded_query_rows": expanded_query_rows,
                     "highlight_terms": highlight_terms,
                     "errors": errors,

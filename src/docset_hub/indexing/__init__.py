@@ -55,6 +55,7 @@ from .query_semantic_plan import (
     SemanticTerm,
     SemanticTermBucket,
     build_query_semantic_plan,
+    serialize_semantic_plan,
 )
 from .search_highlighting import build_search_highlight
 from .span_matcher import (
@@ -139,6 +140,7 @@ __all__ = [
     'match_paper_keywords_using_span_matcher',
     'ROUTE_WEIGHTS',
     'build_query_semantic_plan',
+    'serialize_semantic_plan',
     'normalize_author_name',
     'normalize_query',
 ]

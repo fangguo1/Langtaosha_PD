@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Iterable, List, Sequence
+from typing import Any, Dict, Iterable, List, Sequence
 
 from .query_phrase_analyzer import QueryPhraseNormalizer
 from .span_matcher import ConceptMatchEvidence, SelectedConcept, SpanMatchResult
@@ -211,3 +211,54 @@ def _unique_normalized_terms(
         seen.add(normalized)
         normalized_terms.append(normalized)
     return sorted(normalized_terms)
+
+
+def serialize_semantic_plan(plan: Any) -> Dict[str, Any]:
+    """Serialize a QuerySemanticPlan into a JSON-safe dict (API/页面共用出口)."""
+
+    def serialize_terms(terms: Any) -> List[Dict[str, Any]]:
+        return [
+            {
+                "text": getattr(term, "text", ""),
+                "match_mode": getattr(term, "match_mode", "exact"),
+            }
+            for term in list(terms or [])
+        ]
+
+    def serialize_child(child: Any) -> Dict[str, Any]:
+        return {
+            "span_id": child.span_id,
+            "surface_text": child.surface_text,
+            "normalized_text": child.normalized_text,
+            "start": child.start,
+            "end": child.end,
+            "canonical_text": child.canonical_text,
+            "own_terms": {
+                "tier1": serialize_terms(getattr(child.own_terms, "tier1", [])),
+                "tier2": serialize_terms(getattr(child.own_terms, "tier2", [])),
+            },
+        }
+
+    return {
+        "original_query": plan.original_query,
+        "normalized_query": plan.normalized_query,
+        "spans": [
+            {
+                "span_id": span.span_id,
+                "surface_text": span.surface_text,
+                "normalized_text": span.normalized_text,
+                "start": span.start,
+                "end": span.end,
+                "canonical_text": span.canonical_text,
+                "own_terms": {
+                    "tier1": serialize_terms(getattr(span.own_terms, "tier1", [])),
+                    "tier2": serialize_terms(getattr(span.own_terms, "tier2", [])),
+                },
+                "children": [
+                    serialize_child(child)
+                    for child in list(getattr(span, "children", []) or [])
+                ],
+            }
+            for span in plan.spans
+        ],
+    }
