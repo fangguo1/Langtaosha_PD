@@ -4,7 +4,7 @@ from typing import Any, Callable, List, Optional
 
 from flask import request
 
-SUPPORTED_SEARCH_TYPES = ("dense", "sparse", "hybrid", "hybrid_retrieval")
+SUPPORTED_SEARCH_TYPES = ("dense", "sparse", "hybrid", "hybrid_retrieval", "expanded_sparse")
 
 
 def _normalize_top_k(raw_value: Any, default: int = 10) -> int:
@@ -29,6 +29,12 @@ def _parse_hydrate(raw_value: Optional[str]) -> bool:
     if normalized in {"0", "false", "no", "off"}:
         return False
     return True
+
+
+def _parse_bool_flag(raw_value: Optional[str]) -> bool:
+    if raw_value is None:
+        return False
+    return raw_value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def register_paper_indexer_api_routes(
@@ -63,6 +69,8 @@ def register_paper_indexer_api_routes(
                 top_k=top_k,
                 hydrate=_parse_hydrate(request.args.get("hydrate")),
                 search_type=search_type,
+                keyword_sources=_parse_source_list(request.args.get("keyword_sources")),
+                include_coverage=_parse_bool_flag(request.args.get("include_coverage")),
             )
             return api_success(
                 {
