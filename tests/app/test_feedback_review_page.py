@@ -5,7 +5,7 @@ from pathlib import Path
 
 from flask import Flask
 
-from app.feedback_review_page import (
+from app.pages.feedback_review_page import (
     build_feedback_review_payload,
     load_feedback_review_testbed,
     register_feedback_review_routes,

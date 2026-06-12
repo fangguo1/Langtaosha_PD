@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from flask import Flask
 
-from app.span_matcher_page import (
+from app.pages.span_matcher_page import (
     register_span_matcher_api_routes,
     register_span_matcher_page_routes,
     run_span_matcher_test,
@@ -16,7 +16,7 @@ def test_span_matcher_api_returns_semantic_plan(monkeypatch):
     app = Flask(__name__)
 
     monkeypatch.setattr(
-        "app.span_matcher_page.run_span_matcher_test",
+        "app.pages.span_matcher_page.run_span_matcher_test",
         lambda query, paper_indexer: {
             "success": True,
             "query": query,
@@ -179,7 +179,7 @@ def test_run_span_matcher_test_uses_ontology_plus_keyword_pipeline(monkeypatch):
         return FakePipeline()
 
     monkeypatch.setattr(
-        "app.span_matcher_page.SpanMatcherPipeline.from_profile",
+        "app.pages.span_matcher_page.SpanMatcherPipeline.from_profile",
         fake_from_profile,
     )
 

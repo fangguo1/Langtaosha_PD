@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from flask import Flask
 
-from app.expanded_compare_page import (
+from app.pages.expanded_compare_page import (
     register_expanded_compare_api_routes,
     register_expanded_compare_page_routes,
 )
@@ -122,7 +122,7 @@ def test_expanded_compare_api_returns_sparse_expanded_rows_and_terms(monkeypatch
             return plan
 
     monkeypatch.setattr(
-        "app.expanded_compare_page.build_expanded_sparse_query_rows",
+        "app.pages.expanded_compare_page.build_expanded_sparse_query_rows",
         lambda received_plan: [
             {
                 "group_id": 1,
@@ -137,7 +137,7 @@ def test_expanded_compare_api_returns_sparse_expanded_rows_and_terms(monkeypatch
         ],
     )
     monkeypatch.setattr(
-        "app.expanded_compare_page.match_papers_by_expanded_sparse_plan",
+        "app.pages.expanded_compare_page.match_papers_by_expanded_sparse_plan",
         lambda **kwargs: [
             SimpleNamespace(
                 paper_id=10,
@@ -224,11 +224,11 @@ def test_expanded_compare_api_keeps_expanded_results_when_sparse_fails(monkeypat
             return plan
 
     monkeypatch.setattr(
-        "app.expanded_compare_page.build_expanded_sparse_query_rows",
+        "app.pages.expanded_compare_page.build_expanded_sparse_query_rows",
         lambda received_plan: [{"term": "memory", "match_mode": "exact"}],
     )
     monkeypatch.setattr(
-        "app.expanded_compare_page.match_papers_by_expanded_sparse_plan",
+        "app.pages.expanded_compare_page.match_papers_by_expanded_sparse_plan",
         lambda **kwargs: [
             SimpleNamespace(
                 paper_id=20,

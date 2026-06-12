@@ -37,7 +37,7 @@ class FakeEngine:
 
 
 def test_create_feedback_review_app_serves_page_and_api(tmp_path, monkeypatch):
-    from app import feedback_review_app as feedback_app_module
+    from app.dev import feedback_review_app as feedback_app_module
 
     monkeypatch.setattr(feedback_app_module, "init_config", lambda path: None)
 
@@ -94,7 +94,7 @@ def test_create_feedback_review_app_serves_page_and_api(tmp_path, monkeypatch):
 
 
 def test_create_feedback_review_app_sets_utf8_json(monkeypatch):
-    from app import feedback_review_app as feedback_app_module
+    from app.dev import feedback_review_app as feedback_app_module
 
     monkeypatch.setattr(feedback_app_module, "init_config", lambda path: None)
 
