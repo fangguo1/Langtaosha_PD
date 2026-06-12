@@ -2,7 +2,7 @@
 
 **位置**: `src/docset_hub/indexing/span_matcher.py`  
 **相关编排**: `src/docset_hub/indexing/span_matcher_pipeline.py`  
-**下游消费者**: `src/docset_hub/indexing/query_semantic_plan.py`、`src/docset_hub/indexing/expanded_sparse_retrieval.py`、`app/span_matcher_page.py`、`app/expanded_compare_page.py`、`PaperIndexer`
+**下游消费者**: `src/docset_hub/indexing/query_semantic_plan.py`、`src/docset_hub/indexing/expanded_sparse_retrieval.py`、`app/pages/span_matcher_page.py`、`app/pages/expanded_compare_page.py`、`PaperIndexer`
 
 本文档描述当前 `span_matcher` 的真实职责、输出契约和调用链。它不是一个单独的检索器，也不负责结果融合；它负责把 query span 转成可解释的概念证据，并为后续的 semantic plan 与检索分支提供结构化输入。
 
@@ -288,13 +288,13 @@ query
 
 ### 7.1 Web 调试页
 
-- `app/span_matcher_page.py`
+- `app/pages/span_matcher_page.py`
 
 它通过 `SpanMatcherPipeline` 提供页面级调试能力，返回 selected concepts、semantic plan 和 timings。
 
 ### 7.2 对比页
 
-- `app/expanded_compare_page.py`
+- `app/pages/expanded_compare_page.py`
 
 它会复用同一套 span matcher 语义理解结果，保证页面对比与检索逻辑一致。
 
