@@ -482,3 +482,87 @@ def test_search_dispatches_expanded_sparse_without_vector_db(monkeypatch):
     assert results == [{"work_id": "W1"}]
     assert captured["query"] == "renal adhesion"
     assert captured["top_k"] == 7
+
+
+def test_search_annotates_dense_results_with_coverage_when_requested(monkeypatch):
+    indexer = PaperIndexer.__new__(PaperIndexer)
+    indexer.default_sources = ["langtaosha"]
+    indexer.metadata_db = object()
+    plan = _plan()
+
+    class FakeSearchResult:
+        work_id = "W11"
+        paper_id = 11
+        source_name = "langtaosha"
+        score = 0.77
+        text_type = "abstract"
+        retrieval_debug = {}
+
+    class FakeVectorDB:
+        def search(self, query, source_list, top_k, search_type):
+            return [FakeSearchResult()]
+
+    indexer.vector_db = FakeVectorDB()
+    monkeypatch.setattr(
+        indexer,
+        "_resolve_source_list",
+        lambda source_list: ["langtaosha"],
+    )
+    monkeypatch.setattr(
+        indexer,
+        "_hydrate_search_results",
+        lambda search_results: [
+            {
+                "work_id": "W11",
+                "paper_id": 11,
+                "source_name": "langtaosha",
+                "similarity": 0.77,
+                "metadata": {
+                    "canonical_title": "Kidney adhesion paper",
+                    "canonical_abstract": "Renal epithelial adhesion study.",
+                    "paper_keywords": [{"keyword": "kidney"}],
+                },
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        indexer,
+        "build_query_semantic_plan",
+        lambda query, source_list, keyword_sources=None: plan,
+    )
+
+    results = indexer.search(
+        query="adhesion protein in kidney",
+        search_type="dense",
+        include_coverage=True,
+    )
+
+    assert "coverage_ratio" in results[0]
+    assert "coverage" in results[0]
+    assert "matched_spans" in results[0]
+    assert results[0]["total_span_count"] == len(plan.spans)
+
+
+def test_search_skips_coverage_annotation_by_default(monkeypatch):
+    indexer = PaperIndexer.__new__(PaperIndexer)
+    indexer.default_sources = ["langtaosha"]
+    indexer.metadata_db = object()
+
+    class FakeVectorDB:
+        def search(self, query, source_list, top_k, search_type):
+            return []
+
+    indexer.vector_db = FakeVectorDB()
+    monkeypatch.setattr(indexer, "_resolve_source_list", lambda source_list: ["langtaosha"])
+    monkeypatch.setattr(indexer, "_hydrate_search_results", lambda search_results: [])
+
+    called = {"plan": False}
+
+    def fail_plan(**kwargs):
+        called["plan"] = True
+
+    monkeypatch.setattr(indexer, "build_query_semantic_plan", fail_plan)
+
+    indexer.search(query="renal adhesion", search_type="dense")
+
+    assert called["plan"] is False

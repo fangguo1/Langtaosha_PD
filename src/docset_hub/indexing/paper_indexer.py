@@ -400,7 +400,15 @@ class PaperIndexer:
 
             # 3. 可选：补全 metadata
             if hydrate:
-                return self._hydrate_search_results(search_results)
+                hydrated = self._hydrate_search_results(search_results)
+                if include_coverage and search_type in ("dense", "sparse"):
+                    self._annotate_results_with_coverage(
+                        results=hydrated,
+                        query=query,
+                        source_list=resolved_source_list,
+                        keyword_sources=keyword_sources,
+                    )
+                return hydrated
             else:
                 # 返回轻量级结果
                 return [
@@ -587,6 +595,54 @@ class PaperIndexer:
                 item["source_name"] = metadata.get("source_name")
             results.append(item)
         return results
+
+    def _annotate_results_with_coverage(
+        self,
+        *,
+        results: List[Dict[str, Any]],
+        query: str,
+        source_list: List[str],
+        keyword_sources: Optional[Sequence[str]] = None,
+    ) -> None:
+        """对 hydrate 后的检索结果就地附加 span coverage 字段（dev 对比用）。"""
+        plan = self.build_query_semantic_plan(
+            query=query,
+            source_list=source_list,
+            keyword_sources=keyword_sources,
+        )
+        if plan is None:
+            return
+        for item in results:
+            metadata = dict(item.get("metadata") or {})
+            coverage = analyze_document_coverage(
+                plan=plan,
+                document_fields={
+                    "title": metadata.get("canonical_title") or metadata.get("title") or "",
+                    "abstract": metadata.get("canonical_abstract") or metadata.get("abstract") or "",
+                    "paper_keywords": self._extract_keyword_texts(metadata),
+                },
+            )
+            item["coverage_ratio"] = float(coverage.coverage_ratio or 0.0)
+            item["coverage"] = coverage.to_dict()
+            item["matched_span_count"] = int(coverage.matched_span_count or 0)
+            item["total_span_count"] = int(coverage.total_span_count or 0)
+            item["matched_spans"] = list(coverage.matched_spans or [])
+
+    @staticmethod
+    def _extract_keyword_texts(metadata: Mapping[str, Any]) -> List[str]:
+        raw_keywords = metadata.get("paper_keywords") or metadata.get("keywords") or []
+        if isinstance(raw_keywords, str):
+            raw_keywords = [raw_keywords]
+        texts: List[str] = []
+        for entry in raw_keywords:
+            if isinstance(entry, Mapping):
+                value = entry.get("keyword") or entry.get("text") or entry.get("name")
+            else:
+                value = entry
+            text = " ".join(str(value or "").strip().split())
+            if text and text not in texts:
+                texts.append(text)
+        return texts
 
     def smart_search(
         self,
