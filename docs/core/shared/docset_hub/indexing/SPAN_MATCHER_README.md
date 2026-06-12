@@ -262,6 +262,28 @@ SpanMatcherPipeline.run()
 
 这使 downstream 能区分“精确词项”和“词干前缀词项”。
 
+### 6.1 下游流程浓缩图
+
+```text
+query
+  -> SpanMatcherPipeline
+  -> selected_concepts + span_results
+  -> build_query_semantic_plan()
+  -> QuerySemanticPlan
+     -> coverage_engine.analyze_document_coverage()         # 单篇文档覆盖分析
+     -> expanded_sparse_retrieval.match_papers_by_expanded_sparse_plan()
+        -> MetadataDB.lookup_papers_by_expanded_sparse_groups()
+        -> coverage_ratio / matched_spans
+        -> PaperIndexer 作为 expanded_sparse branch score 参与融合
+```
+
+要点：
+
+- `coverage_engine` 是语义覆盖的 Python 参考实现和报告归一层；
+- 实际 expanded sparse 召回时，coverage 由 `MetadataDB` 的 SQL 直接计算；
+- `PaperIndexer` 不重新算 coverage，只消费 `coverage_ratio` 和 `matched_spans`；
+- 这三层共用同一个 `QuerySemanticPlan` 语义契约。
+
 ## 7. 在项目里的实际入口
 
 ### 7.1 Web 调试页
@@ -314,4 +336,3 @@ SpanMatcherPipeline.run()
 - [Query Semantic Plan 树结构实现计划](../../../../implementation_log/20260610/SPAN_MATCHER_TREE_PREFIX_IMPLEMENTATION_PLAN_20260610.md)
 - [Span Matcher Pipeline 实现计划](../../../../implementation_log/20260610/SPAN_MATCHER_PIPELINE_PROFILE_IMPLEMENTATION_PLAN_20260610.md)
 - [Expanded Sparse Retrieval 设计](../../../../implementation_log/20260610/EXPANDED_SPARSE_RETRIEVAL_AND_COVERAGE_PLAN_20260610.md)
-

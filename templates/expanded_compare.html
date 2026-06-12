@@ -179,7 +179,7 @@
 
     .compare-grid {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
       gap: 12px;
       align-items: start;
     }
@@ -213,16 +213,19 @@
     }
 
     .result-card {
+      min-width: 0;
       border: 1px solid var(--line);
       border-radius: 8px;
       padding: 12px;
       background: #ffffff;
+      overflow: hidden;
     }
 
     .result-head {
       display: flex;
       align-items: baseline;
       justify-content: space-between;
+      flex-wrap: wrap;
       gap: 8px;
       margin-bottom: 8px;
     }
@@ -237,7 +240,9 @@
     .score {
       color: var(--muted);
       font-size: 12px;
-      white-space: nowrap;
+      white-space: normal;
+      overflow-wrap: anywhere;
+      text-align: right;
     }
 
     .title {
@@ -246,6 +251,7 @@
       line-height: 1.45;
       font-weight: 900;
       overflow-wrap: anywhere;
+      word-break: break-word;
     }
 
     .abstract {
@@ -255,6 +261,8 @@
       line-height: 1.55;
       max-height: 124px;
       overflow: auto;
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
 
     .keywords {
@@ -295,10 +303,20 @@
       border-top: 1px dashed var(--line);
     }
 
+    .coverage-meta {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+      overflow-wrap: anywhere;
+    }
+
     .span-match {
       font-size: 12px;
       color: var(--muted);
       line-height: 1.45;
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
 
     .empty,
@@ -318,8 +336,7 @@
     }
 
     @media (max-width: 860px) {
-      .searchbar,
-      .compare-grid {
+      .searchbar {
         grid-template-columns: 1fr;
       }
     }
@@ -352,6 +369,10 @@
 
     <section class="compare-grid">
       <div class="column">
+        <h2>Dense <span class="count" id="dense-count">0</span></h2>
+        <div class="results" id="dense-results"></div>
+      </div>
+      <div class="column">
         <h2>Sparse <span class="count" id="sparse-count">0</span></h2>
         <div class="results" id="sparse-results"></div>
       </div>
@@ -372,8 +393,10 @@
     const termGrid = document.getElementById("term-grid");
     const planPanel = document.getElementById("plan-panel");
     const planGrid = document.getElementById("plan-grid");
+    const denseResults = document.getElementById("dense-results");
     const sparseResults = document.getElementById("sparse-results");
     const expandedResults = document.getElementById("expanded-results");
+    const denseCount = document.getElementById("dense-count");
     const sparseCount = document.getElementById("sparse-count");
     const expandedCount = document.getElementById("expanded-count");
 
@@ -450,10 +473,11 @@
         return;
       }
       container.innerHTML = items.map((item) => {
-        const score = Number(item.coverage_ratio ?? item.score ?? 0);
+        const retrievalScore = Number(item.score ?? 0);
+        const coverageRatio = Number(item.coverage_ratio ?? item.coverage?.coverage_ratio ?? 0);
         const scoreLabel = mode === "expanded"
-          ? `coverage ${score.toFixed(2)}`
-          : `score ${score.toFixed(4)}`;
+          ? `coverage ${coverageRatio.toFixed(2)}`
+          : `score ${retrievalScore.toFixed(4)} | coverage ${coverageRatio.toFixed(2)}`;
         const keywords = (item.keywords || []).slice(0, 18).map((keyword) => (
           `<span class="keyword">${highlightText(keyword, terms)}</span>`
         )).join("");
@@ -462,6 +486,9 @@
           const fieldsText = (span.matched_fields || []).join(", ") || "-";
           return `<div class="span-match">${escapeHtml(span.span_id)} ${escapeHtml(span.canonical_text)} | ${escapeHtml(termsText)} | ${escapeHtml(fieldsText)}</div>`;
         }).join("");
+        const coverageMeta = item.total_span_count
+          ? `<div class="coverage-meta">${escapeHtml(item.matched_span_count || 0)} / ${escapeHtml(item.total_span_count)} spans matched</div>`
+          : "";
         return `
           <article class="result-card">
             <div class="result-head">
@@ -471,6 +498,7 @@
             <h3 class="title">${highlightText(item.title || "(untitled)", terms)}</h3>
             <p class="abstract">${highlightText(item.abstract || "", terms)}</p>
             ${keywords ? `<div class="keywords">${keywords}</div>` : ""}
+            ${coverageMeta}
             ${spans ? `<div class="matched-spans">${spans}</div>` : ""}
           </article>
         `;
@@ -485,6 +513,7 @@
       }
       runButton.disabled = true;
       statusEl.textContent = "running...";
+      denseResults.innerHTML = "";
       sparseResults.innerHTML = "";
       expandedResults.innerHTML = "";
       try {
@@ -500,6 +529,7 @@
         const terms = payload.highlight_terms || [];
         renderTerms(terms);
         renderPlan(payload.semantic_plan);
+        renderResults(denseResults, denseCount, payload.results?.dense || [], terms, "dense", payload.errors?.dense);
         renderResults(sparseResults, sparseCount, payload.results?.sparse || [], terms, "sparse", payload.errors?.sparse);
         renderResults(expandedResults, expandedCount, payload.results?.expanded_sparse || [], terms, "expanded");
         statusEl.textContent = `${payload.query} | ${payload.expanded_query_rows?.length || 0} DB rows`;

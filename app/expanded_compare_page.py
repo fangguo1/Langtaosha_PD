@@ -5,6 +5,10 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 from flask import render_template, request
 
 from app.span_matcher_page import _serialize_semantic_plan
+from src.docset_hub.indexing.coverage_engine import (
+    analyze_document_coverage,
+    summarize_expanded_sparse_matches,
+)
 from src.docset_hub.indexing.expanded_sparse_retrieval import (
     build_expanded_sparse_query_rows,
     match_papers_by_expanded_sparse_plan,
@@ -45,6 +49,18 @@ def register_expanded_compare_api_routes(
             errors: Dict[str, str] = {}
 
             try:
+                dense_results = indexer.search(
+                    query=query,
+                    source_list=source_list,
+                    top_k=top_k,
+                    hydrate=True,
+                    search_type="dense",
+                )
+            except Exception as exc:  # noqa: BLE001
+                dense_results = []
+                errors["dense"] = str(exc)
+
+            try:
                 sparse_results = indexer.search(
                     query=query,
                     source_list=source_list,
@@ -72,6 +88,7 @@ def register_expanded_compare_api_routes(
                         "highlight_terms": [],
                         "errors": errors,
                         "results": {
+                            "dense": [_serialize_sparse_result(item, rank) for rank, item in enumerate(dense_results, start=1)],
                             "sparse": [_serialize_sparse_result(item, rank) for rank, item in enumerate(sparse_results, start=1)],
                             "expanded_sparse": [],
                         },
@@ -97,9 +114,16 @@ def register_expanded_compare_api_routes(
                     "highlight_terms": highlight_terms,
                     "errors": errors,
                     "results": {
-                        "sparse": [_serialize_sparse_result(item, rank) for rank, item in enumerate(sparse_results, start=1)],
+                        "dense": [
+                            _serialize_dense_or_sparse_result(plan, item, rank)
+                            for rank, item in enumerate(dense_results, start=1)
+                        ],
+                        "sparse": [
+                            _serialize_dense_or_sparse_result(plan, item, rank)
+                            for rank, item in enumerate(sparse_results, start=1)
+                        ],
                         "expanded_sparse": [
-                            _serialize_expanded_result(indexer, item, rank)
+                            _serialize_expanded_result(plan, indexer, item, rank)
                             for rank, item in enumerate(expanded_candidates, start=1)
                         ],
                     },
@@ -157,18 +181,37 @@ def _serialize_sparse_result(item: Mapping[str, Any], rank: int) -> Dict[str, An
     }
 
 
-def _serialize_expanded_result(indexer: Any, candidate: Any, rank: int) -> Dict[str, Any]:
+def _serialize_dense_or_sparse_result(plan: Any, item: Mapping[str, Any], rank: int) -> Dict[str, Any]:
+    serialized = _serialize_sparse_result(item, rank)
+    coverage = analyze_document_coverage(
+        plan=plan,
+        document_fields=_build_document_fields(serialized),
+    )
+    serialized["coverage_ratio"] = float(coverage.coverage_ratio or 0.0)
+    serialized["coverage"] = coverage.to_dict()
+    serialized["matched_span_count"] = int(coverage.matched_span_count or 0)
+    serialized["total_span_count"] = int(coverage.total_span_count or 0)
+    serialized["matched_spans"] = list(coverage.matched_spans or [])
+    return serialized
+
+
+def _serialize_expanded_result(plan: Any, indexer: Any, candidate: Any, rank: int) -> Dict[str, Any]:
     work_id = str(getattr(candidate, "work_id", "") or "")
     metadata = _read_metadata_by_work_id(indexer, work_id)
+    coverage = summarize_expanded_sparse_matches(
+        plan=plan,
+        matched_spans=list(getattr(candidate, "matched_spans", []) or []),
+    )
     return {
         "rank": rank,
         "paper_id": getattr(candidate, "paper_id", None) or metadata.get("paper_id"),
         "work_id": work_id or metadata.get("work_id"),
-        "score": float(getattr(candidate, "coverage_ratio", 0.0) or 0.0),
-        "coverage_ratio": float(getattr(candidate, "coverage_ratio", 0.0) or 0.0),
-        "matched_span_count": int(getattr(candidate, "matched_span_count", 0) or 0),
-        "total_span_count": int(getattr(candidate, "total_span_count", 0) or 0),
-        "matched_spans": list(getattr(candidate, "matched_spans", []) or []),
+        "score": float(coverage.coverage_ratio or 0.0),
+        "coverage_ratio": float(coverage.coverage_ratio or 0.0),
+        "coverage": coverage.to_dict(),
+        "matched_span_count": int(coverage.matched_span_count or 0),
+        "total_span_count": int(coverage.total_span_count or 0),
+        "matched_spans": list(coverage.matched_spans or []),
         "title": _first_text(metadata, "canonical_title", "title"),
         "abstract": _first_text(metadata, "canonical_abstract", "abstract"),
         "keywords": _extract_keywords(metadata),
@@ -210,6 +253,14 @@ def _extract_keywords(metadata: Mapping[str, Any]) -> List[str]:
         if text and text not in keywords:
             keywords.append(text)
     return keywords
+
+
+def _build_document_fields(item: Mapping[str, Any]) -> Dict[str, Any]:
+    return {
+        "title": item.get("title") or "",
+        "abstract": item.get("abstract") or "",
+        "paper_keywords": list(item.get("keywords") or []),
+    }
 
 
 def _normalize_text(value: Any) -> str:

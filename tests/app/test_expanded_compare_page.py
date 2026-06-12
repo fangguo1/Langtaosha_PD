@@ -90,6 +90,19 @@ def test_expanded_compare_api_returns_sparse_expanded_rows_and_terms(monkeypatch
         metadata_db = FakeMetadataDB()
 
         def search(self, **kwargs):
+            if kwargs["search_type"] == "dense":
+                return [
+                    {
+                        "paper_id": 11,
+                        "work_id": "W11",
+                        "similarity": 0.77,
+                        "metadata": {
+                            "canonical_title": "Renal molecule dense paper",
+                            "canonical_abstract": "Kidney molecule study.",
+                            "paper_keywords": [{"keyword": "kidney molecule"}],
+                        },
+                    }
+                ]
             assert kwargs["search_type"] == "sparse"
             return [
                 {
@@ -99,6 +112,7 @@ def test_expanded_compare_api_returns_sparse_expanded_rows_and_terms(monkeypatch
                     "metadata": {
                         "canonical_title": "Kidney adhesion paper",
                         "canonical_abstract": "Renal epithelial adhesion study.",
+                        "paper_keywords": [{"keyword": "kidney"}],
                     },
                 }
             ]
@@ -137,6 +151,11 @@ def test_expanded_compare_api_returns_sparse_expanded_rows_and_terms(monkeypatch
                         "canonical_text": "Renal",
                         "matched_terms": ["kidney"],
                         "matched_fields": ["paper_keywords"],
+                        "matched_scopes": ["parent"],
+                        "own_term_matched": True,
+                        "matched_child_count": 0,
+                        "total_child_count": 0,
+                        "span_score": 1.0,
                     }
                 ],
             )
@@ -158,8 +177,14 @@ def test_expanded_compare_api_returns_sparse_expanded_rows_and_terms(monkeypatch
     assert captured["profile_name"] == "ontology_plus_keyword"
     assert payload["expanded_query_rows"][0]["term"] == "kidney"
     assert payload["highlight_terms"] == [{"text": "kidney", "match_mode": "exact"}]
+    assert payload["results"]["dense"][0]["title"] == "Renal molecule dense paper"
+    assert payload["results"]["dense"][0]["coverage_ratio"] == 1.0
+    assert payload["results"]["dense"][0]["coverage"]["matched_span_count"] == 1
     assert payload["results"]["sparse"][0]["title"] == "Kidney adhesion paper"
+    assert payload["results"]["sparse"][0]["coverage_ratio"] == 1.0
+    assert payload["results"]["sparse"][0]["coverage"]["matched_span_count"] == 1
     assert payload["results"]["expanded_sparse"][0]["coverage_ratio"] == 1.0
+    assert payload["results"]["expanded_sparse"][0]["coverage"]["matched_span_count"] == 1
     assert payload["results"]["expanded_sparse"][0]["matched_spans"][0]["matched_terms"] == ["kidney"]
 
 
@@ -180,6 +205,19 @@ def test_expanded_compare_api_keeps_expanded_results_when_sparse_fails(monkeypat
         metadata_db = FakeMetadataDB()
 
         def search(self, **kwargs):
+            if kwargs["search_type"] == "dense":
+                return [
+                    {
+                        "paper_id": 21,
+                        "work_id": "W21",
+                        "similarity": 0.81,
+                        "metadata": {
+                            "canonical_title": "Dense memory paper",
+                            "canonical_abstract": "Synaptic memory mechanisms.",
+                            "paper_keywords": ["memory"],
+                        },
+                    }
+                ]
             raise RuntimeError("BM25 service unavailable")
 
         def _build_query_semantic_plan(self, **kwargs):
@@ -216,5 +254,6 @@ def test_expanded_compare_api_keeps_expanded_results_when_sparse_fails(monkeypat
     assert response.status_code == 200
     assert payload["success"] is True
     assert payload["errors"]["sparse"] == "BM25 service unavailable"
+    assert payload["results"]["dense"][0]["title"] == "Dense memory paper"
     assert payload["results"]["sparse"] == []
     assert payload["results"]["expanded_sparse"][0]["title"] == "Memory paper"
