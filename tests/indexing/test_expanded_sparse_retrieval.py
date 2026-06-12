@@ -329,7 +329,7 @@ def test_paper_indexer_builds_semantic_plan_with_ontology_plus_keyword_profile(m
         fake_from_profile,
     )
 
-    plan = indexer._build_query_semantic_plan(
+    plan = indexer.build_query_semantic_plan(
         query="adhesion protein in kidney",
         source_list=["biorxiv_daily"],
         keyword_sources=["paper_metadata"],
@@ -352,7 +352,7 @@ def test_paper_indexer_runs_expanded_sparse_retrieval_branch(monkeypatch):
 
     monkeypatch.setattr(
         indexer,
-        "_build_query_semantic_plan",
+        "build_query_semantic_plan",
         lambda query, source_list, keyword_sources=None: plan,
     )
     monkeypatch.setattr(

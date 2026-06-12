@@ -718,13 +718,18 @@ class PaperIndexer:
             keyword_sources=tuple(keyword_sources or ()),
         )
 
-    def _build_query_semantic_plan(
+    def build_query_semantic_plan(
         self,
         query: str,
         source_list: List[str],
         keyword_sources: Optional[Sequence[str]] = None,
         profile_name: str = "ontology_plus_keyword",
     ):
+        """构建查询语义计划（公开 Domain 能力，供检索分支与 dev API 使用）。
+
+        Returns:
+            QuerySemanticPlan，无可用 selected_concepts 时返回 None。
+        """
         profile = self._build_span_matcher_profile(
             source_list=source_list,
             keyword_sources=keyword_sources,
@@ -745,7 +750,7 @@ class PaperIndexer:
         top_k: int,
         keyword_sources: Optional[Sequence[str]] = None,
     ) -> List[Dict[str, Any]]:
-        plan = self._build_query_semantic_plan(
+        plan = self.build_query_semantic_plan(
             query=query,
             source_list=source_list,
             keyword_sources=keyword_sources,

@@ -117,7 +117,7 @@ def test_expanded_compare_api_returns_sparse_expanded_rows_and_terms(monkeypatch
                 }
             ]
 
-        def _build_query_semantic_plan(self, **kwargs):
+        def build_query_semantic_plan(self, **kwargs):
             captured.update(kwargs)
             return plan
 
@@ -220,7 +220,7 @@ def test_expanded_compare_api_keeps_expanded_results_when_sparse_fails(monkeypat
                 ]
             raise RuntimeError("BM25 service unavailable")
 
-        def _build_query_semantic_plan(self, **kwargs):
+        def build_query_semantic_plan(self, **kwargs):
             return plan
 
     monkeypatch.setattr(

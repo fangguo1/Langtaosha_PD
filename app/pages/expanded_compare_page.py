@@ -72,7 +72,7 @@ def register_expanded_compare_api_routes(
                 sparse_results = []
                 errors["sparse"] = str(exc)
 
-            plan = indexer._build_query_semantic_plan(
+            plan = indexer.build_query_semantic_plan(
                 query=query,
                 source_list=source_list or list(getattr(indexer, "default_sources", []) or []),
                 keyword_sources=keyword_sources,
