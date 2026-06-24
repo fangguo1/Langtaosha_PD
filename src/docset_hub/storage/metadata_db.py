@@ -1430,6 +1430,8 @@ class MetadataDB:
                 params,
             ).fetchall()
 
+
+        print(rows)
         return [
             {
                 "keyword": row[0],
@@ -2587,6 +2589,8 @@ class MetadataDB:
                 results.append(paper_info)
         return results
 
+
+    #ORDER BY exact_priority ASC, token_match_count DESC, paper_count DESC, author_name ASC
     def suggest_author_names(
         self,
         query: str,
@@ -2602,6 +2606,13 @@ class MetadataDB:
             return []
 
         recall_tokens = sorted(tokens, key=len, reverse=True)[:2]
+        multi_token_query = len(tokens) >= 2
+        normalized_author_sql = (
+            "btrim(regexp_replace("
+            "lower(replace(replace(replace(author_name, ',', ' '), '.', ' '), '-', ' ')), "
+            "'\\s+', ' ', 'g'"
+            "))"
+        )
         conditions = []
         params: Dict[str, Any] = {
             "candidate_limit": max(limit * 20, 50),
@@ -2610,21 +2621,23 @@ class MetadataDB:
         }
         token_match_parts = []
         for idx, token in enumerate(recall_tokens):
-            param_name = f"pattern_{idx}"
-            conditions.append(f"lower(author_name) ILIKE lower(:{param_name})")
-            params[param_name] = f"%{token}%"
-            token_match_parts.append(
-                f"CASE WHEN lower(author_name) ILIKE lower(:{param_name}) THEN 1 ELSE 0 END"
-            )
+            if multi_token_query:
+                param_name = f"token_{idx}"
+                conditions.append(f"{normalized_author_sql} ~ :{param_name}")
+                params[param_name] = rf"(^| ){re.escape(token)}( |$)"
+                token_match_parts.append(
+                    f"CASE WHEN {normalized_author_sql} ~ :{param_name} THEN 1 ELSE 0 END"
+                )
+            else:
+                param_name = f"pattern_{idx}"
+                conditions.append(f"lower(author_name) ILIKE lower(:{param_name})")
+                params[param_name] = f"%{token}%"
+                token_match_parts.append(
+                    f"CASE WHEN lower(author_name) ILIKE lower(:{param_name}) THEN 1 ELSE 0 END"
+                )
 
         where_clause = " OR ".join(conditions)
         token_match_score_sql = " + ".join(token_match_parts) or "0"
-        normalized_author_sql = (
-            "btrim(regexp_replace("
-            "lower(replace(replace(author_name, ',', ' '), '.', ' ')), "
-            "'\\s+', ' ', 'g'"
-            "))"
-        )
 
         with self.engine.connect() as conn:
             rows = conn.execute(
@@ -2650,7 +2663,7 @@ class MetadataDB:
                     FROM authors
                     WHERE {where_clause}
                     GROUP BY author_name
-                    ORDER BY exact_priority ASC, token_match_count DESC, paper_count DESC, author_name ASC
+                    ORDER BY exact_priority ASC, token_match_count DESC
                     LIMIT :candidate_limit
                 """),
                 params
@@ -2667,20 +2680,18 @@ class MetadataDB:
                 "score": score,
                 "paper_count": int(row[1] or 0),
             }
+            if candidate["paper_count"] <= 1:
+                continue
             existing = best_by_normalized.get(normalized_name)
             if (
                 existing is None
                 or candidate["score"] > existing["score"]
-                or (
-                    candidate["score"] == existing["score"]
-                    and candidate["paper_count"] > existing["paper_count"]
-                )
             ):
                 best_by_normalized[normalized_name] = candidate
 
         candidates = sorted(
             best_by_normalized.values(),
-            key=lambda item: (-item["score"], -item["paper_count"], item["name"].lower())
+            key=lambda item: (-item["score"], item["name"].lower())
         )
         return candidates[:limit]
 
