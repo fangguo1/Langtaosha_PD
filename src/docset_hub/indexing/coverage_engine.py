@@ -92,6 +92,92 @@ def analyze_document_coverage(
     return _build_report(plan, matched_spans, missing_spans)
 
 
+def analyze_document_coverage_loose(
+    *,
+    plan: QuerySemanticPlan,
+    document_fields: Mapping[str, Any],
+) -> CoverageReport:
+    """Like analyze_document_coverage, but also counts Guard-1 suffix term matches."""
+
+    normalized_fields = _normalize_document_fields(document_fields)
+    field_words = {
+        field_name: _tokenize_field_words(field_value)
+        for field_name, field_value in normalized_fields.items()
+    }
+    matched_spans: List[Dict[str, Any]] = []
+    missing_spans: List[Dict[str, Any]] = []
+
+    for span in plan.spans:
+        matched_terms: List[str] = []
+        matched_fields: List[str] = []
+        matched_scopes: List[str] = []
+        matched_child_span_ids: List[str] = []
+        match_kinds: List[str] = []
+        parent_match_score = 0.0
+
+        for term_info in _iter_loose_span_terms(span):
+            term = term_info["term"]
+            for field_name, field_value in normalized_fields.items():
+                kind = _loose_term_match_kind(
+                    term,
+                    field_value,
+                    field_words[field_name],
+                )
+                if kind == "none":
+                    continue
+                if kind not in match_kinds:
+                    match_kinds.append(kind)
+                if term.text not in matched_terms:
+                    matched_terms.append(term.text)
+                if field_name not in matched_fields:
+                    matched_fields.append(field_name)
+                scope = str(term_info["scope"])
+                if scope not in matched_scopes:
+                    matched_scopes.append(scope)
+                if scope == "parent":
+                    parent_match_score = max(
+                        parent_match_score,
+                        _loose_parent_score_for_kind(kind),
+                    )
+                child_span_id = term_info.get("child_span_id")
+                if child_span_id and child_span_id not in matched_child_span_ids:
+                    matched_child_span_ids.append(child_span_id)
+
+        matched_child_count = len(matched_child_span_ids)
+        total_child_count = len(span.children)
+        span_score = _calculate_loose_span_score(
+            parent_match_score=parent_match_score,
+            matched_child_count=matched_child_count,
+            total_child_count=total_child_count,
+        )
+        if span_score > 0.0:
+            matched_terms = _prune_subsumed_terms(matched_terms)
+            matched_spans.append(
+                {
+                    "span_id": span.span_id,
+                    "canonical_text": span.canonical_text,
+                    "matched_terms": matched_terms,
+                    "matched_fields": matched_fields,
+                    "matched_scopes": matched_scopes,
+                    "matched_child_span_ids": matched_child_span_ids,
+                    "own_term_matched": parent_match_score > 0.0,
+                    "matched_child_count": matched_child_count,
+                    "total_child_count": total_child_count,
+                    "span_score": span_score,
+                    "match_kinds": match_kinds,
+                }
+            )
+        else:
+            missing_spans.append(
+                {
+                    "span_id": span.span_id,
+                    "canonical_text": span.canonical_text,
+                }
+            )
+
+    return _build_report(plan, matched_spans, missing_spans)
+
+
 def summarize_expanded_sparse_matches(
     *,
     plan: QuerySemanticPlan,
@@ -163,6 +249,34 @@ def _iter_span_terms(span: SemanticSpanGroup) -> List[Dict[str, Any]]:
     return items
 
 
+def _iter_loose_span_terms(span: SemanticSpanGroup) -> List[Dict[str, Any]]:
+    """Plan terms plus single-word surface tokens for Guard-1 suffix matching."""
+
+    items = _iter_span_terms(span)
+    covered_single_words = {
+        " ".join(str(item["term"].text or "").strip().lower().split())
+        for item in items
+        if " " not in " ".join(str(item["term"].text or "").strip().lower().split())
+    }
+    surface_text = str(span.normalized_text or span.surface_text or "").strip().lower()
+    for word in re.findall(r"[a-z0-9]+", surface_text):
+        if word in covered_single_words:
+            continue
+        if len(word) < SUFFIX_MIN_TERM_LENGTH:
+            continue
+        covered_single_words.add(word)
+        items.append(
+            {
+                "term": SemanticTerm(text=word, match_mode="exact"),
+                "scope": "parent",
+                "child_span_id": None,
+                "tier": "surface_suffix",
+            }
+        )
+    return items
+
+
+## Core Matching Logic for Coverage Engine
 def _term_matches_field(term: SemanticTerm, field_value: str) -> bool:
     normalized_term = " ".join(str(term.text or "").strip().lower().split())
     if not normalized_term or not field_value:
@@ -232,6 +346,71 @@ def _normalize_matched_span(
 def _calculate_span_score(*, own_term_matched: bool, matched_child_count: int, total_child_count: int) -> float:
     if own_term_matched:
         return 1.0
+    if total_child_count > 0:
+        return float(matched_child_count) / float(total_child_count)
+    return 0.0
+
+
+SUFFIX_MIN_TERM_LENGTH = 8
+SUFFIX_MIN_WORD_RATIO = 0.5
+LOOSE_SUFFIX_PARENT_SPAN_SCORE = 0.5
+_LOOSE_PARENT_SCORE_BY_KIND = {
+    "exact": 1.0,
+    "prefix": 1.0,
+    "suffix": LOOSE_SUFFIX_PARENT_SPAN_SCORE,
+}
+
+
+def _tokenize_field_words(field_value: str) -> List[str]:
+    return re.findall(r"[a-z0-9]+", field_value or "")
+
+
+def _normalize_term_text(term: SemanticTerm) -> str:
+    return " ".join(str(term.text or "").strip().lower().split())
+
+
+def _term_suffix_matches_guard1(term: SemanticTerm, words: Sequence[str]) -> bool:
+    if term.match_mode != "exact":
+        return False
+    normalized_term = _normalize_term_text(term)
+    if not normalized_term or " " in normalized_term:
+        return False
+    if len(normalized_term) < SUFFIX_MIN_TERM_LENGTH:
+        return False
+    for word in words:
+        if word == normalized_term:
+            continue
+        if not word.endswith(normalized_term):
+            continue
+        if len(normalized_term) / float(len(word)) >= SUFFIX_MIN_WORD_RATIO:
+            return True
+    return False
+
+
+def _loose_term_match_kind(
+    term: SemanticTerm,
+    field_value: str,
+    field_words: Sequence[str],
+) -> str:
+    if _term_matches_field(term, field_value):
+        return "prefix" if term.match_mode == "prefix" else "exact"
+    if _term_suffix_matches_guard1(term, field_words):
+        return "suffix"
+    return "none"
+
+
+def _loose_parent_score_for_kind(kind: str) -> float:
+    return _LOOSE_PARENT_SCORE_BY_KIND.get(kind, 0.0)
+
+
+def _calculate_loose_span_score(
+    *,
+    parent_match_score: float,
+    matched_child_count: int,
+    total_child_count: int,
+) -> float:
+    if parent_match_score > 0.0:
+        return parent_match_score
     if total_child_count > 0:
         return float(matched_child_count) / float(total_child_count)
     return 0.0

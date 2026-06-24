@@ -207,6 +207,14 @@
       font-weight: 700;
     }
 
+    .column-meta {
+      margin: -4px 0 12px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+      font-weight: 600;
+    }
+
     .results {
       display: grid;
       gap: 10px;
@@ -370,14 +378,17 @@
     <section class="compare-grid">
       <div class="column">
         <h2>Dense <span class="count" id="dense-count">0</span></h2>
+        <div class="column-meta" id="dense-meta">search - | loose cov -</div>
         <div class="results" id="dense-results"></div>
       </div>
       <div class="column">
         <h2>Sparse <span class="count" id="sparse-count">0</span></h2>
+        <div class="column-meta" id="sparse-meta">search - | loose cov -</div>
         <div class="results" id="sparse-results"></div>
       </div>
       <div class="column">
         <h2>Expanded sparse <span class="count" id="expanded-count">0</span></h2>
+        <div class="column-meta" id="expanded-meta">search - | loose cov -</div>
         <div class="results" id="expanded-results"></div>
       </div>
     </section>
@@ -399,6 +410,24 @@
     const denseCount = document.getElementById("dense-count");
     const sparseCount = document.getElementById("sparse-count");
     const expandedCount = document.getElementById("expanded-count");
+    const denseMeta = document.getElementById("dense-meta");
+    const sparseMeta = document.getElementById("sparse-meta");
+    const expandedMeta = document.getElementById("expanded-meta");
+
+    function formatMs(value) {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric)) return "-";
+      return `${numeric.toFixed(1)}ms`;
+    }
+
+    function renderColumnMeta(metaEl, payload, clientElapsedMs) {
+      const timings = payload?.timings_ms || {};
+      const searchMs = timings.search;
+      const looseMs = timings.loose_coverage;
+      const totalMs = payload?.elapsed_ms ?? clientElapsedMs;
+      metaEl.textContent =
+        `search ${formatMs(searchMs)} | loose cov ${formatMs(looseMs)} | total ${formatMs(totalMs)}`;
+    }
 
     function escapeHtml(value) {
       return String(value || "")
@@ -475,9 +504,12 @@
       container.innerHTML = items.map((item) => {
         const retrievalScore = Number(item.score ?? 0);
         const coverageRatio = Number(item.coverage_ratio ?? item.coverage?.coverage_ratio ?? 0);
+        const looseCoverageRatio = Number(
+          item.loose_coverage_ratio ?? item.loose_coverage?.coverage_ratio ?? 0,
+        );
         const scoreLabel = mode === "expanded"
-          ? `coverage ${coverageRatio.toFixed(2)}`
-          : `score ${retrievalScore.toFixed(4)} | coverage ${coverageRatio.toFixed(2)}`;
+          ? `coverage ${coverageRatio.toFixed(2)} | loose ${looseCoverageRatio.toFixed(2)}`
+          : `score ${retrievalScore.toFixed(4)} | coverage ${coverageRatio.toFixed(2)} | loose ${looseCoverageRatio.toFixed(2)}`;
         const keywords = (item.keywords || []).slice(0, 18).map((keyword) => (
           `<span class="keyword">${highlightText(keyword, terms)}</span>`
         )).join("");
@@ -534,6 +566,8 @@
         score: Number(item.similarity ?? item.score ?? 0),
         coverage_ratio: item.coverage_ratio,
         coverage: item.coverage,
+        loose_coverage_ratio: item.loose_coverage_ratio,
+        loose_coverage: item.loose_coverage,
         matched_span_count: item.matched_span_count,
         total_span_count: item.total_span_count,
         matched_spans: item.matched_spans || [],
@@ -552,14 +586,26 @@
       return payload;
     }
 
-    function buildSearchUrl(query, searchType, topK, withCoverage) {
+    function buildSearchUrl(query, searchType, topK, withCoverage, withLooseCoverage) {
       const params = new URLSearchParams({
         query,
         top_k: topK,
         search_type: searchType,
       });
       if (withCoverage) params.set("include_coverage", "1");
+      if (withLooseCoverage) params.set("include_loose_coverage", "1");
       return `/api/search?${params.toString()}`;
+    }
+
+    async function fetchSearchPayload(query, searchType, topK, withCoverage, withLooseCoverage) {
+      const startedAt = performance.now();
+      const payload = await fetchJson(
+        buildSearchUrl(query, searchType, topK, withCoverage, withLooseCoverage),
+      );
+      return {
+        payload,
+        clientElapsedMs: performance.now() - startedAt,
+      };
     }
 
     async function runCompare() {
@@ -580,9 +626,9 @@
       const [planOutcome, denseOutcome, sparseOutcome, expandedOutcome] =
         await Promise.allSettled([
           fetchJson(`/api/semantic-plan?${planParams.toString()}`),
-          fetchJson(buildSearchUrl(query, "dense", topK, true)),
-          fetchJson(buildSearchUrl(query, "sparse", topK, true)),
-          fetchJson(buildSearchUrl(query, "expanded_sparse", topK, false)),
+          fetchSearchPayload(query, "dense", topK, true, true),
+          fetchSearchPayload(query, "sparse", topK, true, true),
+          fetchSearchPayload(query, "expanded_sparse", topK, false, true),
         ]);
 
       let terms = [];
@@ -599,22 +645,25 @@
           `<div class="error">${escapeHtml(planOutcome.reason?.message || planOutcome.reason)}</div>`;
       }
 
-      const renderColumn = (outcome, container, countEl, mode) => {
+      const renderColumn = (outcome, container, countEl, metaEl, mode) => {
         if (outcome.status === "fulfilled") {
-          const items = (outcome.value.results || []).map(
+          const { payload, clientElapsedMs } = outcome.value;
+          renderColumnMeta(metaEl, payload, clientElapsedMs);
+          const items = (payload.results || []).map(
             (item, index) => adaptSearchItem(item, index + 1),
           );
           renderResults(container, countEl, items, terms, mode);
         } else {
+          metaEl.textContent = "search - | loose cov - | total -";
           renderResults(
             container, countEl, [], terms, mode,
             outcome.reason?.message || String(outcome.reason),
           );
         }
       };
-      renderColumn(denseOutcome, denseResults, denseCount, "dense");
-      renderColumn(sparseOutcome, sparseResults, sparseCount, "sparse");
-      renderColumn(expandedOutcome, expandedResults, expandedCount, "expanded");
+      renderColumn(denseOutcome, denseResults, denseCount, denseMeta, "dense");
+      renderColumn(sparseOutcome, sparseResults, sparseCount, sparseMeta, "sparse");
+      renderColumn(expandedOutcome, expandedResults, expandedCount, expandedMeta, "expanded");
 
       statusEl.textContent = `${query} | ${rowCount} DB rows`;
       runButton.disabled = false;

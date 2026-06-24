@@ -81,4 +81,22 @@ def test_api_search_defaults_include_coverage_false():
     app.test_client().get("/api/search?query=renal")
 
     assert indexer.captured["include_coverage"] is False
+    assert indexer.captured["include_loose_coverage"] is False
     assert indexer.captured["keyword_sources"] is None
+
+
+def test_api_search_passes_include_loose_coverage_and_returns_timings():
+    app = Flask(__name__)
+    indexer = FakeIndexer()
+    register_paper_indexer_api_routes(app, indexer, _json_success(app), _json_error(app))
+
+    response = app.test_client().get(
+        "/api/search?query=renal&search_type=dense&include_loose_coverage=1"
+    )
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    assert indexer.captured["include_loose_coverage"] is True
+    assert isinstance(indexer.captured["timings_ms"], dict)
+    assert "elapsed_ms" in payload
+    assert "timings_ms" in payload

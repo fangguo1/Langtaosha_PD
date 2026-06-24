@@ -15,6 +15,7 @@ def test_expanded_compare_page_renders():
     assert response.status_code == 200
     assert "Expanded Sparse Compare" in html
     assert "renal adhesion" in html
+    assert "loose cov" in html
 
 
 def test_expanded_compare_module_no_longer_exports_api_registrar():

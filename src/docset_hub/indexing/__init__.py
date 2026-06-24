@@ -10,6 +10,7 @@ from .expanded_sparse_retrieval import (
 from .coverage_engine import (
     CoverageReport,
     analyze_document_coverage,
+    analyze_document_coverage_loose,
     summarize_expanded_sparse_matches,
 )
 from .paper_keyword_lookup import (
@@ -129,6 +130,7 @@ __all__ = [
     'SpanMatchResult',
     'SubphraseCandidateGenerator',
     'analyze_document_coverage',
+    'analyze_document_coverage_loose',
     'build_search_highlight',
     'build_expanded_sparse_groups',
     'build_expanded_sparse_query_rows',

@@ -1,5 +1,6 @@
 from src.docset_hub.indexing.coverage_engine import (
     analyze_document_coverage,
+    analyze_document_coverage_loose,
     summarize_expanded_sparse_matches,
 )
 from src.docset_hub.indexing.query_semantic_plan import (
@@ -307,3 +308,113 @@ def test_summarize_expanded_sparse_matches_matches_in_memory_coverage():
     assert result.matched_span_count == 2
     assert result.total_span_count == 2
     assert result.coverage_ratio == 0.75
+
+
+def test_loose_coverage_matches_developmental_suffix_in_neurodevelopmental():
+    plan = QuerySemanticPlan(
+        original_query="developmental disorder",
+        normalized_query="developmental disorder",
+        spans=[
+            _group(
+                span_id="s1",
+                surface_text="developmental disorder",
+                canonical_text="Developmental disorder",
+                tier1_terms=["developmental disorder", "developmental"],
+                tier2_terms=[],
+            )
+        ],
+    )
+    document_fields = {
+        "title": "Neurodevelopmental disorders in early childhood",
+        "abstract": "",
+        "paper_keywords": [],
+    }
+
+    strict = analyze_document_coverage(plan=plan, document_fields=document_fields)
+    loose = analyze_document_coverage_loose(plan=plan, document_fields=document_fields)
+
+    assert strict.coverage_ratio == 0.0
+    assert strict.matched_span_count == 0
+    assert loose.coverage_ratio == 0.5
+    assert loose.matched_span_count == 1
+    assert loose.matched_spans[0]["span_score"] == 0.5
+    assert loose.matched_spans[0]["own_term_matched"] is True
+    assert "suffix" in loose.matched_spans[0]["match_kinds"]
+
+
+def test_loose_coverage_derives_suffix_from_surface_when_plan_terms_are_multiword():
+    plan = QuerySemanticPlan(
+        original_query="developmental disorder",
+        normalized_query="developmental disorder",
+        spans=[
+            _group(
+                span_id="s1",
+                surface_text="developmental disorder",
+                canonical_text="Developmental Disabilities",
+                tier1_terms=["developmental disabilities", "developmental disorder"],
+                tier2_terms=["developmental disorders"],
+            )
+        ],
+    )
+    document_fields = {
+        "title": (
+            "Differential Neurodevelopmental Disruption by Bisphenol A (BPA) and "
+            "Valproic Acid (VPA) in Human Forebrain Organoids"
+        ),
+        "abstract": (
+            "Neurodevelopmental disorders, including autism spectrum disorder (ASD), are influenced "
+            "by both genetic abnormalities and environmental toxicants."
+        ),
+        "paper_keywords": [],
+    }
+
+    strict = analyze_document_coverage(plan=plan, document_fields=document_fields)
+    loose = analyze_document_coverage_loose(plan=plan, document_fields=document_fields)
+
+    assert strict.coverage_ratio == 0.0
+    assert loose.coverage_ratio == 1.0
+    assert "developmental" in loose.matched_spans[0]["matched_terms"]
+    assert "disorder" in loose.matched_spans[0]["matched_terms"]
+    assert "suffix" in loose.matched_spans[0]["match_kinds"]
+    assert "exact" in loose.matched_spans[0]["match_kinds"]
+
+
+def test_loose_coverage_rejects_renal_in_adrenal_via_guard1():
+    plan = QuerySemanticPlan(
+        original_query="renal",
+        normalized_query="renal",
+        spans=[
+            _group(
+                span_id="s1",
+                surface_text="renal",
+                canonical_text="Renal",
+                tier1_terms=["renal"],
+                tier2_terms=[],
+            )
+        ],
+    )
+    document_fields = {
+        "title": "Adrenal signaling pathways",
+        "abstract": "",
+        "paper_keywords": [],
+    }
+
+    result = analyze_document_coverage_loose(plan=plan, document_fields=document_fields)
+
+    assert result.coverage_ratio == 0.0
+    assert result.matched_span_count == 0
+
+
+def test_loose_coverage_loose_gte_strict():
+    document_fields = {
+        "title": "Cell adhesion molecule in renal epithelial injury",
+        "abstract": "",
+        "paper_keywords": [],
+    }
+    plan = _plan()
+
+    strict = analyze_document_coverage(plan=plan, document_fields=document_fields)
+    loose = analyze_document_coverage_loose(plan=plan, document_fields=document_fields)
+
+    assert loose.coverage_ratio >= strict.coverage_ratio
+    assert loose.matched_span_count >= strict.matched_span_count

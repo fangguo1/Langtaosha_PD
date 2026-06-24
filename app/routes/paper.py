@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import Any, Callable, List, Optional
 
 from flask import request
@@ -50,6 +51,7 @@ def register_paper_indexer_api_routes(
     @app.route("/api/search", methods=["GET"])
     def api_search():
         try:
+            started_at = time.perf_counter()
             query = (request.args.get("query") or "").strip()
             if not query:
                 return api_error("query 不能为空", status_code=400, code="INVALID_REQUEST")
@@ -71,13 +73,18 @@ def register_paper_indexer_api_routes(
                 search_type=search_type,
                 keyword_sources=_parse_source_list(request.args.get("keyword_sources")),
                 include_coverage=_parse_bool_flag(request.args.get("include_coverage")),
+                include_loose_coverage=_parse_bool_flag(request.args.get("include_loose_coverage")),
+                timings_ms=(timings_ms := {}),
             )
+            elapsed_ms = round((time.perf_counter() - started_at) * 1000.0, 3)
             return api_success(
                 {
                     "query": query,
                     "top_k": top_k,
                     "search_type": search_type,
                     "results": results,
+                    "timings_ms": timings_ms,
+                    "elapsed_ms": elapsed_ms,
                 }
             )
         except ValueError as exc:

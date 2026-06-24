@@ -2,9 +2,11 @@
 
 **位置**: `src/docset_hub/indexing/span_matcher.py`  
 **相关编排**: `src/docset_hub/indexing/span_matcher_pipeline.py`  
-**下游消费者**: `src/docset_hub/indexing/query_semantic_plan.py`、`src/docset_hub/indexing/expanded_sparse_retrieval.py`、`app/pages/span_matcher_page.py`、`app/pages/expanded_compare_page.py`、`PaperIndexer`
+**下游**: [Query Semantic Plan](QUERY_SEMANTIC_PLAN_README.md) → [Expanded Sparse](EXPANDED_SPARSE_RETRIEVAL_README.md) / [Coverage Engine](COVERAGE_ENGINE_README.md)
 
-本文档描述当前 `span_matcher` 的真实职责、输出契约和调用链。它不是一个单独的检索器，也不负责结果融合；它负责把 query span 转成可解释的概念证据，并为后续的 semantic plan 与检索分支提供结构化输入。
+本文档面向开发者，描述 **Span Matcher** 的设计目标、组件职责与输出契约。
+
+**边界**：Span Matcher 不是检索器，不做结果融合；它把 query span 转成可解释的概念证据。Semantic Plan 构建、召回与 coverage 评分见各自专页 README。
 
 ## 1. 这个模块解决什么问题
 
@@ -21,7 +23,7 @@
 - `CompositeSpanMatcher` 负责把 ontology 与 keyword 匹配合并；
 - `MaximalConceptSelector` 负责选择最终非重叠概念；
 - `SpanMatcherPipeline` 负责把上述步骤编排成统一的运行结果；
-- `build_query_semantic_plan()` 把 `SelectedConcept[] + SpanMatchResult[]` 转成面向下游检索的 semantic plan。
+- 可选调用 `build_query_semantic_plan()` 产出 Semantic Plan（详见 [QUERY_SEMANTIC_PLAN_README.md](QUERY_SEMANTIC_PLAN_README.md)）。
 
 ## 2. 核心数据结构
 
@@ -233,84 +235,32 @@ SpanMatcherPipeline.from_profile(...)
   -> run(query)
 ```
 
-### 5.3 下游 semantic plan 链
+### 5.3 下游 Semantic Plan（链接）
 
 ```text
 SpanMatcherPipeline.run()
-  -> selected_concepts
-  -> span_results
-  -> build_query_semantic_plan()
-```
-
-这个 semantic plan 目前是 expanded sparse retrieval、coverage 以及 trace 展示的共同输入。
-
-## 6. 当前 semantic plan 约定
-
-当前实现已经不再只输出平面 `SelectedConcept[]`。它会进一步构建 `QuerySemanticPlan`，其核心约定是：
-
-- 顶层 semantic span 来自 `SelectedConcept[]`；
-- 子 span 只来自 `subphrase_ngram` 候选；
-- child 只允许一层，不产生 grandchild；
-- term 以 `{text, match_mode}` 表示；
-- `match_mode` 当前支持：
-  - `exact`
-  - `prefix`
-
-其中，结尾带 `-` 的 alias 会被视为 prefix term，例如：
-
-- `renal-` -> `{"text": "renal", "match_mode": "prefix"}`
-
-这使 downstream 能区分“精确词项”和“词干前缀词项”。
-
-### 6.1 下游流程浓缩图
-
-```text
-query
-  -> SpanMatcherPipeline
   -> selected_concepts + span_results
-  -> build_query_semantic_plan()
+  -> build_query_semantic_plan()   # 见 QUERY_SEMANTIC_PLAN_README.md
   -> QuerySemanticPlan
-     -> coverage_engine.analyze_document_coverage()         # 单篇文档覆盖分析
-     -> expanded_sparse_retrieval.match_papers_by_expanded_sparse_plan()
-        -> MetadataDB.lookup_papers_by_expanded_sparse_groups()
-        -> coverage_ratio / matched_spans
-        -> PaperIndexer 作为 expanded_sparse branch score 参与融合
+       -> Expanded Sparse / Coverage / API
 ```
 
-要点：
+Semantic Plan 的 tier 规则、child 深度、序列化契约不在本文重复，见：
 
-- `coverage_engine` 是语义覆盖的 Python 参考实现和报告归一层；
-- 实际 expanded sparse 召回时，coverage 由 `MetadataDB` 的 SQL 直接计算；
-- `PaperIndexer` 不重新算 coverage，只消费 `coverage_ratio` 和 `matched_spans`；
-- 这三层共用同一个 `QuerySemanticPlan` 语义契约。
+- [Query Semantic Plan README](QUERY_SEMANTIC_PLAN_README.md)
+- [Expanded Sparse Retrieval README](EXPANDED_SPARSE_RETRIEVAL_README.md)
+- [Coverage Engine README](COVERAGE_ENGINE_README.md)
 
-## 7. 在项目里的实际入口
+## 6. 在项目里的入口
 
-### 7.1 Web 调试页
+| 入口 | 路径 |
+|------|------|
+| Pipeline 调试页 | `app/pages/span_matcher_page.py` |
+| Compare 页（间接） | 通过 `/api/semantic-plan` + `/api/search` |
+| 正式编排 | `PaperIndexer.build_query_semantic_plan()` |
+| Dev API | `GET /api/semantic-plan`（`app/dev/semantic_plan_api.py`） |
 
-- `app/pages/span_matcher_page.py`
-
-它通过 `SpanMatcherPipeline` 提供页面级调试能力，返回 selected concepts、semantic plan 和 timings。
-
-### 7.2 对比页
-
-- `app/pages/expanded_compare_page.py`
-
-它会复用同一套 span matcher 语义理解结果，保证页面对比与检索逻辑一致。
-
-### 7.3 `PaperIndexer`
-
-- `src/docset_hub/indexing/paper_indexer.py`
-
-`PaperIndexer` 里的 query understanding / keyword lookup / expanded sparse 相关路径，会依赖 span matcher 的统一输出。
-
-### 7.4 Expanded sparse retrieval
-
-- `src/docset_hub/indexing/expanded_sparse_retrieval.py`
-
-它把 semantic plan 转成 expanded sparse query rows，再交给 `MetadataDB` 做论文召回。
-
-## 8. 调试建议
+## 7. 调试建议
 
 如果要排查 span matcher 问题，建议按这个顺序看：
 
@@ -319,7 +269,7 @@ query
 3. `RemoteOntologySpanMatcher` 返回的原始 evidence 是否被 `filter_ontology_evidence_items()` 过滤掉；
 4. `CompositeSpanMatcher` 排序后 primary evidence 是否符合预期；
 5. `MaximalConceptSelector` 是否因为重叠区间丢掉了某个 span；
-6. `build_query_semantic_plan()` 是否把 selected concepts 和 child spans 组织正确。
+6. Semantic Plan 是否正确（见 [QUERY_SEMANTIC_PLAN_README.md](QUERY_SEMANTIC_PLAN_README.md) §7）。
 
 常见问题：
 
@@ -328,11 +278,13 @@ query
 - 空 query 会直接报错；
 - 如果 profile 关闭了 keyword matcher，但 metadata_db 没传，会在构建 pipeline 时失败。
 
-## 9. 相关文档
+## 8. 相关文档
 
 - [Indexing 模块架构](README.md)
+- [Query Semantic Plan README](QUERY_SEMANTIC_PLAN_README.md)
+- [Expanded Sparse Retrieval README](EXPANDED_SPARSE_RETRIEVAL_README.md)
+- [Coverage Engine README](COVERAGE_ENGINE_README.md)
 - [PaperIndexer 功能地图](PAPER_INDEXER_FUNCTION_MAP.md)
 - [PaperIndexer API 与示例](PAPER_INDEXER_README.md)
-- [Query Semantic Plan 树结构实现计划](../../../../implementation_log/20260610/SPAN_MATCHER_TREE_PREFIX_IMPLEMENTATION_PLAN_20260610.md)
-- [Span Matcher Pipeline 实现计划](../../../../implementation_log/20260610/SPAN_MATCHER_PIPELINE_PROFILE_IMPLEMENTATION_PLAN_20260610.md)
-- [Expanded Sparse Retrieval 设计](../../../../implementation_log/20260610/EXPANDED_SPARSE_RETRIEVAL_AND_COVERAGE_PLAN_20260610.md)
+- 设计：`docs/implementation_log/20260610/Span Matcher Modification Design_20260610.md`
+- 实现：`docs/implementation_log/20260610/SPAN_MATCHER_PIPELINE_PROFILE_IMPLEMENTATION_PLAN_20260610.md`
