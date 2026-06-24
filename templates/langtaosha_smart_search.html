@@ -1,0 +1,695 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Langtaosha Smart Search</title>
+  <style>
+    :root {
+      --primary: #0F4C81;
+      --secondary: #2C7FB8;
+      --accent: #D98C2B;
+      --bg-main: #FAFBFC;
+      --bg-card: #FFFFFF;
+      --bg-sidebar: #F5F7F9;
+      --text-primary: #1A1A1A;
+      --text-secondary: #5B6675;
+      --text-meta: #8A94A6;
+      --border-light: #E6EAF0;
+      --border-medium: #D7DDE5;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Inter, "Helvetica Neue", Arial, sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(44, 127, 184, 0.08), transparent 32%),
+        linear-gradient(180deg, #fdfefe 0%, var(--bg-main) 100%);
+      color: var(--text-primary);
+    }
+
+    .page-shell {
+      width: min(1080px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 56px 0 72px;
+    }
+
+    .hero {
+      margin-bottom: 28px;
+    }
+
+    .hero-kicker {
+      margin: 0 0 10px;
+      color: var(--secondary);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 36px;
+      line-height: 1.15;
+      color: var(--primary);
+    }
+
+    .hero-copy {
+      width: min(640px, 100%);
+      margin: 14px 0 0;
+      color: var(--text-secondary);
+      font-size: 16px;
+      line-height: 1.7;
+    }
+
+    .search-panel {
+      padding: 24px;
+      border: 1px solid var(--border-light);
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.96);
+      box-shadow: 0 18px 42px rgba(15, 76, 129, 0.06);
+      backdrop-filter: blur(6px);
+    }
+
+    #search-form {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+    }
+
+    #search-input {
+      width: 100%;
+      min-height: 52px;
+      border: 1px solid var(--border-medium);
+      border-radius: 12px;
+      padding: 0 16px;
+      font-size: 16px;
+      color: var(--text-primary);
+      background: #FFFFFF;
+      outline: none;
+      transition: border-color 120ms ease, box-shadow 120ms ease;
+    }
+
+    #search-input:focus {
+      border-color: #0F4C81;
+      box-shadow: 0 0 0 3px rgba(15,76,129,0.12);
+    }
+
+    #search-button {
+      min-height: 52px;
+      border: 0;
+      border-radius: 12px;
+      padding: 0 22px;
+      background: #0F4C81;
+      color: #fff;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    #search-button:hover {
+      background: #0A3B66;
+    }
+
+    #status {
+      min-height: 24px;
+      margin-top: 14px;
+      color: var(--text-secondary);
+      font-size: 14px;
+    }
+
+    .filter-bar {
+      display: none;
+      flex-wrap: wrap;
+      width: 100%;
+      gap: 12px;
+      margin: 14px 0 10px;
+      padding: 12px;
+      background: var(--bg-sidebar);
+      border: 1px solid var(--border-light);
+      border-radius: 12px;
+    }
+
+    .filter-group {
+      min-width: 220px;
+    }
+
+    .filter-title {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--text-secondary);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .chip {
+      border: 1px solid var(--border-medium);
+      background: white;
+      color: var(--primary);
+      border-radius: 999px;
+      padding: 5px 10px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .chip.active {
+      border-color: var(--primary);
+      background: rgba(15, 76, 129, 0.08);
+      color: var(--primary);
+      font-weight: 700;
+    }
+
+    .query-notice {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 12px;
+      padding: 12px 14px;
+      border: 1px solid rgba(217, 140, 43, 0.28);
+      border-radius: 12px;
+      background: rgba(217, 140, 43, 0.08);
+      color: #7b531f;
+    }
+
+    .query-notice button {
+      border: 1px solid rgba(15, 76, 129, 0.18);
+      border-radius: 999px;
+      background: white;
+      color: var(--primary);
+      padding: 8px 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    #results {
+      display: grid;
+      gap: 16px;
+      margin-top: 20px;
+    }
+
+    .paper-card {
+      padding: 24px;
+      border: 1px solid var(--border-light);
+      border-radius: 12px;
+      background: white;
+      transition: box-shadow 120ms ease, transform 120ms ease;
+    }
+
+    .paper-card:hover {
+      box-shadow: 0 4px 16px rgba(0,0,0,0.05);
+      transform: translateY(-1px);
+    }
+
+    .paper-card h2 {
+      margin: 0 0 10px;
+      font-size: 22px;
+      font-weight: 600;
+      line-height: 1.35;
+      min-width: 0;
+    }
+
+    .paper-card h2 a {
+      color: var(--primary);
+      text-decoration: none;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+
+    .paper-card h2 a:hover {
+      color: var(--secondary);
+      text-decoration: underline;
+    }
+
+    .meta {
+      margin: 0 0 12px;
+      color: var(--text-meta);
+      font-size: 13px;
+      line-height: 1.6;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+
+    .abstract {
+      margin: 0;
+      color: var(--text-secondary);
+      font-size: 15px;
+      line-height: 1.7;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+
+    .section-label {
+      margin: 14px 0 6px;
+      color: var(--text-secondary);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .evidence-tags {
+      display: flex;
+      align-items: flex-start;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 10px 0 12px;
+    }
+
+    .evidence-title {
+      color: var(--text-secondary);
+      font-size: 13px;
+      font-weight: 700;
+      line-height: 28px;
+    }
+
+    .evidence-tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      max-width: 100%;
+      border: 1px solid rgba(217, 140, 43, 0.24);
+      border-radius: 999px;
+      background: rgba(217, 140, 43, 0.08);
+      color: #7b531f;
+      padding: 4px 9px;
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+
+    @media (max-width: 720px) {
+      .page-shell {
+        width: min(100%, calc(100% - 24px));
+        padding-top: 36px;
+      }
+
+      #search-form {
+        grid-template-columns: 1fr;
+      }
+
+      #search-button {
+        width: 100%;
+      }
+
+      .query-notice {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page-shell">
+    <header class="hero">
+      <p class="hero-kicker">Langtaosha Academic Search</p>
+      <h1>Langtaosha Smart Search</h1>
+      <p class="hero-copy">Search preprints by concept, keyword, or author.</p>
+    </header>
+
+    <section class="search-panel">
+      <form
+        id="search-form"
+        data-api-endpoint="/api/scholar/search"
+        data-client-surface="{{ client_surface }}"
+      >
+        <input
+          id="search-input"
+          name="query"
+          type="text"
+          value="{{ initial_query }}"
+          placeholder="Enter a topic, method, author, or entity"
+        />
+        <input id="top-k-input" name="limit" type="hidden" value="{{ default_top_k }}" />
+        <button id="search-button" type="submit">Search</button>
+      </form>
+      <div id="status" aria-live="polite"></div>
+      <div id="queryNotice" class="query-notice"></div>
+      <div id="filterBar" class="filter-bar">
+        <div class="filter-group">
+          <span class="filter-title">Source</span>
+          <div id="sourceFilters" class="chips"></div>
+        </div>
+        <div class="filter-group">
+          <span class="filter-title">Year</span>
+          <div id="yearFilters" class="chips"></div>
+        </div>
+      </div>
+      <div id="results"></div>
+    </section>
+  </main>
+
+  <script>
+    const form = document.getElementById("search-form");
+    const input = document.getElementById("search-input");
+    const statusEl = document.getElementById("status");
+    const queryNoticeEl = document.getElementById("queryNotice");
+    const filterBarEl = document.getElementById("filterBar");
+    const sourceFiltersEl = document.getElementById("sourceFilters");
+    const yearFiltersEl = document.getElementById("yearFilters");
+    const resultsEl = document.getElementById("results");
+    let allResults = [];
+    let groupedResults = { langtaosha: [], biorxiv: [] };
+    let selectedSource = "langtaosha";
+    let selectedYear = "all";
+    let currentSearchMeta = null;
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+    }
+
+    function formatDate(value) {
+      if (!value) return "-";
+      const text = String(value);
+      const match = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (!match) return text;
+      return `${match[1]}-${match[2]}-${match[3]}`;
+    }
+
+    function extractYear(value) {
+      if (!value) return "Unknown";
+      const match = String(value).match(/^(\d{4})-/);
+      return match ? match[1] : "Unknown";
+    }
+
+    function makeChip(label, active, onClick) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = active ? "chip active" : "chip";
+      btn.textContent = label;
+      btn.addEventListener("click", onClick);
+      return btn;
+    }
+
+    function formatReasonScore(score) {
+      if (score === null || score === undefined || Number.isNaN(Number(score))) {
+        return "";
+      }
+      return ` ${Number(score).toFixed(4)}`;
+    }
+
+    function renderRetrievalReasons(item) {
+      const reasons = Array.isArray(item.match_reasons) ? item.match_reasons : [];
+      if (!reasons.length) return "";
+
+      const tags = reasons.map((reason) => {
+        const scoreText = formatReasonScore(reason.score);
+        return `<span class="evidence-tag">${escapeHtml(reason.label || reason.key || "Reason")}${escapeHtml(scoreText)}</span>`;
+      }).join("");
+
+      return `
+        <div class="evidence-tags">
+          <span class="evidence-title">Reason:</span>
+          ${tags}
+        </div>
+      `;
+    }
+
+    function renderItem(item) {
+      const title = escapeHtml(item.title || "(Untitled)");
+      const abstract = escapeHtml(item.abstract || "(No abstract)");
+      const authors = escapeHtml(item.authors || "Unknown authors");
+      const doi = escapeHtml(item.doi || "-");
+      const onlineDate = escapeHtml(formatDate(item.online_date));
+      const source = escapeHtml(item.source || "-");
+      const link = item.link ? escapeHtml(item.link) : "";
+      const linkHtml = link
+        ? `<a href="${link}" target="_blank" rel="noopener noreferrer">${link}</a>`
+        : "-";
+
+      return `
+        <article class="paper-card">
+          <h2 class="title">${title}</h2>
+          <p class="meta"><strong>Authors:</strong> ${authors}</p>
+          <p class="meta"><strong>Source:</strong> ${source}</p>
+          <p class="meta"><strong>DOI:</strong> ${doi} | <strong>Online Date:</strong> ${onlineDate}</p>
+          <p class="meta"><strong>Link:</strong> ${linkHtml}</p>
+          ${renderRetrievalReasons(item)}
+          <p class="section-label">Abstract</p>
+          <p class="abstract">${abstract}</p>
+        </article>
+      `;
+    }
+
+    function normalizeGroupedResults(rawResults) {
+      const normalized = { langtaosha: [], biorxiv: [] };
+      if (!Array.isArray(rawResults)) {
+        return normalized;
+      }
+
+      rawResults.forEach((entry) => {
+        if (!Array.isArray(entry) || entry.length !== 2) {
+          return;
+        }
+        const sourcePrefix = String(entry[0] || "").trim();
+        const items = Array.isArray(entry[1]) ? entry[1] : [];
+        if (sourcePrefix === "langtaosha" || sourcePrefix === "biorxiv") {
+          normalized[sourcePrefix] = items;
+        }
+      });
+      return normalized;
+    }
+
+    function flattenGroupedResults(groups) {
+      return [
+        ...(groups.langtaosha || []),
+        ...(groups.biorxiv || []),
+      ];
+    }
+
+    function renderResults(items) {
+      resultsEl.innerHTML = (items || []).map((item) => renderItem(item)).join("");
+    }
+
+    function getFilteredResults() {
+      return allResults.filter((item) => {
+        const sourceOk = selectedSource === "all" || item.source_key === selectedSource;
+        const yearOk = selectedYear === "all" || extractYear(item.online_date) === selectedYear;
+        return sourceOk && yearOk;
+      });
+    }
+
+    function renderFilteredResults() {
+      const filtered = getFilteredResults();
+      const sourceLabel = selectedSource === "langtaosha"
+        ? "Langtaosha"
+        : selectedSource === "biorxiv"
+          ? "Biorxiv"
+          : "All";
+      statusEl.textContent = `Results: ${allResults.length} | Showing ${sourceLabel}: ${filtered.length}`;
+      if (!filtered.length) {
+        resultsEl.innerHTML = `<div class='paper-card'>当前筛选条件下暂无结果</div>${renderBiorxivJump()}`;
+        return;
+      }
+      resultsEl.innerHTML = `${filtered.map((item) => renderItem(item)).join("")}${renderBiorxivJump()}`;
+    }
+
+    function renderFilters() {
+      const sourceCounts = { all: allResults.length, langtaosha: 0, biorxiv: 0 };
+      const yearCounts = {};
+
+      allResults.forEach((item) => {
+        const sourceKey = item.source_key || "unknown";
+        if (sourceCounts[sourceKey] !== undefined) {
+          sourceCounts[sourceKey] += 1;
+        }
+      });
+
+      const sourceScopedResults = allResults.filter((item) => {
+        return selectedSource === "all" || item.source_key === selectedSource;
+      });
+
+      sourceScopedResults.forEach((item) => {
+        const year = extractYear(item.online_date);
+        yearCounts[year] = (yearCounts[year] || 0) + 1;
+      });
+
+      sourceFiltersEl.innerHTML = "";
+      sourceFiltersEl.appendChild(makeChip(`All (${sourceCounts.all || 0})`, selectedSource === "all", () => {
+        selectedSource = "all";
+        selectedYear = "all";
+        renderFilters();
+        renderFilteredResults();
+      }));
+      sourceFiltersEl.appendChild(makeChip(`Langtaosha (${sourceCounts.langtaosha || 0})`, selectedSource === "langtaosha", () => {
+        selectedSource = "langtaosha";
+        selectedYear = "all";
+        renderFilters();
+        renderFilteredResults();
+      }));
+      sourceFiltersEl.appendChild(makeChip(`Biorxiv (${sourceCounts.biorxiv || 0})`, selectedSource === "biorxiv", () => {
+        selectedSource = "biorxiv";
+        selectedYear = "all";
+        renderFilters();
+        renderFilteredResults();
+      }));
+
+      const sortedYears = Object.keys(yearCounts).sort((a, b) => {
+        if (a === "Unknown") return 1;
+        if (b === "Unknown") return -1;
+        return Number(b) - Number(a);
+      });
+
+      yearFiltersEl.innerHTML = "";
+      yearFiltersEl.appendChild(makeChip(`All (${sourceScopedResults.length})`, selectedYear === "all", () => {
+        selectedYear = "all";
+        renderFilters();
+        renderFilteredResults();
+      }));
+      sortedYears.forEach((year) => {
+        yearFiltersEl.appendChild(makeChip(`${year} (${yearCounts[year]})`, selectedYear === year, () => {
+          selectedYear = year;
+          renderFilters();
+          renderFilteredResults();
+        }));
+      });
+    }
+
+    function countBySource(sourceKey) {
+      return allResults.filter((item) => item.source_key === sourceKey).length;
+    }
+
+    function renderBiorxivJump() {
+      const biorxivCount = countBySource("biorxiv");
+      if (selectedSource !== "langtaosha" || selectedYear !== "all" || biorxivCount <= 0) {
+        return "";
+      }
+      const langtaoshaCount = countBySource("langtaosha");
+      const message = langtaoshaCount > 0
+        ? "浪淘沙的结果已展示，可以查看 Biorxiv 的结果。"
+        : "浪淘沙暂无符合要求的结果，可以查看 Biorxiv 的结果。";
+      return `
+        <div class="paper-card">
+          <p class="meta">${escapeHtml(message)}</p>
+          <button type="button" class="chip" data-action="show-biorxiv">查看 Biorxiv 结果 (${biorxivCount})</button>
+        </div>
+      `;
+    }
+
+    function clearQueryNotice() {
+      queryNoticeEl.style.display = "none";
+      queryNoticeEl.innerHTML = "";
+    }
+
+    function renderQueryNotice(notice) {
+      clearQueryNotice();
+      if (!notice || !notice.message) return;
+
+      const message = document.createElement("span");
+      message.textContent = notice.message;
+      queryNoticeEl.appendChild(message);
+
+      if (notice.fallback_mode && notice.fallback_query && notice.action_label) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.textContent = notice.action_label;
+        btn.addEventListener("click", () => {
+          input.value = notice.fallback_query;
+          void runSearch(notice.fallback_query, notice.fallback_mode);
+        });
+        queryNoticeEl.appendChild(btn);
+      }
+
+      queryNoticeEl.style.display = "flex";
+    }
+
+    async function runSearch(query, mode = "smart") {
+      if (!query) {
+        statusEl.textContent = "Please enter a query.";
+        return;
+      }
+
+      const endpoint = form.dataset.apiEndpoint;
+      const clientSurface = form.dataset.clientSurface;
+      const url = new URL(endpoint, window.location.origin);
+      url.searchParams.set("query", query);
+      url.searchParams.set("mode", mode);
+      url.searchParams.set("top_k", document.getElementById("top-k-input").value);
+
+      statusEl.textContent = "Searching...";
+      clearQueryNotice();
+      filterBarEl.style.display = "none";
+      resultsEl.innerHTML = "";
+
+      const response = await fetch(url.toString(), {
+        headers: {
+          "X-Langtaosha-Client-Surface": clientSurface,
+        },
+      });
+      const payload = await response.json();
+
+      if (!response.ok || !payload.success) {
+        statusEl.textContent = payload.error || "Search failed.";
+        return;
+      }
+
+      currentSearchMeta = {
+        query: payload.query,
+        search_mode: payload.search_mode,
+        search_query: payload.search_query,
+      };
+      groupedResults = normalizeGroupedResults(payload.results);
+      allResults = flattenGroupedResults(groupedResults);
+      selectedSource = "langtaosha";
+      selectedYear = "all";
+      renderQueryNotice(payload.notice);
+      if (!allResults.length) {
+        filterBarEl.style.display = "none";
+        const route = payload.query_understanding && payload.query_understanding.route;
+        statusEl.textContent = route === "author_suggestion"
+          ? "发现可能的作者名匹配，请确认是否按建议作者搜索。"
+          : `Results: ${payload.meta.count}`;
+        resultsEl.innerHTML = "<div class='paper-card'>暂无结果</div>";
+        return;
+      }
+      filterBarEl.style.display = "flex";
+      renderFilters();
+      renderFilteredResults();
+    }
+
+    resultsEl.addEventListener("click", (event) => {
+      const actionEl = event.target.closest("[data-action]");
+      if (!actionEl) return;
+
+      if (actionEl.dataset.action === "show-biorxiv") {
+        selectedSource = "biorxiv";
+        selectedYear = "all";
+        renderFilters();
+        renderFilteredResults();
+      }
+    });
+
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const query = input.value.trim();
+      if (!query) {
+        statusEl.textContent = "Please enter a query.";
+        return;
+      }
+      void runSearch(query);
+    });
+
+    if (input.value.trim()) {
+      void runSearch(input.value.trim());
+    }
+  </script>
+</body>
+</html>

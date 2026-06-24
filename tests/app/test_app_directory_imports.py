@@ -18,6 +18,7 @@ def test_target_page_modules_are_importable_after_refactor():
         "app.pages.expanded_compare_page",
         "app.pages.feedback_review_page",
         "app.pages.retrieval_compare_page",
+        "app.pages.langtaosha_smart_search_page",
     ):
         assert importlib.import_module(module_name).__name__ == module_name
 
@@ -36,5 +37,6 @@ def test_target_dev_modules_are_importable_after_refactor():
         "app.dev.develop_api_proxy",
         "app.dev.feedback_review_app",
         "app.dev.main_develop",
+        "app.dev.main_search_use",
     ):
         assert importlib.import_module(module_name).__name__ == module_name

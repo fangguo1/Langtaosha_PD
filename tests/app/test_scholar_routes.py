@@ -105,6 +105,7 @@ class FakeIndexer:
         self.default_sources = ["langtaosha", "biorxiv_daily"]
         self.metadata_db = FakeMetadataDB()
         self.search_calls = []
+        self.smart_search_calls = []
         self.query_understanding = SimpleNamespace(
             analyze=lambda query: understanding_result
             or FakeUnderstandingResult(normalized_query=query)
@@ -122,28 +123,106 @@ class FakeIndexer:
         )
         return [
             {
-                "work_id": f"W_{source_list[0]}",
+                "work_id": f"W_{source_name}",
                 "score": 0.91,
-                "source_name": source_list[0],
+                "source_name": source_name,
                 "metadata": {
-                    "canonical_title": f"Paper from {source_list[0]}",
+                    "canonical_title": f"Paper from {source_name}",
                     "canonical_abstract": "Abstract A",
                     "authors": [{"name": "Alice"}, {"name": "Bob"}],
                     "online_at": "2026-04-13T00:00:00",
                     "sources": [
                         {
-                            "source_name": source_list[0],
-                            "source_url": f"https://example.org/{source_list[0]}",
+                            "source_name": source_name,
+                            "source_url": f"https://example.org/{source_name}",
                             "doi": "10.1000/a",
                         }
                     ],
                 },
                 "retrieval_debug": {
-                    "matched_retrievers": ["dense"],
+                    "matched_retrievers": ["dense", "sparse"],
                     "dense_score": 0.91,
+                    "sparse_score": 0.53,
                 },
             }
+            for source_name in source_list
         ]
+
+    def smart_search(self, *, query, source_list, top_k, hydrate):
+        self.smart_search_calls.append(
+            {
+                "query": query,
+                "source_list": source_list,
+                "top_k": top_k,
+                "hydrate": hydrate,
+            }
+        )
+        understanding = self.query_understanding.analyze(query).to_dict()
+        route = understanding.get("route") or "vector"
+
+        if route == "none":
+            return {
+                "success": False,
+                "query": query,
+                "search_query": None,
+                "query_understanding": understanding,
+                "results": [],
+            }
+
+        if route == "metadata_author":
+            search_query = understanding.get("matched_author") or understanding.get("normalized_query")
+            return {
+                "success": True,
+                "query": query,
+                "search_query": search_query,
+                "query_understanding": understanding,
+                "results": self.metadata_db.search_by_author(
+                    author_name=search_query,
+                    limit=top_k,
+                    source_list=source_list,
+                    fuzzy=True,
+                ),
+            }
+
+        if route == "author_suggestion":
+            return {
+                "success": True,
+                "query": query,
+                "search_query": None,
+                "query_understanding": understanding,
+                "results": [],
+            }
+
+        search_query = understanding.get("corrected_query") or understanding.get("normalized_query") or query
+        return {
+            "success": True,
+            "query": query,
+            "search_query": search_query,
+            "expanded_search_queries": ["artificial intelligence"],
+            "query_understanding": understanding,
+            "results": [
+                (
+                    "langtaosha",
+                    self.search(
+                        query=search_query,
+                        source_list=[source for source in source_list if source == "langtaosha"],
+                        top_k=top_k,
+                        hydrate=hydrate,
+                        search_type="hybrid_retrieval",
+                    ),
+                ),
+                (
+                    "biorxiv",
+                    self.search(
+                        query=search_query,
+                        source_list=[source for source in source_list if source != "langtaosha"],
+                        top_k=top_k,
+                        hydrate=hydrate,
+                        search_type="hybrid_retrieval",
+                    ),
+                ),
+            ],
+        }
 
 
 def _client(indexer=None, request_id="req-route-001", recorder=None):
@@ -161,7 +240,7 @@ def _client(indexer=None, request_id="req-route-001", recorder=None):
     return app.test_client()
 
 
-def test_scholar_search_returns_v11_shape_and_no_legacy_fields():
+def test_scholar_search_returns_grouped_results_shape_for_smart_mode():
     client = _client()
 
     response = client.get(
@@ -181,24 +260,25 @@ def test_scholar_search_returns_v11_shape_and_no_legacy_fields():
         "matched_author": None,
         "suggested_author": None,
     }
+    assert data["search_query"] == "Nav1.7"
+    assert data["search_mode"] == "smart"
+    assert data["smart_search"]["search_query"] == "Nav1.7"
+    assert data["smart_search"]["expanded_search_queries"] == ["artificial intelligence"]
+    assert data["smart_search"]["query_understanding"]["route"] == "vector"
+    assert len(data["smart_search"]["results"]) == 2
+    assert data["query_understanding"]["route"] == "vector"
+    assert data["count"] == 2
     assert data["meta"]["count"] == 2
     assert data["meta"]["request_id"] == "req-route-001"
-    assert set(data["meta"]) == {"count", "elapsed_ms", "request_id"}
     assert data["notice"] is None
-    assert [item["rank"] for item in data["results"]] == [1, 2]
-    assert data["results"][0]["source_key"] == "langtaosha"
-    assert data["results"][1]["source_key"] == "biorxiv"
+    assert data["results"][0][0] == "langtaosha"
+    assert data["results"][1][0] == "biorxiv"
+    assert [item["rank"] for item in data["results"][0][1]] == [1]
+    assert [item["rank"] for item in data["results"][1][1]] == [2]
+    assert data["results"][0][1][0]["source_key"] == "langtaosha"
+    assert data["results"][1][1][0]["source_key"] == "biorxiv"
 
-    forbidden_top_level = {
-        "search_query",
-        "search_mode",
-        "query_understanding",
-        "result_policy",
-        "count",
-    }
-    assert forbidden_top_level.isdisjoint(data)
-
-    result_keys = set(data["results"][0])
+    result_keys = set(data["results"][0][1][0])
     assert result_keys == {
         "work_id",
         "rank",
@@ -215,7 +295,48 @@ def test_scholar_search_returns_v11_shape_and_no_legacy_fields():
     }
 
 
-def test_scholar_search_ignores_limit_and_offset_for_public_v11_api():
+def test_vector_mode_does_not_attach_smart_search_payload():
+    indexer = FakeIndexer()
+    client = _client(indexer=indexer)
+
+    response = client.get(
+        "/api/scholar/search?query=Nav1.7&mode=vector&source_list=langtaosha"
+    )
+    data = response.get_json()
+
+    assert response.status_code == 200
+    assert data["smart_search"] is None
+
+
+def test_scholar_search_prints_backend_debug_summary_for_smart_requests(capsys):
+    client = _client()
+
+    response = client.get(
+        "/api/scholar/search?query=niang+yan&mode=smart&source_list=langtaosha"
+    )
+
+    assert response.status_code == 200
+    captured = capsys.readouterr()
+    assert "SMART SEARCH DEBUG" in captured.out
+    assert "query=niang yan" in captured.out
+    assert "route=vector" in captured.out
+    assert "SMART SEARCH RESULTS" in captured.out
+    assert "group=langtaosha" in captured.out
+
+
+def test_scholar_search_does_not_print_backend_debug_summary_for_vector_requests(capsys):
+    client = _client()
+
+    response = client.get(
+        "/api/scholar/search?query=Nav1.7&mode=vector&source_list=langtaosha"
+    )
+
+    assert response.status_code == 200
+    captured = capsys.readouterr()
+    assert "SMART SEARCH DEBUG" not in captured.out
+
+
+def test_scholar_search_ignores_limit_and_offset_for_public_api():
     indexer = FakeIndexer()
     client = _client(indexer=indexer)
 
@@ -229,7 +350,7 @@ def test_scholar_search_ignores_limit_and_offset_for_public_v11_api():
     assert "limit" not in data["meta"]
     assert "offset" not in data["meta"]
     assert "has_more" not in data["meta"]
-    assert [call["top_k"] for call in indexer.search_calls] == [5, 5]
+    assert [call["top_k"] for call in indexer.smart_search_calls] == [5]
 
 
 def test_scholar_search_normalizes_top_k_to_one_to_one_hundred():
@@ -237,19 +358,19 @@ def test_scholar_search_normalizes_top_k_to_one_to_one_hundred():
     _client(indexer=indexer_low).get(
         "/api/scholar/search?query=Nav1.7&top_k=0&source_list=langtaosha"
     )
-    assert indexer_low.search_calls[0]["top_k"] == 1
+    assert indexer_low.smart_search_calls[0]["top_k"] == 1
 
     indexer_high = FakeIndexer()
     _client(indexer=indexer_high).get(
         "/api/scholar/search?query=Nav1.7&top_k=999&source_list=langtaosha"
     )
-    assert indexer_high.search_calls[0]["top_k"] == 100
+    assert indexer_high.smart_search_calls[0]["top_k"] == 100
 
     indexer_invalid = FakeIndexer()
     _client(indexer=indexer_invalid).get(
         "/api/scholar/search?query=Nav1.7&top_k=abc&source_list=langtaosha"
     )
-    assert indexer_invalid.search_calls[0]["top_k"] == 100
+    assert indexer_invalid.smart_search_calls[0]["top_k"] == 100
 
 
 def test_scholar_search_rejects_empty_query_and_invalid_mode():
@@ -280,6 +401,7 @@ def test_vector_mode_adds_vector_notice():
     assert response.status_code == 200
     assert data["query"]["mode"] == "vector"
     assert data["query"]["route"] == "vector"
+    assert data["search_mode"] == "vector"
     assert data["notice"] == {
         "type": "vector",
         "message": "已按原 query 执行向量检索。",
@@ -287,7 +409,7 @@ def test_vector_mode_adds_vector_notice():
     }
 
 
-def test_query_correction_notice_uses_corrected_query_but_action_keeps_original_query():
+def test_smart_mode_surfaces_query_correction_notice_from_smart_search():
     indexer = FakeIndexer(
         FakeUnderstandingResult(
             normalized_query="machi learningn",
@@ -303,6 +425,8 @@ def test_query_correction_notice_uses_corrected_query_but_action_keeps_original_
 
     assert response.status_code == 200
     assert data["query"]["executed"] == "machine learning"
+    assert data["query"]["corrected_query"] == "machine learning"
+    assert data["search_query"] == "machine learning"
     assert indexer.search_calls[0]["query"] == "machine learning"
     assert data["notice"] == {
         "type": "query_correction",
@@ -312,10 +436,13 @@ def test_query_correction_notice_uses_corrected_query_but_action_keeps_original_
             "mode": "vector",
             "query": "machi learningn",
         },
+        "fallback_mode": "vector",
+        "fallback_query": "machi learningn",
+        "action_label": "使用原 query 检索",
     }
 
 
-def test_author_suggestion_returns_no_results_and_action_query():
+def test_smart_mode_surfaces_author_suggestion_notice():
     indexer = FakeIndexer(
         FakeUnderstandingResult(
             route="author_suggestion",
@@ -335,7 +462,7 @@ def test_author_suggestion_returns_no_results_and_action_query():
     assert data["query"]["executed"] is None
     assert data["query"]["suggested_author"] == "Nieng Yan"
     assert data["meta"]["count"] == 0
-    assert data["results"] == []
+    assert indexer.search_calls == []
     assert data["notice"] == {
         "type": "author_suggestion",
         "message": '未找到 "niang yan" 的高置信作者匹配，是否搜索作者 Nieng Yan？',
@@ -344,10 +471,13 @@ def test_author_suggestion_returns_no_results_and_action_query():
             "mode": "smart",
             "query": "Nieng Yan",
         },
+        "fallback_mode": "smart",
+        "fallback_query": "Nieng Yan",
+        "action_label": "搜索作者 Nieng Yan",
     }
 
 
-def test_author_match_uses_metadata_author_search_and_notice_action():
+def test_smart_mode_uses_metadata_author_shortcut_when_smart_search_routes_to_author():
     indexer = FakeIndexer(
         FakeUnderstandingResult(
             route="metadata_author",
@@ -381,7 +511,116 @@ def test_author_match_uses_metadata_author_search_and_notice_action():
             "mode": "vector",
             "query": "Nieng Yan",
         },
+        "fallback_mode": "vector",
+        "fallback_query": "Nieng Yan",
+        "action_label": "改用向量检索",
     }
+
+
+def test_scholar_search_flattens_grouped_smart_search_results_and_preserves_groups():
+    indexer = FakeIndexer()
+
+    def grouped_smart_search(*, query, source_list, top_k, hydrate):
+        indexer.smart_search_calls.append(
+            {
+                "query": query,
+                "source_list": source_list,
+                "top_k": top_k,
+                "hydrate": hydrate,
+            }
+        )
+        return {
+            "success": True,
+            "query": query,
+            "search_query": query,
+            "expanded_search_queries": [],
+            "query_understanding": {
+                "route": "vector",
+                "intent": "semantic_search",
+                "normalized_query": query,
+                "corrected_query": None,
+                "matched_author": None,
+                "suggested_author": None,
+            },
+            "results": [
+                ("langtaosha", indexer.search(
+                    query=query,
+                    source_list=["langtaosha"],
+                    top_k=top_k,
+                    hydrate=hydrate,
+                    search_type="hybrid_retrieval",
+                )),
+                ("biorxiv", indexer.search(
+                    query=query,
+                    source_list=["biorxiv_daily"],
+                    top_k=top_k,
+                    hydrate=hydrate,
+                    search_type="hybrid_retrieval",
+                )),
+            ],
+        }
+
+    indexer.smart_search = grouped_smart_search
+    client = _client(indexer=indexer)
+
+    response = client.get(
+        "/api/scholar/search?query=Nav1.7&mode=smart&top_k=5&source_list=langtaosha,biorxiv_daily"
+    )
+    data = response.get_json()
+
+    assert response.status_code == 200
+    assert data["results"][0][0] == "langtaosha"
+    assert data["results"][1][0] == "biorxiv"
+    assert len(data["results"][0][1]) == 1
+    assert len(data["results"][1][1]) == 1
+
+
+def test_metadata_author_results_prefer_langtaosha_source_when_filtered_match_is_langtaosha():
+    indexer = FakeIndexer(
+        FakeUnderstandingResult(
+            route="metadata_author",
+            intent="author_name",
+            normalized_query="Nieng Yan",
+            matched_author="Nieng Yan",
+        )
+    )
+    indexer.metadata_db.search_by_author = lambda **kwargs: [
+        {
+            "work_id": "W_CROSS_SOURCE",
+            "canonical_source_id": 2,
+            "sources": [
+                {
+                    "paper_source_id": 1,
+                    "source_name": "langtaosha",
+                    "source_url": "https://langtaosha.example/paper",
+                    "doi": "10.1000/lang",
+                },
+                {
+                    "paper_source_id": 2,
+                    "source_name": "biorxiv_daily",
+                    "source_url": "https://biorxiv.example/paper",
+                    "doi": "10.1000/bio",
+                },
+            ],
+            "authors": [{"name": "Nieng Yan"}],
+            "canonical_title": "Cross-source author paper",
+            "canonical_abstract": "Abstract",
+            "online_at": "2026-04-13T00:00:00",
+            "matched_source_name": "langtaosha",
+        }
+    ]
+    client = _client(indexer=indexer)
+
+    response = client.get(
+        "/api/scholar/search?query=Nieng%20Yan&mode=smart&source_list=langtaosha"
+    )
+    data = response.get_json()
+
+    assert response.status_code == 200
+    assert data["results"][0]["source_key"] == "langtaosha"
+    assert data["results"][0]["source"] == "Langtaosha"
+    assert data["results"][0]["doi"] == "10.1000/lang"
+    assert data["results"][0]["link"] == "https://langtaosha.example/paper"
 
 
 def test_scholar_search_records_optional_frontend_search_log():

@@ -31,6 +31,7 @@ class FakeIndexer:
     default_sources = ["langtaosha"]
 
     def __init__(self):
+        self.smart_search_calls = []
         self.query_understanding = SimpleNamespace(
             analyze=lambda query: FakeUnderstandingResult(query)
         )
@@ -55,6 +56,36 @@ class FakeIndexer:
                 },
             }
         ]
+
+    def smart_search(self, *, query, source_list, top_k, hydrate):
+        self.smart_search_calls.append(
+            {
+                "query": query,
+                "source_list": source_list,
+                "top_k": top_k,
+                "hydrate": hydrate,
+            }
+        )
+        return {
+            "success": True,
+            "query": query,
+            "search_query": query,
+            "query_understanding": {
+                "route": "vector",
+                "intent": "semantic_search",
+                "normalized_query": query,
+                "corrected_query": None,
+                "matched_author": None,
+                "suggested_author": None,
+            },
+            "results": self.search(
+                query=query,
+                source_list=source_list or self.default_sources,
+                top_k=top_k,
+                hydrate=hydrate,
+                search_type="hybrid_retrieval",
+            ),
+        }
 
 
 def test_create_scholar_api_app_registers_clean_search_api_without_legacy_main():

@@ -5,9 +5,8 @@ from typing import Any, Callable, Dict, List, Optional
 
 from flask import request
 
-LANGTAOSHA_SOURCES = ("langtaosha",)
-BIORXIV_SOURCES = ("biorxiv_history", "biorxiv_daily")
 DEFAULT_INDEXER_SEARCH_TYPE = "hybrid_retrieval"
+VECTOR_MODE_SEARCH_TYPE = "dense"
 
 
 def _normalize_top_k(raw_value: Any) -> int:
@@ -54,61 +53,6 @@ def _resolve_search_sources(indexer: Any, source_list: Optional[List[str]]) -> L
     return resolved_sources
 
 
-def _dedupe_search_results(
-    result_groups: List[List[Dict[str, Any]]],
-) -> List[Dict[str, Any]]:
-    merged_results: List[Dict[str, Any]] = []
-    seen_work_ids = set()
-
-    for results in result_groups:
-        for item in results:
-            work_id = item.get("work_id")
-            if work_id:
-                if work_id in seen_work_ids:
-                    continue
-                seen_work_ids.add(work_id)
-            merged_results.append(item)
-
-    return merged_results
-
-
-def _search_by_prioritized_sources(
-    indexer: Any,
-    query: str,
-    source_list: Optional[List[str]],
-    top_k: int,
-) -> List[Dict[str, Any]]:
-    resolved_sources = _resolve_search_sources(indexer, source_list)
-    langtaosha_sources = [
-        source for source in resolved_sources if source in LANGTAOSHA_SOURCES
-    ]
-    biorxiv_sources = [
-        source for source in resolved_sources if source in BIORXIV_SOURCES
-    ]
-    other_sources = [
-        source
-        for source in resolved_sources
-        if source not in LANGTAOSHA_SOURCES and source not in BIORXIV_SOURCES
-    ]
-
-    result_groups: List[List[Dict[str, Any]]] = []
-    for grouped_sources in (langtaosha_sources, biorxiv_sources, other_sources):
-        if not grouped_sources:
-            result_groups.append([])
-            continue
-        result_groups.append(
-            indexer.search(
-                query=query,
-                source_list=grouped_sources,
-                top_k=top_k,
-                hydrate=True,
-                search_type=DEFAULT_INDEXER_SEARCH_TYPE,
-            )
-        )
-
-    return _dedupe_search_results(result_groups)
-
-
 def _format_date_ymd(value: Any) -> Optional[str]:
     if value is None:
         return None
@@ -140,8 +84,18 @@ def _get_preferred_source(metadata: Dict[str, Any]) -> Dict[str, Any]:
     return sources[0] if sources else {}
 
 
-def _extract_doi(metadata: Dict[str, Any]) -> Optional[str]:
-    preferred_source = _get_preferred_source(metadata)
+def _get_display_source(item: Dict[str, Any], metadata: Dict[str, Any]) -> Dict[str, Any]:
+    sources = metadata.get("sources") or []
+    matched_source_name = item.get("matched_source_name") or item.get("source_name")
+    if matched_source_name:
+        for source in sources:
+            if source.get("source_name") == matched_source_name:
+                return source
+    return _get_preferred_source(metadata)
+
+
+def _extract_doi(metadata: Dict[str, Any], item: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    preferred_source = _get_display_source(item or {}, metadata)
     if preferred_source.get("doi"):
         return preferred_source.get("doi")
     for source in metadata.get("sources") or []:
@@ -170,8 +124,12 @@ def _normalize_source_key(source_name: Optional[str]) -> str:
     return source_name.lower()
 
 
-def _extract_paper_link(metadata: Dict[str, Any], doi: Optional[str]) -> Optional[str]:
-    preferred_source = _get_preferred_source(metadata)
+def _extract_paper_link(
+    metadata: Dict[str, Any],
+    doi: Optional[str],
+    item: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
+    preferred_source = _get_display_source(item or {}, metadata)
     if preferred_source.get("source_url"):
         return preferred_source.get("source_url")
     if metadata.get("link"):
@@ -238,9 +196,9 @@ def _build_match_reasons(item: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 def _map_search_item(item: Dict[str, Any], rank: int) -> Dict[str, Any]:
     metadata = item.get("metadata") or item
-    preferred_source = _get_preferred_source(metadata)
+    preferred_source = _get_display_source(item, metadata)
     source_name = preferred_source.get("source_name") or item.get("source_name")
-    doi = _extract_doi(metadata)
+    doi = _extract_doi(metadata, item)
     return {
         "work_id": item.get("work_id"),
         "rank": rank,
@@ -252,7 +210,7 @@ def _map_search_item(item: Dict[str, Any], rank: int) -> Dict[str, Any]:
         "online_date": _format_date_ymd(
             metadata.get("online_at") or item.get("online_at")
         ),
-        "link": _extract_paper_link(metadata, doi),
+        "link": _extract_paper_link(metadata, doi, item),
         "doi": doi,
         "ranking_score": _get_ranking_score(item),
         "match_reasons": _build_match_reasons(item),
@@ -318,6 +276,125 @@ def _build_query_notice(
     return None
 
 
+def _normalize_legacy_notice(
+    query: str,
+    search_query: Optional[str],
+    understanding: Optional[Dict[str, Any]],
+    search_mode: str,
+) -> Optional[Dict[str, Any]]:
+    notice = _build_query_notice(
+        query=query,
+        search_query=search_query,
+        understanding=understanding,
+        search_mode=search_mode,
+    )
+    if not notice:
+        return None
+
+    action = notice.get("action") or {}
+    if action:
+        notice["fallback_mode"] = action.get("mode")
+        notice["fallback_query"] = action.get("query")
+        notice["action_label"] = action.get("label")
+    return notice
+
+
+def _emit_smart_search_debug(
+    *,
+    query: str,
+    search_mode: str,
+    search_query: Optional[str],
+    understanding: Optional[Dict[str, Any]],
+    result_count: int,
+    notice: Optional[Dict[str, Any]],
+) -> None:
+    if search_mode != "smart":
+        return
+    understanding = understanding or {}
+    debug_line = (
+        "SMART SEARCH DEBUG | "
+        f"query={query} | "
+        f"executed={search_query} | "
+        f"route={understanding.get('route')} | "
+        f"intent={understanding.get('intent')} | "
+        f"corrected={understanding.get('corrected_query')} | "
+        f"matched_author={understanding.get('matched_author')} | "
+        f"suggested_author={understanding.get('suggested_author')} | "
+        f"result_count={result_count} | "
+        f"notice_type={(notice or {}).get('type')}"
+    )
+    print(debug_line)
+
+
+def _emit_smart_search_result_summary(
+    *,
+    search_mode: str,
+    raw_results: Any,
+    preview_limit: int = 3,
+) -> None:
+    if search_mode != "smart":
+        return
+
+    if not isinstance(raw_results, list):
+        print("SMART SEARCH RESULTS | no_results")
+        return
+
+    grouped_lines: List[str] = []
+    grouped_detected = False
+    for item in raw_results:
+        if (
+            isinstance(item, (list, tuple))
+            and len(item) == 2
+            and isinstance(item[0], str)
+            and isinstance(item[1], list)
+        ):
+            grouped_detected = True
+            source_prefix = item[0]
+            source_results = item[1]
+            preview_items = []
+            for result in source_results[:preview_limit]:
+                if not isinstance(result, dict):
+                    continue
+                metadata = result.get("metadata") or result
+                preview_items.append(
+                    {
+                        "work_id": result.get("work_id"),
+                        "title": metadata.get("canonical_title") or metadata.get("title"),
+                        "source": (
+                            (result.get("source_name"))
+                            or ((metadata.get("sources") or [{}])[0].get("source_name"))
+                        ),
+                    }
+                )
+            grouped_lines.append(
+                f"SMART SEARCH RESULTS | group={source_prefix} | count={len(source_results)} | preview={preview_items}"
+            )
+
+    if grouped_detected:
+        for line in grouped_lines:
+            print(line)
+        return
+
+    preview_items = []
+    for result in raw_results[:preview_limit]:
+        if not isinstance(result, dict):
+            continue
+        metadata = result.get("metadata") or result
+        preview_items.append(
+            {
+                "work_id": result.get("work_id"),
+                "title": metadata.get("canonical_title") or metadata.get("title"),
+                "source": (
+                    result.get("source_name")
+                    or ((metadata.get("sources") or [{}])[0].get("source_name"))
+                ),
+            }
+        )
+    print(
+        f"SMART SEARCH RESULTS | group=flat | count={len(raw_results)} | preview={preview_items}"
+    )
+
+
 def _build_query_payload(
     input_query: str,
     executed_query: Optional[str],
@@ -336,6 +413,73 @@ def _build_query_payload(
     }
 
 
+def _normalize_smart_search_payload(payload: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return None
+    return {
+        "success": payload.get("success"),
+        "query": payload.get("query"),
+        "search_query": payload.get("search_query"),
+        "expanded_search_queries": list(payload.get("expanded_search_queries") or []),
+        "query_understanding": dict(payload.get("query_understanding") or {}),
+        "results": list(payload.get("results") or []),
+    }
+
+
+def _map_grouped_smart_search_results(raw_results: Any) -> tuple[List[Any], int]:
+    if not isinstance(raw_results, list):
+        return [], 0
+
+    mapped_grouped_results: List[Any] = []
+    next_rank = 1
+    total_count = 0
+
+    for item in raw_results:
+        if (
+            isinstance(item, (list, tuple))
+            and len(item) == 2
+            and isinstance(item[0], str)
+            and isinstance(item[1], list)
+        ):
+            source_prefix = item[0]
+            source_results = item[1]
+            mapped_items = []
+            for source_item in source_results:
+                if not isinstance(source_item, dict):
+                    continue
+                mapped_items.append(_map_search_item(source_item, rank=next_rank))
+                next_rank += 1
+            mapped_grouped_results.append((source_prefix, mapped_items))
+            total_count += len(mapped_items)
+
+    if mapped_grouped_results:
+        return mapped_grouped_results, total_count
+
+    mapped_flat_results = []
+    for source_item in raw_results:
+        if not isinstance(source_item, dict):
+            continue
+        mapped_flat_results.append(_map_search_item(source_item, rank=next_rank))
+        next_rank += 1
+    return mapped_flat_results, len(mapped_flat_results)
+
+
+def _run_vector_search(
+    *,
+    indexer: Any,
+    query: str,
+    source_list: List[str],
+    top_k: int,
+) -> List[Dict[str, Any]]:
+    return indexer.search(
+        query=query,
+        source_list=source_list,
+        top_k=top_k,
+        hydrate=True,
+        search_type=VECTOR_MODE_SEARCH_TYPE,
+    )
+
+
 def run_scholar_search(
     *,
     indexer: Any,
@@ -352,12 +496,13 @@ def run_scholar_search(
 
     normalized_top_k = _normalize_top_k(top_k)
     normalized_mode = _validate_search_mode(search_mode)
+    resolved_sources = _resolve_search_sources(indexer, source_list)
 
     if normalized_mode == "vector":
-        results = _search_by_prioritized_sources(
+        raw_results = _run_vector_search(
             indexer=indexer,
             query=normalized_query,
-            source_list=source_list,
+            source_list=resolved_sources,
             top_k=normalized_top_k,
         )
         search_query = normalized_query
@@ -371,44 +516,45 @@ def run_scholar_search(
             "suggested_author": None,
         }
     else:
-        understanding_result = indexer.query_understanding.analyze(normalized_query)
-        understanding = understanding_result.to_dict()
-        route = understanding_result.route
-
-        if route == "none":
-            results = []
-            search_query = None
-        elif route == "metadata_author":
-            search_query = (
-                understanding_result.matched_author
-                or understanding_result.normalized_query
-            )
-            results = indexer.metadata_db.search_by_author(
-                author_name=search_query,
-                limit=normalized_top_k,
-                source_list=_resolve_search_sources(indexer, source_list),
-                fuzzy=True,
-            )
-        elif route == "author_suggestion":
-            results = []
-            search_query = None
-        else:
-            search_query = (
-                understanding_result.corrected_query
-                or understanding_result.normalized_query
-            )
-            results = _search_by_prioritized_sources(
-                indexer=indexer,
-                query=search_query,
-                source_list=source_list,
-                top_k=normalized_top_k,
-            )
-
-    mapped_results = [
-        _map_search_item(item, rank=index + 1)
-        for index, item in enumerate(results[:normalized_top_k])
-    ]
+        smart_payload = indexer.smart_search(
+            query=normalized_query,
+            source_list=resolved_sources,
+            top_k=normalized_top_k,
+            hydrate=True,
+        )
+        raw_smart_results = smart_payload.get("results")
+        _emit_smart_search_result_summary(
+            search_mode=normalized_mode,
+            raw_results=raw_smart_results,
+        )
+        raw_results, mapped_result_count = _map_grouped_smart_search_results(
+            raw_smart_results
+        )
+        search_query = smart_payload.get("search_query")
+        understanding = dict(smart_payload.get("query_understanding") or {})
+        normalized_smart_payload = _normalize_smart_search_payload(smart_payload)
+        mapped_results = raw_results
+    if normalized_mode == "vector":
+        mapped_results = [
+            _map_search_item(item, rank=index + 1)
+            for index, item in enumerate(raw_results[:normalized_top_k])
+        ]
+        mapped_result_count = len(mapped_results)
     elapsed_ms = int((time.time() - started_at) * 1000)
+    notice = _normalize_legacy_notice(
+        query=normalized_query,
+        search_query=search_query,
+        understanding=understanding,
+        search_mode=normalized_mode,
+    )
+    _emit_smart_search_debug(
+        query=normalized_query,
+        search_mode=normalized_mode,
+        search_query=search_query,
+        understanding=understanding,
+        result_count=mapped_result_count,
+        notice=notice,
+    )
 
     return {
         "success": True,
@@ -418,17 +564,19 @@ def run_scholar_search(
             search_mode=normalized_mode,
             understanding=understanding,
         ),
+        "search_query": search_query,
+        "search_mode": normalized_mode,
+        "query_understanding": understanding,
+        "smart_search": (
+            normalized_smart_payload if normalized_mode == "smart" else None
+        ),
         "meta": {
-            "count": len(mapped_results),
+            "count": mapped_result_count,
             "elapsed_ms": elapsed_ms,
             "request_id": request_id,
         },
-        "notice": _build_query_notice(
-            query=normalized_query,
-            search_query=search_query,
-            understanding=understanding,
-            search_mode=normalized_mode,
-        ),
+        "notice": notice,
+        "count": mapped_result_count,
         "results": mapped_results,
     }
 
