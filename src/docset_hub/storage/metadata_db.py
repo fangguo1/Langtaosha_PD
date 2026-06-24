@@ -1265,9 +1265,10 @@ class MetadataDB:
         ]
         params: Dict[str, Any] = {
             "final_limit": limit if candidate_pool_limit is not None else max(limit * 5, 50),
-            "route_limit": candidate_pool_limit if candidate_pool_limit is not None else max(limit * 10, 100),
+            "candidate_limit": candidate_pool_limit if candidate_pool_limit is not None else max(limit * 10, 100),
             "min_weight": min_weight,
             "normalized_query": normalized_query.lower(),
+            "query_token_count": len(tokens),
             "trigram_threshold": trigram_threshold,
             "token_trigram_threshold": token_trigram_threshold,
             "trigram_threshold_text": str(trigram_threshold),
@@ -1286,106 +1287,25 @@ class MetadataDB:
             token_conditions.append(f"lower(keyword) LIKE :{param_name}")
             params[param_name] = f"%{token}%"
 
-        prefix_conditions = []
-        for idx, token in enumerate(sorted_tokens):
-            if len(token) < 5:
-                continue
-            param_name = f"prefix_{idx}"
-            prefix_conditions.append(f"lower(keyword) LIKE :{param_name}")
-            params[param_name] = f"%{token[:4]}%"
-
         trigram_conditions = []
         trigram_score_terms = []
+        phrase_similarity_expr = "similarity(lower(keyword), :normalized_query)"
+        word_similarity_expr = "word_similarity(lower(keyword), :normalized_query)"
         use_trigram = bool(enable_trigram and self._has_pg_trgm())
         if use_trigram:
             trigram_conditions.append(
                 "lower(keyword) % :normalized_query"
             )
             trigram_score_terms.append(
-                "CASE WHEN lower(keyword) % :normalized_query "
-                "THEN similarity(lower(keyword), :normalized_query) ELSE 0 END"
+                phrase_similarity_expr
             )
-            for idx, token in enumerate(sorted_tokens):
-                if len(token) < 5:
-                    continue
-                param_name = f"trigram_token_{idx}"
-                trigram_conditions.append(
-                    f":{param_name} <% lower(keyword)"
-                )
-                trigram_score_terms.append(
-                    f"CASE WHEN :{param_name} <% lower(keyword) "
-                    f"THEN word_similarity(:{param_name}, lower(keyword)) ELSE 0 END"
-                )
-                params[param_name] = token
-
-        route_queries = []
-        if token_conditions:
-            route_queries.append(
-                f"""
-                (
-                    SELECT
-                        lower(keyword) AS normalized_keyword,
-                        keyword_type,
-                        source,
-                        paper_id,
-                        keyword AS display_keyword,
-                        COALESCE(weight, 1.0) AS paper_weight,
-                        4.0 AS match_score
-                    FROM paper_keywords
-                    WHERE source IN ({", ".join(source_placeholders)})
-                      AND COALESCE(weight, 1.0) >= :min_weight
-                      AND ({" OR ".join(token_conditions)})
-                    ORDER BY COALESCE(weight, 1.0) DESC, lower(keyword) ASC
-                    LIMIT :route_limit
-                )
-                """
+            trigram_conditions.append(
+                ":normalized_query <% lower(keyword)"
             )
-        if prefix_conditions:
-            route_queries.append(
-                f"""
-                (
-                    SELECT
-                        lower(keyword) AS normalized_keyword,
-                        keyword_type,
-                        source,
-                        paper_id,
-                        keyword AS display_keyword,
-                        COALESCE(weight, 1.0) AS paper_weight,
-                        2.0 AS match_score
-                    FROM paper_keywords
-                    WHERE source IN ({", ".join(source_placeholders)})
-                      AND COALESCE(weight, 1.0) >= :min_weight
-                      AND ({" OR ".join(prefix_conditions)})
-                    ORDER BY COALESCE(weight, 1.0) DESC, lower(keyword) ASC
-                    LIMIT :route_limit
-                )
-                """
-            )
-        if trigram_conditions:
-            route_queries.append(
-                f"""
-                (
-                    SELECT
-                        lower(keyword) AS normalized_keyword,
-                        keyword_type,
-                        source,
-                        paper_id,
-                        keyword AS display_keyword,
-                        COALESCE(weight, 1.0) AS paper_weight,
-                        GREATEST({", ".join(trigram_score_terms)}) AS match_score
-                    FROM paper_keywords, settings
-                    WHERE source IN ({", ".join(source_placeholders)})
-                      AND COALESCE(weight, 1.0) >= :min_weight
-                      AND ({" OR ".join(trigram_conditions)})
-                    ORDER BY GREATEST({", ".join(trigram_score_terms)}) DESC,
-                             COALESCE(weight, 1.0) DESC,
-                             lower(keyword) ASC
-                    LIMIT :route_limit
-                )
-                """
+            trigram_score_terms.append(
+                word_similarity_expr
             )
 
-        route_union_sql = "\nUNION ALL\n".join(route_queries)
         settings_cte = ""
         if use_trigram:
             settings_cte = """
@@ -1397,41 +1317,106 @@ class MetadataDB:
             """
 
         with self.engine.connect() as conn:
-            rows = conn.execute(
-                text(f"""
-                    WITH {settings_cte}
-                    raw_candidates AS (
-                        {route_union_sql}
-                    ),
-                    candidates AS (
+            if use_trigram:
+                rows = conn.execute(
+                    text(f"""
+                        WITH {settings_cte}
+                        scored_candidates AS (
+                            SELECT
+                                lower(keyword) AS normalized_keyword,
+                                keyword_type,
+                                source,
+                                paper_id,
+                                keyword AS display_keyword,
+                                COALESCE(weight, 1.0) AS paper_weight,
+                                {phrase_similarity_expr} AS phrase_similarity,
+                                {word_similarity_expr} AS token_similarity,
+                                GREATEST({", ".join(trigram_score_terms)}) AS trigram_score,
+                                array_length(regexp_split_to_array(lower(keyword), E'\\s+'), 1) AS keyword_token_count
+                            FROM paper_keywords, settings
+                            WHERE source IN ({", ".join(source_placeholders)})
+                              AND COALESCE(weight, 1.0) >= :min_weight
+                              AND ({" OR ".join(trigram_conditions)})
+                        ),
+                        candidates AS (
+                            SELECT
+                                normalized_keyword,
+                                MIN(display_keyword) AS display_keyword,
+                                keyword_type,
+                                source,
+                                paper_id,
+                                MAX(paper_weight) AS paper_weight,
+                                MAX(phrase_similarity) AS phrase_similarity,
+                                MAX(token_similarity) AS token_similarity,
+                                MAX(trigram_score) AS match_score,
+                                MAX(keyword_token_count) AS keyword_token_count
+                            FROM scored_candidates
+                            GROUP BY normalized_keyword, keyword_type, source, paper_id
+                        )
                         SELECT
-                            normalized_keyword,
-                            MIN(display_keyword) AS display_keyword,
+                            MIN(display_keyword) AS keyword,
                             keyword_type,
                             source,
-                            paper_id,
-                            MAX(paper_weight) AS paper_weight,
+                            COUNT(DISTINCT paper_id) AS doc_count,
+                            AVG(paper_weight) AS avg_weight,
                             MAX(match_score) AS match_score
-                        FROM raw_candidates
-                        GROUP BY normalized_keyword, keyword_type, source, paper_id
-                    )
-                    SELECT
-                        MIN(display_keyword) AS keyword,
-                        keyword_type,
-                        source,
-                        COUNT(DISTINCT paper_id) AS doc_count,
-                        AVG(paper_weight) AS avg_weight,
-                        MAX(match_score) AS match_score
-                    FROM candidates
-                    GROUP BY normalized_keyword, keyword_type, source
-                    ORDER BY match_score DESC, doc_count DESC, avg_weight DESC, lower(MIN(display_keyword)) ASC
-                    LIMIT :final_limit
-                """),
-                params,
-            ).fetchall()
+                        FROM candidates
+                        GROUP BY normalized_keyword, keyword_type, source
+                        ORDER BY
+                            MAX(phrase_similarity) DESC,
+                            ABS(MAX(keyword_token_count) - :query_token_count) ASC,
+                            MAX(token_similarity) DESC,
+                            COUNT(DISTINCT paper_id) DESC,
+                            AVG(paper_weight) DESC,
+                            lower(MIN(display_keyword)) ASC
+                        LIMIT :candidate_limit
+                    """),
+                    params,
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    text(f"""
+                        WITH raw_candidates AS (
+                            SELECT
+                                lower(keyword) AS normalized_keyword,
+                                keyword_type,
+                                source,
+                                paper_id,
+                                keyword AS display_keyword,
+                                COALESCE(weight, 1.0) AS paper_weight
+                            FROM paper_keywords
+                            WHERE source IN ({", ".join(source_placeholders)})
+                              AND COALESCE(weight, 1.0) >= :min_weight
+                              AND ({" OR ".join(token_conditions)})
+                        ),
+                        candidates AS (
+                            SELECT
+                                normalized_keyword,
+                                MIN(display_keyword) AS display_keyword,
+                                keyword_type,
+                                source,
+                                paper_id,
+                                MAX(paper_weight) AS paper_weight
+                            FROM raw_candidates
+                            GROUP BY normalized_keyword, keyword_type, source, paper_id
+                        )
+                        SELECT
+                            MIN(display_keyword) AS keyword,
+                            keyword_type,
+                            source,
+                            COUNT(DISTINCT paper_id) AS doc_count,
+                            AVG(paper_weight) AS avg_weight
+                        FROM candidates
+                        GROUP BY normalized_keyword, keyword_type, source
+                        ORDER BY
+                            COUNT(DISTINCT paper_id) DESC,
+                            AVG(paper_weight) DESC,
+                            lower(MIN(display_keyword)) ASC
+                        LIMIT :candidate_limit
+                    """),
+                    params,
+                ).fetchall()
 
-
-        print(rows)
         return [
             {
                 "keyword": row[0],
@@ -2659,11 +2644,27 @@ class MetadataDB:
                             WHEN {normalized_author_sql} = :normalized_query THEN 1
                             ELSE 2
                         END AS exact_priority,
-                        ({token_match_score_sql}) AS token_match_count
+                        (
+                            SELECT COUNT(*)
+                            FROM unnest(:query_tokens) AS qt
+                            WHERE qt = ANY(author_tokens)
+                        ) AS token_match_count,
+                        similarity(
+                            lower(author_name),
+                            lower(:raw_query)
+                        ) AS trigram_score
                     FROM authors
-                    WHERE {where_clause}
-                    GROUP BY author_name
-                    ORDER BY exact_priority ASC, token_match_count DESC
+                    WHERE EXISTS (
+                        SELECT 1
+                        FROM unnest(:query_tokens) AS qt
+                        WHERE qt = ANY(author_tokens)
+                    )
+                    GROUP BY author_name, author_tokens
+                    ORDER BY
+                        exact_priority ASC,
+                        token_match_count DESC,
+                        trigram_score DESC,
+                        paper_count DESC
                     LIMIT :candidate_limit
                 """),
                 params
