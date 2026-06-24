@@ -255,7 +255,10 @@ class TestPaperIndexerSmartSearch:
         assert result["success"] is True
         assert result["search_query"] == "Alice Zhang"
         assert result["query_understanding"]["route"] == "metadata_author"
-        assert result["results"] == [{"paper_id": 1, "title": "Author paper"}]
+        assert result["expanded_search_queries"] == []
+        assert result["results"] == [
+            ("langtaosha", [{"paper_id": 1, "title": "Author paper"}])
+        ]
         assert indexer.metadata_db.author_queries == [
             {
                 "author_name": "Alice Zhang",
@@ -297,13 +300,24 @@ class TestPaperIndexerSmartSearch:
         assert result["success"] is True
         assert result["search_query"] == "solvent formation"
         assert result["query_understanding"]["corrected_query"] == "solvent formation"
+        assert result["expanded_search_queries"] == []
         assert calls == [
             {
                 "query": "solvent formation",
-                "source_list": ["langtaosha", "biorxiv_history", "biorxiv_daily"],
+                "source_list": ["langtaosha"],
+                "top_k": 5,
+                "hydrate": False,
+            },
+            {
+                "query": "solvent formation",
+                "source_list": ["biorxiv_history", "biorxiv_daily"],
                 "top_k": 5,
                 "hydrate": False,
             }
+        ]
+        assert result["results"] == [
+            ("langtaosha", [{"paper_id": 2, "title": "Vector paper"}]),
+            ("biorxiv", [{"paper_id": 2, "title": "Vector paper"}]),
         ]
 
     def test_smart_search_returns_author_suggestion_without_vector_search(self, monkeypatch):
@@ -336,6 +350,7 @@ class TestPaperIndexerSmartSearch:
 
         assert result["success"] is True
         assert result["search_query"] is None
+        assert result["expanded_search_queries"] == []
         assert result["results"] == []
         assert result["query_understanding"]["route"] == "author_suggestion"
         assert result["query_understanding"]["suggested_author"] == "Nieng Yan"
@@ -373,7 +388,33 @@ class TestPaperIndexerSmartSearch:
 
         assert result["success"] is True
         assert result["search_query"] == "solvent formation for cancer cell therapy"
+        assert result["expanded_search_queries"] == []
         assert result["query_understanding"]["corrections"][0]["corrected"] == "solvent formation"
+
+    def test_smart_search_allows_single_source_group_without_strong_assumption(self, monkeypatch):
+        indexer = _smart_search_indexer(
+            QueryUnderstandingResult(
+                original_query="Nav1.7",
+                normalized_query="Nav1.7",
+                intent="semantic_search",
+                route="vector",
+                confidence=0.95,
+                reason="query_term_high_confidence",
+            )
+        )
+
+        def fake_search(query, source_list=None, top_k=10, hydrate=True):
+            return [{"paper_id": 3, "title": "Langtaosha-only paper", "source_list": source_list}]
+
+        monkeypatch.setattr(indexer, "search", fake_search)
+
+        result = indexer.smart_search("Nav1.7", source_list=["langtaosha"], top_k=2, hydrate=False)
+
+        assert result["success"] is True
+        assert result["expanded_search_queries"] == []
+        assert result["results"] == [
+            ("langtaosha", [{"paper_id": 3, "title": "Langtaosha-only paper", "source_list": ["langtaosha"]}])
+        ]
 
     def test_smart_search_returns_empty_result_for_invalid_query(self):
         indexer = _smart_search_indexer(

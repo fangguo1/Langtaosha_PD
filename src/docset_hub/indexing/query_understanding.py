@@ -333,6 +333,9 @@ class AuthorMatcher:
             query=normalized_query,
             limit=5,
         )
+
+        print(raw_candidates)
+        print("--------------------------------")
         candidates = [self._normalize_candidate(item) for item in raw_candidates]
         candidates = sorted(
             candidates,

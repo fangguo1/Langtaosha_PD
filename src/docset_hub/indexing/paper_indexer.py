@@ -46,6 +46,8 @@
 import logging
 import math
 import os
+import time
+from collections import defaultdict as ddict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, Any, List, Mapping, Optional, Sequence, Union
@@ -58,7 +60,11 @@ from .dense_result_filter import (
     DENSE_DEFAULT_MIN_SIMILARITY,
     filter_dense_results_by_hard_rules,
 )
-from .coverage_engine import analyze_document_coverage, summarize_expanded_sparse_matches
+from .coverage_engine import (
+    analyze_document_coverage,
+    analyze_document_coverage_loose,
+    summarize_expanded_sparse_matches,
+)
 from .expanded_sparse_retrieval import match_papers_by_expanded_sparse_plan
 from .keyword_enrichment import KeywordEnrichmentService
 from .paper_keyword_lookup import (
@@ -342,6 +348,8 @@ class PaperIndexer:
         search_type: str = "dense",
         keyword_sources: Optional[Sequence[str]] = None,
         include_coverage: bool = False,
+        include_loose_coverage: bool = False,
+        timings_ms: Optional[Dict[str, float]] = None,
     ) -> List[Dict[str, Any]]:
         """搜索论文
 
@@ -353,6 +361,8 @@ class PaperIndexer:
             search_type: 检索类型，支持 dense / sparse / hybrid / hybrid_retrieval / expanded_sparse
             keyword_sources: 关键词来源过滤（expanded_sparse 与 coverage 注解使用）
             include_coverage: dense/sparse 结果附加 span coverage 字段（需 hydrate=True）
+            include_loose_coverage: hydrate 结果附加 loose suffix coverage（dev 对比用）
+            timings_ms: 可选 dict，写入 search / strict_coverage / loose_coverage 耗时（毫秒）
 
         Returns:
             List[Dict[str, Any]]: 搜索结果列表，每个结果包含:
@@ -373,6 +383,8 @@ class PaperIndexer:
                 top_k=top_k,
                 hydrate=hydrate,
                 keyword_sources=keyword_sources,
+                include_loose_coverage=include_loose_coverage,
+                timings_ms=timings_ms,
             )
 
         if not self.vector_db:
@@ -390,6 +402,7 @@ class PaperIndexer:
                     hydrate=hydrate,
                 )
 
+            search_started = time.perf_counter()
             # 2. 执行向量搜索
             search_results = self.vector_db.search(
                 query=query,
@@ -401,13 +414,40 @@ class PaperIndexer:
             # 3. 可选：补全 metadata
             if hydrate:
                 hydrated = self._hydrate_search_results(search_results)
-                if include_coverage and search_type in ("dense", "sparse"):
-                    self._annotate_results_with_coverage(
-                        results=hydrated,
+                if timings_ms is not None:
+                    timings_ms["search"] = round(
+                        (time.perf_counter() - search_started) * 1000.0,
+                        3,
+                    )
+                plan = None
+                if include_coverage or include_loose_coverage:
+                    plan = self.build_query_semantic_plan(
                         query=query,
                         source_list=resolved_source_list,
                         keyword_sources=keyword_sources,
                     )
+                if include_coverage and search_type in ("dense", "sparse") and plan is not None:
+                    coverage_started = time.perf_counter()
+                    self._annotate_results_with_coverage(
+                        results=hydrated,
+                        plan=plan,
+                    )
+                    if timings_ms is not None:
+                        timings_ms["strict_coverage"] = round(
+                            (time.perf_counter() - coverage_started) * 1000.0,
+                            3,
+                        )
+                if include_loose_coverage and plan is not None:
+                    loose_started = time.perf_counter()
+                    self._annotate_results_with_loose_coverage(
+                        results=hydrated,
+                        plan=plan,
+                    )
+                    if timings_ms is not None:
+                        timings_ms["loose_coverage"] = round(
+                            (time.perf_counter() - loose_started) * 1000.0,
+                            3,
+                        )
                 return hydrated
             else:
                 # 返回轻量级结果
@@ -543,6 +583,8 @@ class PaperIndexer:
         top_k: int = 10,
         hydrate: bool = True,
         keyword_sources: Optional[Sequence[str]] = None,
+        include_loose_coverage: bool = False,
+        timings_ms: Optional[Dict[str, float]] = None,
     ) -> List[Dict[str, Any]]:
         """Expanded sparse 检索：semantic plan 展开词项匹配 + span coverage 评分。
 
@@ -550,6 +592,7 @@ class PaperIndexer:
         检索类型保持一致（metadata 嵌套，hydrate 可关）。
         """
         resolved_source_list = self._resolve_source_list(source_list)
+        search_started = time.perf_counter()
         plan = self.build_query_semantic_plan(
             query=query,
             source_list=resolved_source_list,
@@ -594,39 +637,63 @@ class PaperIndexer:
                 item["metadata"] = metadata
                 item["source_name"] = metadata.get("source_name")
             results.append(item)
+        if timings_ms is not None:
+            timings_ms["search"] = round((time.perf_counter() - search_started) * 1000.0, 3)
+        if include_loose_coverage:
+            loose_started = time.perf_counter()
+            self._annotate_results_with_loose_coverage(results=results, plan=plan)
+            if timings_ms is not None:
+                timings_ms["loose_coverage"] = round(
+                    (time.perf_counter() - loose_started) * 1000.0,
+                    3,
+                )
         return results
 
     def _annotate_results_with_coverage(
         self,
         *,
         results: List[Dict[str, Any]],
-        query: str,
-        source_list: List[str],
-        keyword_sources: Optional[Sequence[str]] = None,
+        plan: Any,
     ) -> None:
-        """对 hydrate 后的检索结果就地附加 span coverage 字段（dev 对比用）。"""
-        plan = self.build_query_semantic_plan(
-            query=query,
-            source_list=source_list,
-            keyword_sources=keyword_sources,
-        )
-        if plan is None:
-            return
+        """对 hydrate 后的检索结果就地附加 strict span coverage 字段（dev 对比用）。"""
         for item in results:
             metadata = dict(item.get("metadata") or {})
             coverage = analyze_document_coverage(
                 plan=plan,
-                document_fields={
-                    "title": metadata.get("canonical_title") or metadata.get("title") or "",
-                    "abstract": metadata.get("canonical_abstract") or metadata.get("abstract") or "",
-                    "paper_keywords": self._extract_keyword_texts(metadata),
-                },
+                document_fields=self._coverage_document_fields(metadata),
             )
             item["coverage_ratio"] = float(coverage.coverage_ratio or 0.0)
             item["coverage"] = coverage.to_dict()
             item["matched_span_count"] = int(coverage.matched_span_count or 0)
             item["total_span_count"] = int(coverage.total_span_count or 0)
             item["matched_spans"] = list(coverage.matched_spans or [])
+
+    def _annotate_results_with_loose_coverage(
+        self,
+        *,
+        results: List[Dict[str, Any]],
+        plan: Any,
+    ) -> None:
+        """对 hydrate 后的检索结果就地附加 loose suffix coverage 字段（dev 对比用）。"""
+        for item in results:
+            metadata = dict(item.get("metadata") or {})
+            loose = analyze_document_coverage_loose(
+                plan=plan,
+                document_fields=self._coverage_document_fields(metadata),
+            )
+            item["loose_coverage_ratio"] = float(loose.coverage_ratio or 0.0)
+            item["loose_coverage"] = loose.to_dict()
+            item["loose_matched_span_count"] = int(loose.matched_span_count or 0)
+            item["loose_total_span_count"] = int(loose.total_span_count or 0)
+            item["loose_matched_spans"] = list(loose.matched_spans or [])
+
+    @staticmethod
+    def _coverage_document_fields(metadata: Mapping[str, Any]) -> Dict[str, Any]:
+        return {
+            "title": metadata.get("canonical_title") or metadata.get("title") or "",
+            "abstract": metadata.get("canonical_abstract") or metadata.get("abstract") or "",
+            "paper_keywords": PaperIndexer._extract_keyword_texts(metadata),
+        }
 
     @staticmethod
     def _extract_keyword_texts(metadata: Mapping[str, Any]) -> List[str]:
@@ -643,7 +710,19 @@ class PaperIndexer:
             if text and text not in texts:
                 texts.append(text)
         return texts
+    def merge_source_list(self, source_list: List[str]) -> Dict[str, List[str]]:
+        merge_source_dict = ddict(list)
+        for source in source_list:
+            if "langtaosha" in source:
+                merge_source_dict["langtaosha"].append(source)
+            elif "biorxiv" in source:
+                merge_source_dict["biorxiv"].append(source)
+            else:
+                continue
+        return dict(merge_source_dict)
 
+
+            
     def smart_search(
         self,
         query: str,
@@ -666,22 +745,29 @@ class PaperIndexer:
                 "query": query,
                 "search_query": None,
                 "query_understanding": understanding_payload,
+                "expanded_search_queries": [],
                 "results": [],
             }
 
         resolved_source_list = self._resolve_source_list(source_list)
+        merged_source_dict = self.merge_source_list(resolved_source_list)
+        results = []
         if understanding.route == "metadata_author":
-            results = self.metadata_db.search_by_author(
-                author_name=understanding.matched_author or understanding.normalized_query,
-                limit=top_k,
-                source_list=resolved_source_list,
-                fuzzy=True,
-            )
+            for source_prefix, grouped_source_list in merged_source_dict.items():
+                result = self.metadata_db.search_by_author(
+                    author_name=understanding.matched_author or understanding.normalized_query,
+                    limit=top_k,
+                    source_list=grouped_source_list,
+                    fuzzy=True,
+                )
+                results.append((source_prefix, result))
+            
             return {
                 "success": True,
                 "query": query,
                 "search_query": understanding.matched_author or understanding.normalized_query,
                 "query_understanding": understanding_payload,
+                "expanded_search_queries": [],
                 "results": results,
             }
 
@@ -691,60 +777,31 @@ class PaperIndexer:
                 "query": query,
                 "search_query": None,
                 "query_understanding": understanding_payload,
+                "expanded_search_queries": [],
                 "results": [],
             }
 
         search_query = understanding.corrected_query or understanding.normalized_query
-        expansion = understanding_payload.get("expansion") or {}
-        expanded_queries = expansion.get("expanded_queries") if expansion.get("status") == "ok" else []
-        queries = [search_query] + [q for q in (expanded_queries or []) if q and q != search_query]
-        result_batches = []
-        for candidate_query in queries:
-            result_batches.append(
-                (
-                    candidate_query,
-                    self.search(
-                        query=candidate_query,
-                        source_list=resolved_source_list,
-                        top_k=top_k,
-                        hydrate=hydrate,
-                    ),
-                )
+        results = []
+        for source_prefix, grouped_source_list in merged_source_dict.items():
+            result = self.search(
+                query=search_query,
+                source_list=grouped_source_list,
+                top_k=top_k,
+                hydrate=hydrate,
             )
-        results = self._merge_search_result_batches(result_batches, top_k=top_k)
+            results.append((source_prefix, result))
+
+
         return {
             "success": True,
             "query": query,
             "search_query": search_query,
-            "expanded_search_queries": queries[1:],
             "query_understanding": understanding_payload,
+            "expanded_search_queries": [],
             "results": results,
         }
 
-    @staticmethod
-    def _merge_search_result_batches(
-        result_batches: List[tuple[str, List[Dict[str, Any]]]],
-        top_k: int,
-    ) -> List[Dict[str, Any]]:
-        """Merge search results from original and expanded queries."""
-        merged: Dict[str, Dict[str, Any]] = {}
-        order = 0
-        for query, results in result_batches:
-            for result in results:
-                order += 1
-                key = str(result.get("work_id") or result.get("paper_id") or order)
-                score = result.get("similarity")
-                existing = merged.get(key)
-                if existing is None or (score is not None and score > existing.get("similarity", -1)):
-                    item = dict(result)
-                    item["matched_query"] = query
-                    item["_merge_order"] = order
-                    merged[key] = item
-        values = list(merged.values())
-        values.sort(key=lambda item: (item.get("similarity") is not None, item.get("similarity", -1)), reverse=True)
-        for item in values:
-            item.pop("_merge_order", None)
-        return values[:top_k]
 
     def _run_dense_retrieval_branch(
         self,

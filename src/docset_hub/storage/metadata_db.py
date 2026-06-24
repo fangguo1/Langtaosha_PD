@@ -2590,47 +2590,31 @@ class MetadataDB:
         if not tokens:
             return []
 
-        recall_tokens = sorted(tokens, key=len, reverse=True)[:2]
-        multi_token_query = len(tokens) >= 2
         normalized_author_sql = (
             "btrim(regexp_replace("
             "lower(replace(replace(replace(author_name, ',', ' '), '.', ' '), '-', ' ')), "
             "'\\s+', ' ', 'g'"
             "))"
         )
-        conditions = []
         params: Dict[str, Any] = {
             "candidate_limit": max(limit * 20, 50),
             "raw_query": query,
             "normalized_query": normalized_query,
+            "query_tokens": tokens,
         }
-        token_match_parts = []
-        for idx, token in enumerate(recall_tokens):
-            if multi_token_query:
-                param_name = f"token_{idx}"
-                conditions.append(f"{normalized_author_sql} ~ :{param_name}")
-                params[param_name] = rf"(^| ){re.escape(token)}( |$)"
-                token_match_parts.append(
-                    f"CASE WHEN {normalized_author_sql} ~ :{param_name} THEN 1 ELSE 0 END"
-                )
-            else:
-                param_name = f"pattern_{idx}"
-                conditions.append(f"lower(author_name) ILIKE lower(:{param_name})")
-                params[param_name] = f"%{token}%"
-                token_match_parts.append(
-                    f"CASE WHEN lower(author_name) ILIKE lower(:{param_name}) THEN 1 ELSE 0 END"
-                )
-
-        where_clause = " OR ".join(conditions)
-        token_match_score_sql = " + ".join(token_match_parts) or "0"
 
         with self.engine.connect() as conn:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
             rows = conn.execute(
                 text(f"""
                     WITH authors AS (
                         SELECT
                             author->>'name' AS author_name,
-                            paa.paper_id
+                            paa.paper_id,
+                            regexp_split_to_array(
+                                regexp_replace(lower(author->>'name'), '[^a-z0-9 ]', ' ', 'g'),
+                                '\\s+'
+                            ) AS author_tokens
                         FROM paper_author_affiliation paa,
                              jsonb_array_elements(paa.authors) AS author
                         WHERE author->>'name' IS NOT NULL
