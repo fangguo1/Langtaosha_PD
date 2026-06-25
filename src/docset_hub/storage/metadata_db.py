@@ -2665,7 +2665,7 @@ class MetadataDB:
                 "score": score,
                 "paper_count": int(row[1] or 0),
             }
-            if candidate["paper_count"] <= 1:
+            if candidate["paper_count"] < 1:
                 continue
             existing = best_by_normalized.get(normalized_name)
             if (
