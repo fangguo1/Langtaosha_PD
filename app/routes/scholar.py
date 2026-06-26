@@ -265,7 +265,7 @@ def _build_query_notice(
     if corrected_query and corrected_query != normalized_query:
         return {
             "type": "query_correction",
-            "message": f"已识别到可能的拼写错误，实际搜索 query 为: {corrected_query}",
+            "message": f'您是想搜索 "{corrected_query}" 吗？',
             "action": {
                 "label": "使用原 query 检索",
                 "mode": "vector",

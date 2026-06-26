@@ -314,6 +314,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     _run_frontend_server(host=host, port=frontend_port, debug=debug, api_base_url=api_base_url)
     return 0
 
+#TO RUN BACKEND: python app/dev/main_develop.py api 
+#TO RUN FRONTEND: python app/dev/main_develop.py frontend
 
 if __name__ == "__main__":
     raise SystemExit(main())
