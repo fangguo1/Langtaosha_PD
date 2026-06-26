@@ -2532,6 +2532,8 @@ class MetadataDB:
         MVP implementation expands the JSONB authors array and matches only
         authors[].name. It intentionally avoids authors::text matching so that
         affiliations or JSON field names cannot produce false positives.
+
+        fuzzy: bool = True, if True, the author name will be fuzzy matched, otherwise it will be exact matched.
         """
         normalized = (author_name or "").strip()
         if not normalized:

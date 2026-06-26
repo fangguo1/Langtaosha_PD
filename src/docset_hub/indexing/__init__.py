@@ -58,6 +58,7 @@ from .query_semantic_plan import (
     build_query_semantic_plan,
     serialize_semantic_plan,
 )
+from .retrieval_helper import RankedResult
 from .search_highlighting import build_search_highlight
 from .span_matcher import (
     CompositeSpanMatcher,
@@ -115,6 +116,7 @@ __all__ = [
     'QueryNormalizer',
     'QueryUnderstandingResult',
     'QueryUnderstandingService',
+    'RankedResult',
     'SemanticChildSpan',
     'SemanticSpanGroup',
     'SemanticTerm',
