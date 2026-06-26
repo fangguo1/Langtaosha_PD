@@ -91,7 +91,7 @@ def test_build_query_correction_notice_uses_action_schema():
 
     assert notice == {
         "type": "query_correction",
-        "message": "已识别到可能的拼写错误，实际搜索 query 为: machine learning",
+        "message": '您是想搜索 "machine learning" 吗？',
         "action": {
             "label": "使用原 query 检索",
             "mode": "vector",

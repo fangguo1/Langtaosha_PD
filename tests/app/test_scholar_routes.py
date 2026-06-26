@@ -430,7 +430,7 @@ def test_smart_mode_surfaces_query_correction_notice_from_smart_search():
     assert indexer.search_calls[0]["query"] == "machine learning"
     assert data["notice"] == {
         "type": "query_correction",
-        "message": "已识别到可能的拼写错误，实际搜索 query 为: machine learning",
+        "message": '您是想搜索 "machine learning" 吗？',
         "action": {
             "label": "使用原 query 检索",
             "mode": "vector",

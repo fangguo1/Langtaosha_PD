@@ -4,6 +4,7 @@ from src.docset_hub.indexing.expanded_sparse_retrieval import (
     match_papers_by_expanded_sparse_plan,
 )
 from src.docset_hub.indexing.paper_indexer import PaperIndexer
+from src.docset_hub.indexing.retrieval_helper import RankedResult, hits_to_branch_results
 from src.docset_hub.indexing.query_semantic_plan import (
     QuerySemanticPlan,
     SemanticChildSpan,
@@ -345,7 +346,7 @@ def test_paper_indexer_builds_semantic_plan_with_ontology_plus_keyword_profile(m
     assert captured["metadata_db"] is indexer.metadata_db
 
 
-def test_paper_indexer_runs_expanded_sparse_retrieval_branch(monkeypatch):
+def test_expanded_sparse_search_returns_ranked_results_for_branch_conversion(monkeypatch):
     indexer = PaperIndexer.__new__(PaperIndexer)
     indexer.metadata_db = object()
     plan = _plan()
@@ -374,17 +375,21 @@ def test_paper_indexer_runs_expanded_sparse_retrieval_branch(monkeypatch):
         ],
     )
 
-    branch_results = indexer._run_expanded_sparse_retrieval_branch(
+    hits = indexer.expanded_sparse_search(
         query="adhesion protein in kidney",
         source_list=["biorxiv_daily"],
         top_k=5,
         keyword_sources=["paper_metadata"],
     )
 
+    from src.docset_hub.indexing.retrieval_helper import hits_to_branch_results
+
+    branch_results = hits_to_branch_results(hits)
+
     assert len(branch_results) == 1
     assert branch_results[0]["paper_id"] == 101
     assert branch_results[0]["work_id"] == "W101"
-    assert branch_results[0]["retrieval_debug"]["retriever"] == "expanded_sparse"
+    assert branch_results[0]["retriever"] == "expanded_sparse"
     assert branch_results[0]["retrieval_debug"]["matched_span_count"] == 2
     assert branch_results[0]["retrieval_debug"]["matched_spans"][0]["matched_scopes"] == ["parent", "child"]
 
@@ -442,10 +447,11 @@ def test_expanded_sparse_search_returns_coverage_annotated_results(monkeypatch):
         ],
     )
 
-    results = indexer.expanded_sparse_search(
+    results = indexer.search(
         query="adhesion protein in kidney",
         source_list=["langtaosha"],
         top_k=5,
+        search_type="expanded_sparse",
         hydrate=True,
     )
 
@@ -466,166 +472,36 @@ def test_search_dispatches_expanded_sparse_without_vector_db(monkeypatch):
     indexer.vector_db = None  # expanded_sparse 不依赖向量库
     captured = {}
 
-    def fake_expanded_sparse_search(**kwargs):
-        captured.update(kwargs)
-        return [{"work_id": "W1"}]
+    def fake_expanded_sparse_search(query, source_list, top_k, keyword_sources=None):
+        captured["query"] = query
+        captured["source_list"] = source_list
+        captured["top_k"] = top_k
+        captured["keyword_sources"] = keyword_sources
+        return [
+            RankedResult(
+                work_id="W1",
+                paper_id=None,
+                source_name="",
+                score=0.5,
+                text_type="",
+                retriever="expanded_sparse",
+                rank=1,
+            )
+        ]
 
     monkeypatch.setattr(indexer, "expanded_sparse_search", fake_expanded_sparse_search)
+    monkeypatch.setattr(indexer, "build_query_semantic_plan", lambda *args, **kwargs: None)
 
     results = indexer.search(
         query="renal adhesion",
         source_list=["langtaosha"],
         top_k=7,
         search_type="expanded_sparse",
+        hydrate=False,
     )
 
-    assert results == [{"work_id": "W1"}]
+    assert results[0]["work_id"] == "W1"
+    assert results[0]["similarity"] == 0.5
+    assert results[0]["coverage_ratio"] == 0.5
     assert captured["query"] == "renal adhesion"
     assert captured["top_k"] == 7
-
-
-def test_search_annotates_dense_results_with_coverage_when_requested(monkeypatch):
-    indexer = PaperIndexer.__new__(PaperIndexer)
-    indexer.default_sources = ["langtaosha"]
-    indexer.metadata_db = object()
-    plan = _plan()
-
-    class FakeSearchResult:
-        work_id = "W11"
-        paper_id = 11
-        source_name = "langtaosha"
-        score = 0.77
-        text_type = "abstract"
-        retrieval_debug = {}
-
-    class FakeVectorDB:
-        def search(self, query, source_list, top_k, search_type):
-            return [FakeSearchResult()]
-
-    indexer.vector_db = FakeVectorDB()
-    monkeypatch.setattr(
-        indexer,
-        "_resolve_source_list",
-        lambda source_list: ["langtaosha"],
-    )
-    monkeypatch.setattr(
-        indexer,
-        "_hydrate_search_results",
-        lambda search_results: [
-            {
-                "work_id": "W11",
-                "paper_id": 11,
-                "source_name": "langtaosha",
-                "similarity": 0.77,
-                "metadata": {
-                    "canonical_title": "Kidney adhesion paper",
-                    "canonical_abstract": "Renal epithelial adhesion study.",
-                    "paper_keywords": [{"keyword": "kidney"}],
-                },
-            }
-        ],
-    )
-    monkeypatch.setattr(
-        indexer,
-        "build_query_semantic_plan",
-        lambda query, source_list, keyword_sources=None: plan,
-    )
-
-    results = indexer.search(
-        query="adhesion protein in kidney",
-        search_type="dense",
-        include_coverage=True,
-    )
-
-    assert "coverage_ratio" in results[0]
-    assert "coverage" in results[0]
-    assert "matched_spans" in results[0]
-    assert results[0]["total_span_count"] == len(plan.spans)
-
-
-def test_search_annotates_dense_results_with_loose_coverage_when_requested(monkeypatch):
-    indexer = PaperIndexer.__new__(PaperIndexer)
-    indexer.default_sources = ["langtaosha"]
-    indexer.metadata_db = object()
-    plan = _plan()
-    timings_ms = {}
-
-    class FakeSearchResult:
-        work_id = "W11"
-        paper_id = 11
-        source_name = "langtaosha"
-        score = 0.77
-        text_type = "abstract"
-        retrieval_debug = {}
-
-    class FakeVectorDB:
-        def search(self, query, source_list, top_k, search_type):
-            return [FakeSearchResult()]
-
-    indexer.vector_db = FakeVectorDB()
-    monkeypatch.setattr(
-        indexer,
-        "_resolve_source_list",
-        lambda source_list: ["langtaosha"],
-    )
-    monkeypatch.setattr(
-        indexer,
-        "_hydrate_search_results",
-        lambda search_results: [
-            {
-                "work_id": "W11",
-                "paper_id": 11,
-                "source_name": "langtaosha",
-                "similarity": 0.77,
-                "metadata": {
-                    "canonical_title": "Kidney adhesion paper",
-                    "canonical_abstract": "Renal epithelial adhesion study.",
-                    "paper_keywords": [{"keyword": "kidney"}],
-                },
-            }
-        ],
-    )
-    monkeypatch.setattr(
-        indexer,
-        "build_query_semantic_plan",
-        lambda query, source_list, keyword_sources=None: plan,
-    )
-
-    results = indexer.search(
-        query="adhesion protein in kidney",
-        search_type="dense",
-        include_loose_coverage=True,
-        timings_ms=timings_ms,
-    )
-
-    assert "loose_coverage_ratio" in results[0]
-    assert "loose_coverage" in results[0]
-    assert "loose_matched_spans" in results[0]
-    assert results[0]["loose_total_span_count"] == len(plan.spans)
-    assert "search" in timings_ms
-    assert "loose_coverage" in timings_ms
-
-
-def test_search_skips_coverage_annotation_by_default(monkeypatch):
-    indexer = PaperIndexer.__new__(PaperIndexer)
-    indexer.default_sources = ["langtaosha"]
-    indexer.metadata_db = object()
-
-    class FakeVectorDB:
-        def search(self, query, source_list, top_k, search_type):
-            return []
-
-    indexer.vector_db = FakeVectorDB()
-    monkeypatch.setattr(indexer, "_resolve_source_list", lambda source_list: ["langtaosha"])
-    monkeypatch.setattr(indexer, "_hydrate_search_results", lambda search_results: [])
-
-    called = {"plan": False}
-
-    def fail_plan(**kwargs):
-        called["plan"] = True
-
-    monkeypatch.setattr(indexer, "build_query_semantic_plan", fail_plan)
-
-    indexer.search(query="renal adhesion", search_type="dense")
-
-    assert called["plan"] is False

@@ -2,9 +2,16 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from flask import Flask
 
 from app.routes.paper import register_paper_indexer_api_routes
+from src.docset_hub.indexing.query_semantic_plan import (
+    QuerySemanticPlan,
+    SemanticSpanGroup,
+    SemanticTerm,
+    SemanticTermBucket,
+)
 
 
 def _json_success(app):
@@ -35,13 +42,73 @@ def _json_error(app):
     return api_error
 
 
+def _fake_plan():
+    return QuerySemanticPlan(
+        original_query="renal",
+        normalized_query="renal",
+        spans=[
+            SemanticSpanGroup(
+                span_id="s1",
+                surface_text="renal",
+                normalized_text="renal",
+                start=0,
+                end=5,
+                canonical_text="Renal",
+                own_terms=SemanticTermBucket(
+                    tier1=[SemanticTerm(text="renal", match_mode="exact")],
+                    tier2=[],
+                ),
+                children=[],
+                evidence=[],
+            )
+        ],
+    )
+
+
+@pytest.fixture(autouse=True)
+def stub_route_coverage_annotators(monkeypatch):
+    def annotate_strict(results, *, plan):
+        for item in results:
+            item["coverage_ratio"] = 0.5
+            item["coverage"] = {"matched_span_count": 1, "total_span_count": 2}
+            item["matched_spans"] = []
+
+    def annotate_loose(results, *, plan):
+        for item in results:
+            item["loose_coverage_ratio"] = 0.3
+            item["loose_coverage"] = {"matched_span_count": 1, "total_span_count": 2}
+            item["loose_matched_spans"] = []
+
+    monkeypatch.setattr("app.routes.paper.annotate_strict_coverage", annotate_strict)
+    monkeypatch.setattr("app.routes.paper.annotate_loose_coverage", annotate_loose)
+
+
 class FakeIndexer:
     def __init__(self):
         self.captured = {}
+        self.hybrid_captured = {}
+        self.default_sources = ["langtaosha"]
 
     def search(self, **kwargs):
         self.captured.update(kwargs)
-        return [{"work_id": "W1", "similarity": 0.9}]
+        return [
+            {
+                "work_id": "W1",
+                "similarity": 0.9,
+                "metadata": {
+                    "canonical_title": "Kidney adhesion paper",
+                    "canonical_abstract": "Renal epithelial adhesion study.",
+                    "paper_keywords": [{"keyword": "kidney"}],
+                },
+            }
+        ]
+
+    def hybrid_retrieval_search(self, **kwargs):
+        self.hybrid_captured.update(kwargs)
+        return [{"work_id": "W1", "similarity": 0.8}]
+
+    def build_query_semantic_plan(self, query, source_list, keyword_sources=None):
+        return _fake_plan()
 
 
 def test_api_search_accepts_expanded_sparse_type():
@@ -65,12 +132,14 @@ def test_api_search_passes_keyword_sources_and_include_coverage():
 
     response = app.test_client().get(
         "/api/search?query=renal&search_type=dense"
-        "&keyword_sources=paper_metadata,mesh&include_coverage=1"
+        "&keyword_sources=paper_metadata,mesh&include_coverage=1&hydrate=1"
     )
+    payload = response.get_json()
 
     assert response.status_code == 200
     assert indexer.captured["keyword_sources"] == ["paper_metadata", "mesh"]
-    assert indexer.captured["include_coverage"] is True
+    assert "include_coverage" not in indexer.captured
+    assert "coverage_ratio" in payload["results"][0]
 
 
 def test_api_search_defaults_include_coverage_false():
@@ -78,11 +147,13 @@ def test_api_search_defaults_include_coverage_false():
     indexer = FakeIndexer()
     register_paper_indexer_api_routes(app, indexer, _json_success(app), _json_error(app))
 
-    app.test_client().get("/api/search?query=renal")
+    response = app.test_client().get("/api/search?query=renal&hydrate=1")
+    payload = response.get_json()
 
-    assert indexer.captured["include_coverage"] is False
-    assert indexer.captured["include_loose_coverage"] is False
+    assert response.status_code == 200
     assert indexer.captured["keyword_sources"] is None
+    assert "coverage_ratio" not in payload["results"][0]
+    assert "loose_coverage_ratio" not in payload["results"][0]
 
 
 def test_api_search_passes_include_loose_coverage_and_returns_timings():
@@ -91,12 +162,41 @@ def test_api_search_passes_include_loose_coverage_and_returns_timings():
     register_paper_indexer_api_routes(app, indexer, _json_success(app), _json_error(app))
 
     response = app.test_client().get(
-        "/api/search?query=renal&search_type=dense&include_loose_coverage=1"
+        "/api/search?query=renal&search_type=dense&include_loose_coverage=1&hydrate=1"
     )
     payload = response.get_json()
 
     assert response.status_code == 200
-    assert indexer.captured["include_loose_coverage"] is True
-    assert isinstance(indexer.captured["timings_ms"], dict)
+    assert "include_loose_coverage" not in indexer.captured
+    assert "loose_coverage_ratio" in payload["results"][0]
+    assert isinstance(payload["timings_ms"], dict)
     assert "elapsed_ms" in payload
     assert "timings_ms" in payload
+    assert "search" in payload["timings_ms"]
+    assert "loose_coverage" in payload["timings_ms"]
+
+
+def test_api_search_routes_hybrid_retrieval_to_hybrid_method():
+    app = Flask(__name__)
+    indexer = FakeIndexer()
+    register_paper_indexer_api_routes(app, indexer, _json_success(app), _json_error(app))
+
+    response = app.test_client().get(
+        "/api/search?query=renal&search_type=hybrid_retrieval&top_k=5"
+    )
+
+    assert response.status_code == 200
+    assert indexer.captured == {}
+    assert indexer.hybrid_captured["top_k"] == 5
+
+
+def test_api_search_routes_hybrid_alias_to_hybrid_method():
+    app = Flask(__name__)
+    indexer = FakeIndexer()
+    register_paper_indexer_api_routes(app, indexer, _json_success(app), _json_error(app))
+
+    response = app.test_client().get("/api/search?query=renal&search_type=hybrid&top_k=3")
+
+    assert response.status_code == 200
+    assert indexer.captured == {}
+    assert indexer.hybrid_captured["top_k"] == 3
