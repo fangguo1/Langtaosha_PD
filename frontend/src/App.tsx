@@ -3,7 +3,15 @@ import { Search, RefreshCw } from "lucide-react";
 import { searchPapers } from "./api/search";
 import { getDailyNew } from "./api/dailyNew";
 import { API_BASE_LABEL, ApiError } from "./api/client";
-import type { DailyNewPaper, SearchMode, SearchResult } from "./types";
+import type {
+  DailyNewPaper,
+  SearchMeta,
+  SearchMode,
+  SearchNotice,
+  SearchNoticeAction,
+  SearchResponse,
+  SearchResult,
+} from "./types";
 
 const SOURCE_OPTIONS = [
   { label: "Langtaosha", value: "langtaosha" },
@@ -54,6 +62,18 @@ function ResultItem({ result, rank }: { result: SearchResult; rank: number }) {
   );
 }
 
+function normalizeResults(results: SearchResponse["results"] | undefined): SearchResult[] {
+  const flattened: SearchResult[] = [];
+  for (const entry of results || []) {
+    if (Array.isArray(entry) && Array.isArray(entry[1])) {
+      flattened.push(...entry[1]);
+      continue;
+    }
+    flattened.push(entry as SearchResult);
+  }
+  return flattened;
+}
+
 function DailyNewList({ items }: { items: DailyNewPaper[] }) {
   return (
     <section className="side-panel" aria-labelledby="daily-new-heading">
@@ -96,6 +116,8 @@ export default function App() {
   const [isLoadingDailyNew, setIsLoadingDailyNew] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastRequestId, setLastRequestId] = useState<string | null>(null);
+  const [notice, setNotice] = useState<SearchNotice | null>(null);
+  const [resultMeta, setResultMeta] = useState<SearchMeta | null>(null);
 
   const trimmedQuery = useMemo(() => query.trim(), [query]);
 
@@ -125,24 +147,37 @@ export default function App() {
     };
   }, []);
 
-  async function handleSearch(event?: FormEvent) {
-    event?.preventDefault();
-    if (!trimmedQuery) {
+  async function runSearch(next: {
+    query?: string;
+    mode?: SearchMode;
+    topK?: number;
+    sourceList?: string;
+    correctionDecision?: "accept" | "reject";
+  } = {}) {
+    const nextQuery = (next.query ?? trimmedQuery).trim();
+    if (!nextQuery) {
       setError("请输入搜索内容。");
       return;
     }
+
     setIsSearching(true);
     setError(null);
     setLastRequestId(null);
+    setNotice(null);
+    setResultMeta(null);
     try {
       const data = await searchPapers({
-        query: trimmedQuery,
-        mode,
-        topK,
-        sourceList,
+        query: nextQuery,
+        mode: next.mode ?? mode,
+        topK: next.topK ?? topK,
+        offset: 0,
+        sourceList: next.sourceList ?? sourceList,
+        correctionDecision: next.correctionDecision,
       });
-      setResults(data.results || []);
-      setLastRequestId(data.request_id || null);
+      setResults(normalizeResults(data.results));
+      setNotice(data.notice || null);
+      setResultMeta(data.meta || null);
+      setLastRequestId(data.meta?.request_id || data.request_id || null);
     } catch (err) {
       if (err instanceof ApiError) {
         setLastRequestId(err.requestId || null);
@@ -151,6 +186,25 @@ export default function App() {
     } finally {
       setIsSearching(false);
     }
+  }
+
+  async function handleSearch(event?: FormEvent) {
+    event?.preventDefault();
+    await runSearch();
+  }
+
+  async function handleNoticeAction(action: SearchNoticeAction) {
+    const correctionDecision =
+      action.correction_decision === "accept" || action.correction_decision === "reject"
+        ? action.correction_decision
+        : undefined;
+    setQuery(action.query);
+    setMode(action.mode);
+    await runSearch({
+      query: action.query,
+      mode: action.mode,
+      correctionDecision,
+    });
   }
 
   return (
@@ -225,11 +279,44 @@ export default function App() {
           </form>
 
           {error ? <div className="alert">{error}</div> : null}
+          {notice ? (
+            <div className="alert">
+              <div>{notice.message}</div>
+              {notice.actions?.length ? (
+                <div className="notice-actions">
+                  {notice.actions.map((action) => (
+                    <button
+                      key={`${action.label}-${action.correction_decision || "none"}`}
+                      className="notice-button"
+                      type="button"
+                      onClick={() => void handleNoticeAction(action)}
+                      disabled={isSearching}
+                    >
+                      {action.label}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              {notice.action ? (
+                <div className="notice-actions">
+                  <button
+                    className="notice-button"
+                    type="button"
+                    onClick={() => void handleNoticeAction(notice.action as SearchNoticeAction)}
+                    disabled={isSearching}
+                  >
+                    {notice.action.label}
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           {lastRequestId ? <div className="request-id">request_id: {lastRequestId}</div> : null}
 
           <div className="result-summary">
-            <strong>{results.length}</strong>
+            <strong>{resultMeta?.count ?? results.length}</strong>
             <span>results</span>
+            {typeof resultMeta?.elapsed_ms === "number" ? <span>{resultMeta.elapsed_ms} ms</span> : null}
           </div>
 
           <div className="result-list">

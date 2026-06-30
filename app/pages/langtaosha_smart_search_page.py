@@ -3,7 +3,7 @@ from __future__ import annotations
 from flask import render_template, request
 
 
-DEFAULT_TOP_K = 10
+DEFAULT_TOP_K = 100
 DEFAULT_CLIENT_SURFACE = "search_use_page"
 
 
