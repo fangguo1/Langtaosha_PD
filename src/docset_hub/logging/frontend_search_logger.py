@@ -13,6 +13,10 @@ from config.config_loader import get_db_engine, get_frontend_search_logging_conf
 
 
 logger = logging.getLogger(__name__)
+event_logger = logging.getLogger(f"{__name__}.event")
+event_logger.propagate = False
+if not event_logger.handlers:
+    event_logger.addHandler(logging.NullHandler())
 
 FRONTEND_SEARCH_LOG_EVENT = "frontend_scholar_search"
 DEFAULT_CLIENT_SURFACE = "unknown"
@@ -73,17 +77,40 @@ def _compute_frontend_search_status(response_body: Dict[str, Any], status_code: 
 
 
 def _truncate_frontend_search_results(
-    results: List[Dict[str, Any]],
+    results: List[Any],
     max_results: int,
-) -> Tuple[List[Dict[str, Any]], bool, int, int]:
+) -> Tuple[List[Any], bool, int, int]:
     full_count = len(results)
-    logged_results = [dict(item) if isinstance(item, dict) else item for item in results[:max_results]]
+    logged_results = [_compact_logged_result_item(item) for item in results[:max_results]]
     return (
         logged_results,
         full_count > max_results,
         len(logged_results),
         full_count,
     )
+
+
+def _compact_logged_result_item(item: Any) -> Any:
+    if isinstance(item, dict):
+        return _compact_logged_paper(item)
+    if (
+        isinstance(item, (list, tuple))
+        and len(item) == 2
+        and isinstance(item[0], str)
+        and isinstance(item[1], list)
+    ):
+        return (
+            item[0],
+            [_compact_logged_paper(entry) for entry in item[1] if isinstance(entry, dict)],
+        )
+    return item
+
+
+def _compact_logged_paper(item: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "work_id": item.get("work_id"),
+        "title": item.get("title") or ((item.get("metadata") or {}).get("canonical_title")),
+    }
 
 
 def build_frontend_search_log_payload(
@@ -106,6 +133,7 @@ def build_frontend_search_log_payload(
         max_results=max_results,
     )
     response_payload["results"] = logged_results
+    _compact_nested_smart_search_payload(response_payload, max_results=max_results)
 
     request_id = (
         ((response_payload.get("meta") or {}).get("request_id") if isinstance(response_payload.get("meta"), dict) else None)
@@ -129,6 +157,22 @@ def build_frontend_search_log_payload(
         "results_full_count": results_full_count,
         "status": _compute_frontend_search_status(response_payload, status_code),
     }
+
+
+def _compact_nested_smart_search_payload(
+    response_payload: Dict[str, Any],
+    *,
+    max_results: int,
+) -> None:
+    smart_payload = response_payload.get("smart_search")
+    if not isinstance(smart_payload, dict):
+        return
+    smart_results = list(smart_payload.get("results") or [])
+    logged_results, _, _, _ = _truncate_frontend_search_results(
+        smart_results,
+        max_results=max_results,
+    )
+    smart_payload["results"] = logged_results
 
 
 def _build_frontend_search_summary_params(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -227,7 +271,7 @@ def insert_frontend_search_request_log(payload: Dict[str, Any]) -> int:
 
 def emit_frontend_search_log(payload: Dict[str, Any], now: Optional[datetime] = None) -> None:
     config = get_frontend_search_logging_config()
-    logger.info("%s %s", FRONTEND_SEARCH_LOG_EVENT, _json_payload(payload))
+    event_logger.info("%s %s", FRONTEND_SEARCH_LOG_EVENT, _json_payload(payload))
 
     local_jsonl_config = config.get("local_jsonl") or {}
     if not local_jsonl_config.get("enabled", True):

@@ -131,6 +131,20 @@ class FakeIndexer:
                     "canonical_abstract": "Abstract A",
                     "authors": [{"name": "Alice"}, {"name": "Bob"}],
                     "online_at": "2026-04-13T00:00:00",
+                    "paper_keywords": [
+                        {
+                            "keyword_type": "concept",
+                            "keyword": "machine learning",
+                            "weight": 0.9,
+                            "source": "generated",
+                        },
+                        {
+                            "keyword_type": "method",
+                            "keyword": "random forest",
+                            "weight": 0.7,
+                            "source": "generated",
+                        },
+                    ],
                     "sources": [
                         {
                             "source_name": source_name,
@@ -148,13 +162,14 @@ class FakeIndexer:
             for source_name in source_list
         ]
 
-    def smart_search(self, *, query, source_list, top_k, hydrate):
+    def smart_search(self, *, query, source_list, top_k, hydrate, correction_decision=None):
         self.smart_search_calls.append(
             {
                 "query": query,
                 "source_list": source_list,
                 "top_k": top_k,
                 "hydrate": hydrate,
+                "correction_decision": correction_decision,
             }
         )
         understanding = self.query_understanding.analyze(query).to_dict()
@@ -193,7 +208,25 @@ class FakeIndexer:
                 "results": [],
             }
 
-        search_query = understanding.get("corrected_query") or understanding.get("normalized_query") or query
+        corrected_query = understanding.get("corrected_query")
+        normalized_query = understanding.get("normalized_query") or query
+        if corrected_query and corrected_query != normalized_query and correction_decision is None:
+            understanding["correction_status"] = "pending"
+            return {
+                "success": True,
+                "query": query,
+                "search_query": None,
+                "expanded_search_queries": [],
+                "query_understanding": understanding,
+                "results": [],
+            }
+
+        if corrected_query and corrected_query != normalized_query:
+            understanding["correction_status"] = "accepted" if correction_decision == "accept" else "rejected"
+            search_query = corrected_query if correction_decision == "accept" else normalized_query
+        else:
+            understanding["correction_status"] = "not_needed"
+            search_query = normalized_query
         return {
             "success": True,
             "query": query,
@@ -259,6 +292,7 @@ def test_scholar_search_returns_grouped_results_shape_for_smart_mode():
         "corrected_query": None,
         "matched_author": None,
         "suggested_author": None,
+        "correction_status": "not_needed",
     }
     assert data["search_query"] == "Nav1.7"
     assert data["search_mode"] == "smart"
@@ -292,7 +326,22 @@ def test_scholar_search_returns_grouped_results_shape_for_smart_mode():
         "doi",
         "ranking_score",
         "match_reasons",
+        "keywords",
     }
+    assert data["results"][0][1][0]["keywords"] == [
+        {
+            "keyword_type": "concept",
+            "keyword": "machine learning",
+            "weight": 0.9,
+            "source": "generated",
+        },
+        {
+            "keyword_type": "method",
+            "keyword": "random forest",
+            "weight": 0.7,
+            "source": "generated",
+        },
+    ]
 
 
 def test_vector_mode_does_not_attach_smart_search_payload():
@@ -308,7 +357,21 @@ def test_vector_mode_does_not_attach_smart_search_payload():
     assert data["smart_search"] is None
 
 
-def test_scholar_search_prints_backend_debug_summary_for_smart_requests(capsys):
+def test_scholar_search_does_not_print_backend_debug_summary_by_default(capsys):
+    client = _client()
+
+    response = client.get(
+        "/api/scholar/search?query=niang+yan&mode=smart&source_list=langtaosha"
+    )
+
+    assert response.status_code == 200
+    captured = capsys.readouterr()
+    assert "SMART SEARCH DEBUG" not in captured.out
+    assert "SMART SEARCH RESULTS" not in captured.out
+
+
+def test_scholar_search_prints_backend_debug_summary_when_enabled(capsys, monkeypatch):
+    monkeypatch.setenv("SMART_SEARCH_DEBUG", "1")
     client = _client()
 
     response = client.get(
@@ -424,22 +487,77 @@ def test_smart_mode_surfaces_query_correction_notice_from_smart_search():
     data = response.get_json()
 
     assert response.status_code == 200
-    assert data["query"]["executed"] == "machine learning"
+    assert data["query"]["executed"] is None
     assert data["query"]["corrected_query"] == "machine learning"
-    assert data["search_query"] == "machine learning"
-    assert indexer.search_calls[0]["query"] == "machine learning"
+    assert data["query"]["correction_status"] == "pending"
+    assert data["search_query"] is None
+    assert indexer.search_calls == []
+    assert data["meta"]["count"] == 0
     assert data["notice"] == {
         "type": "query_correction",
         "message": '您是想搜索 "machine learning" 吗？',
-        "action": {
-            "label": "使用原 query 检索",
-            "mode": "vector",
-            "query": "machi learningn",
-        },
-        "fallback_mode": "vector",
+        "actions": [
+            {
+                "label": '搜索 "machine learning"',
+                "mode": "smart",
+                "query": "machi learningn",
+                "correction_decision": "accept",
+            },
+            {
+                "label": "继续搜索原 query",
+                "mode": "smart",
+                "query": "machi learningn",
+                "correction_decision": "reject",
+            },
+        ],
+        "fallback_mode": "smart",
         "fallback_query": "machi learningn",
-        "action_label": "使用原 query 检索",
+        "action_label": '搜索 "machine learning"',
     }
+
+
+def test_smart_mode_accepts_query_correction_and_runs_search():
+    indexer = FakeIndexer(
+        FakeUnderstandingResult(
+            normalized_query="machi learningn",
+            corrected_query="machine learning",
+        )
+    )
+    client = _client(indexer=indexer)
+
+    response = client.get(
+        "/api/scholar/search?query=machi%20learningn&mode=smart&source_list=langtaosha&correction_decision=accept"
+    )
+    data = response.get_json()
+
+    assert response.status_code == 200
+    assert data["query"]["executed"] == "machine learning"
+    assert data["query"]["correction_status"] == "accepted"
+    assert data["search_query"] == "machine learning"
+    assert indexer.search_calls[0]["query"] == "machine learning"
+    assert data["notice"] is None
+
+
+def test_smart_mode_rejects_query_correction_and_runs_original_query():
+    indexer = FakeIndexer(
+        FakeUnderstandingResult(
+            normalized_query="machi learningn",
+            corrected_query="machine learning",
+        )
+    )
+    client = _client(indexer=indexer)
+
+    response = client.get(
+        "/api/scholar/search?query=machi%20learningn&mode=smart&source_list=langtaosha&correction_decision=reject"
+    )
+    data = response.get_json()
+
+    assert response.status_code == 200
+    assert data["query"]["executed"] == "machi learningn"
+    assert data["query"]["correction_status"] == "rejected"
+    assert data["search_query"] == "machi learningn"
+    assert indexer.search_calls[0]["query"] == "machi learningn"
+    assert data["notice"] is None
 
 
 def test_smart_mode_surfaces_author_suggestion_notice():
@@ -520,13 +638,14 @@ def test_smart_mode_uses_metadata_author_shortcut_when_smart_search_routes_to_au
 def test_scholar_search_flattens_grouped_smart_search_results_and_preserves_groups():
     indexer = FakeIndexer()
 
-    def grouped_smart_search(*, query, source_list, top_k, hydrate):
+    def grouped_smart_search(*, query, source_list, top_k, hydrate, correction_decision=None):
         indexer.smart_search_calls.append(
             {
                 "query": query,
                 "source_list": source_list,
                 "top_k": top_k,
                 "hydrate": hydrate,
+                "correction_decision": correction_decision,
             }
         )
         return {
@@ -643,5 +762,6 @@ def test_scholar_search_records_optional_frontend_search_log():
         "mode": "smart",
         "top_k": "5",
         "source_list": None,
+        "correction_decision": None,
     }
     assert captured["response_body"]["meta"]["request_id"] == "req-route-001"

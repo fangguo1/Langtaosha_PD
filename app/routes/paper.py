@@ -10,7 +10,14 @@ from docset_hub.indexing.retrieval_helper import (
     annotate_strict_coverage,
 )
 
-SUPPORTED_SEARCH_TYPES = ("dense", "sparse", "hybrid", "hybrid_retrieval", "expanded_sparse")
+SUPPORTED_SEARCH_TYPES = (
+    "dense",
+    "sparse",
+    "hybrid",
+    "hybrid_retrieval",
+    "hybrid_retreival",
+    "expanded_sparse",
+)
 HYBRID_SEARCH_TYPES = {"hybrid", "hybrid_retrieval"}
 
 
@@ -87,10 +94,13 @@ def register_paper_indexer_api_routes(
     indexer: Any,
     api_success: Callable[..., Any],
     api_error: Callable[..., Any],
+    *,
+    include_health_route: bool = True,
 ) -> None:
-    @app.route("/api/health", methods=["GET"])
-    def api_health():
-        return api_success({"status": "ok", "service": "paper_indexer"})
+    if include_health_route:
+        @app.route("/api/health", methods=["GET"])
+        def api_health():
+            return api_success({"status": "ok", "service": "paper_indexer"})
 
     @app.route("/api/search", methods=["GET"])
     def api_search():
@@ -136,7 +146,7 @@ def register_paper_indexer_api_routes(
                 )
             timings_ms["search"] = round((time.perf_counter() - search_started) * 1000.0, 3)
 
-            if search_type in {"dense", "sparse"} and hydrate:
+            if search_type in {"dense", "sparse","expanded_sparse"} and hydrate:
                 _annotate_search_results_with_coverage(
                     indexer=indexer,
                     query=query,
@@ -163,3 +173,37 @@ def register_paper_indexer_api_routes(
             return api_error(str(exc), status_code=400, code="INVALID_REQUEST")
         except Exception as exc:  # noqa: BLE001
             return api_error(str(exc), status_code=500, code="SEARCH_FAILED")
+
+    @app.route("/api/retrieve_papers_by_time_interval", methods=["POST"])
+    def api_retrieve_papers_by_time_interval():
+        try:
+            payload = request.get_json(silent=True) or {}
+            date_from = (payload.get("date_from") or "").strip()
+            date_to = (payload.get("date_to") or "").strip()
+            source_name = (payload.get("source_name") or "langtaosha").strip() or "langtaosha"
+
+            if not date_from or not date_to:
+                return api_error(
+                    "date_from 和 date_to 不能为空",
+                    status_code=400,
+                    code="INVALID_REQUEST",
+                )
+
+            papers = indexer.retrieve_papers_by_time_interval(
+                date_from=date_from,
+                date_to=date_to,
+                source_name=source_name,
+            )
+
+            return api_success(
+                {
+                    "date_from": date_from,
+                    "date_to": date_to,
+                    "source_name": source_name,
+                    "papers": papers,
+                }
+            )
+        except ValueError as exc:
+            return api_error(str(exc), status_code=400, code="INVALID_REQUEST")
+        except Exception as exc:  # noqa: BLE001
+            return api_error(str(exc), status_code=500, code="RETRIEVE_PAPERS_FAILED")

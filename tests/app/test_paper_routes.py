@@ -87,6 +87,7 @@ class FakeIndexer:
     def __init__(self):
         self.captured = {}
         self.hybrid_captured = {}
+        self.retrieve_captured = {}
         self.default_sources = ["langtaosha"]
 
     def search(self, **kwargs):
@@ -109,6 +110,17 @@ class FakeIndexer:
 
     def build_query_semantic_plan(self, query, source_list, keyword_sources=None):
         return _fake_plan()
+
+    def retrieve_papers_by_time_interval(self, date_from, date_to, source_name="langtaosha"):
+        self.retrieve_captured = {
+            "date_from": date_from,
+            "date_to": date_to,
+            "source_name": source_name,
+        }
+        return [
+            {"paper_id": 1, "work_id": "W1"},
+            {"paper_id": 2, "work_id": "W2"},
+        ]
 
 
 def test_api_search_accepts_expanded_sparse_type():
@@ -200,3 +212,110 @@ def test_api_search_routes_hybrid_alias_to_hybrid_method():
     assert response.status_code == 200
     assert indexer.captured == {}
     assert indexer.hybrid_captured["top_k"] == 3
+
+
+def test_api_search_accepts_hybrid_retreival_via_indexer_search():
+    app = Flask(__name__)
+    indexer = FakeIndexer()
+    register_paper_indexer_api_routes(app, indexer, _json_success(app), _json_error(app))
+
+    response = app.test_client().get(
+        "/api/search?query=renal&search_type=hybrid_retreival&top_k=4"
+    )
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    assert payload["success"] is True
+    assert payload["search_type"] == "hybrid_retreival"
+    assert indexer.hybrid_captured == {}
+    assert indexer.captured["search_type"] == "hybrid_retreival"
+    assert indexer.captured["top_k"] == 4
+
+
+def test_register_paper_routes_can_skip_health_registration():
+    app = Flask(__name__)
+    indexer = FakeIndexer()
+
+    @app.route("/api/health", methods=["GET"])
+    def custom_health():
+        return _json_success(app)({"status": "ok", "service": "custom"})
+
+    register_paper_indexer_api_routes(
+        app,
+        indexer,
+        _json_success(app),
+        _json_error(app),
+        include_health_route=False,
+    )
+
+    response = app.test_client().get("/api/health")
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    assert payload["service"] == "custom"
+
+
+def test_api_retrieve_papers_by_time_interval_accepts_json_body():
+    app = Flask(__name__)
+    indexer = FakeIndexer()
+    register_paper_indexer_api_routes(app, indexer, _json_success(app), _json_error(app))
+
+    response = app.test_client().post(
+        "/api/retrieve_papers_by_time_interval",
+        json={"date_from": "2026-04-01", "date_to": "2026-04-10"},
+    )
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    assert payload["success"] is True
+    assert payload["date_from"] == "2026-04-01"
+    assert payload["date_to"] == "2026-04-10"
+    assert payload["papers"] == [
+        {"paper_id": 1, "work_id": "W1"},
+        {"paper_id": 2, "work_id": "W2"},
+    ]
+    assert indexer.retrieve_captured == {
+        "date_from": "2026-04-01",
+        "date_to": "2026-04-10",
+        "source_name": "langtaosha",
+    }
+
+
+def test_api_retrieve_papers_by_time_interval_requires_both_dates():
+    app = Flask(__name__)
+    indexer = FakeIndexer()
+    register_paper_indexer_api_routes(app, indexer, _json_success(app), _json_error(app))
+
+    response = app.test_client().post(
+        "/api/retrieve_papers_by_time_interval",
+        json={"date_from": "2026-04-01"},
+    )
+    payload = response.get_json()
+
+    assert response.status_code == 400
+    assert payload["success"] is False
+    assert payload["error_code"] == "INVALID_REQUEST"
+
+
+def test_api_retrieve_papers_by_time_interval_accepts_explicit_source_name():
+    app = Flask(__name__)
+    indexer = FakeIndexer()
+    register_paper_indexer_api_routes(app, indexer, _json_success(app), _json_error(app))
+
+    response = app.test_client().post(
+        "/api/retrieve_papers_by_time_interval",
+        json={
+            "date_from": "2026-04-01",
+            "date_to": "2026-04-10",
+            "source_name": "biorxiv_history",
+        },
+    )
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    assert payload["success"] is True
+    assert indexer.retrieve_captured == {
+        "date_from": "2026-04-01",
+        "date_to": "2026-04-10",
+        "source_name": "biorxiv_history",
+    }

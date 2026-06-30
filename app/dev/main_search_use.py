@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import sys
 import threading
@@ -8,7 +9,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
-from flask import Flask, g, jsonify, request
+from flask import Flask, g, jsonify, request, send_file
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -19,6 +20,7 @@ if str(ROOT / "src") not in sys.path:
 
 from app.dev.develop_api_proxy import register_develop_api_proxy
 from app.pages.langtaosha_smart_search_page import register_langtaosha_smart_search_page_routes
+from app.routes.paper import register_paper_indexer_api_routes
 from app.routes.scholar import register_scholar_search_api_routes
 from config.config_loader import init_config
 from src.docset_hub.indexing import PaperIndexer
@@ -34,6 +36,19 @@ DEFAULT_ALLOWED_ORIGINS = (
     f"http://localhost:{DEFAULT_FRONTEND_PORT}",
     f"http://127.0.0.1:{DEFAULT_FRONTEND_PORT}",
 )
+
+
+def _configure_logging() -> None:
+    level_name = os.environ.get("SEARCH_USE_LOG_LEVEL", "INFO").strip().upper() or "INFO"
+    level = getattr(logging, level_name, logging.INFO)
+    root_logger = logging.getLogger()
+    if not root_logger.handlers:
+        logging.basicConfig(
+            level=level,
+            format="%(levelname)s:%(name)s:%(message)s",
+        )
+        return
+    root_logger.setLevel(level)
 
 
 def _resolve_config_path(config_path: Optional[str | Path] = None) -> Path:
@@ -119,6 +134,18 @@ def create_search_use_frontend_app(*, api_base_url: Optional[str] = None) -> Fla
         root_path=str(ROOT),
         template_folder="templates",
     )
+
+    @app.route("/lib/ui-library/src/resources/ltslogo_new.png")
+    def langtaosha_logo_asset():
+        return send_file(ROOT / "app" / "UI_design" / "ltslogo_new.png", mimetype="image/png")
+
+    @app.route("/lib/ui-library/src/resources/favicon_en.png")
+    def langtaosha_favicon_asset():
+        return send_file(
+            ROOT / "lib" / "ui-library" / "src" / "resources" / "favicon_en.png",
+            mimetype="image/png",
+        )
+
     register_langtaosha_smart_search_page_routes(app)
     register_develop_api_proxy(
         app,
@@ -176,7 +203,15 @@ def create_search_use_api_app(
 
     @app.route("/api/health", methods=["GET"])
     def api_health():
-        return _api_success({"status": "ok", "service": "scholar_search_api"})
+        return _api_success({"status": "ok", "service": "search_use_api"})
+
+    register_paper_indexer_api_routes(
+        app,
+        resolved_indexer,
+        _api_success,
+        _api_error,
+        include_health_route=False,
+    )
 
     register_scholar_search_api_routes(
         app,
@@ -206,6 +241,7 @@ def _run_frontend_server(*, host: str, port: int, debug: bool, api_base_url: str
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    _configure_logging()
     parser = argparse.ArgumentParser(description="Langtaosha smart search use server")
     parser.add_argument(
         "mode",

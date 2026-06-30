@@ -57,13 +57,14 @@ class FakeIndexer:
             }
         ]
 
-    def smart_search(self, *, query, source_list, top_k, hydrate):
+    def smart_search(self, *, query, source_list, top_k, hydrate, correction_decision=None):
         self.smart_search_calls.append(
             {
                 "query": query,
                 "source_list": source_list,
                 "top_k": top_k,
                 "hydrate": hydrate,
+                "correction_decision": correction_decision,
             }
         )
         return {

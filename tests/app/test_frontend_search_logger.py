@@ -1,11 +1,17 @@
 from datetime import datetime, timezone
 from pathlib import Path
 import json
+import logging
 from importlib import reload
 
 from src.docset_hub.logging.frontend_search_logger import build_frontend_search_jsonl_path
 import src.docset_hub.logging.frontend_search_logger as frontend_search_logger
 from config.config_loader import _reset_config, get_frontend_search_logging_config, init_config
+
+
+def test_frontend_search_event_logger_is_silent_by_default():
+    assert frontend_search_logger.event_logger.propagate is False
+    assert any(isinstance(handler, logging.NullHandler) for handler in frontend_search_logger.event_logger.handlers)
 
 
 def test_build_frontend_search_jsonl_path_partitions_by_year():
@@ -75,6 +81,113 @@ def test_build_frontend_search_log_payload_truncates_results_and_preserves_respo
     assert payload["results_truncated"] is True
     assert payload["results_logged_count"] == 10
     assert payload["results_full_count"] == 12
+
+
+def test_build_frontend_search_log_payload_keeps_only_work_id_and_title_for_grouped_results(monkeypatch):
+    monkeypatch.setattr(
+        frontend_search_logger,
+        "get_frontend_search_logging_config",
+        lambda: {
+            "enabled": True,
+            "local_jsonl": {"enabled": True, "root_dir": "local_data/search_api_logs", "partition_by_year": True, "filename_pattern": "{date}_frontend_search_requests.jsonl"},
+            "db_summary": {"enabled": True},
+            "response_log": {"max_results": 10},
+        },
+    )
+
+    payload = frontend_search_logger.build_frontend_search_log_payload(
+        request_args={
+            "query": "machine learning",
+            "mode": "smart",
+            "source_list": None,
+            "top_k": 10,
+        },
+        response_body={
+            "success": True,
+            "query": {"input": "machine learning", "executed": "machine learning", "mode": "smart", "route": "vector"},
+            "meta": {
+                "count": 4,
+                "elapsed_ms": 12,
+                "request_id": "req-grouped-001",
+            },
+            "smart_search": {
+                "success": True,
+                "query": "machine learning",
+                "search_query": "machine learning",
+                "query_understanding": {"route": "vector"},
+                "results": [
+                    (
+                        "langtaosha",
+                        [
+                            {"work_id": "W1", "title": "Paper 1", "abstract": "long text", "authors": "A"},
+                            {"work_id": "W2", "title": "Paper 2", "abstract": "long text", "authors": "B"},
+                        ],
+                    ),
+                    (
+                        "biorxiv",
+                        [
+                            {"work_id": "W3", "title": "Paper 3", "abstract": "long text", "authors": "C"},
+                            {"work_id": "W4", "title": "Paper 4", "abstract": "long text", "authors": "D"},
+                        ],
+                    ),
+                ],
+            },
+            "results": [
+                (
+                    "langtaosha",
+                    [
+                        {"work_id": "W1", "title": "Paper 1", "abstract": "long text", "authors": "A"},
+                        {"work_id": "W2", "title": "Paper 2", "abstract": "long text", "authors": "B"},
+                    ],
+                ),
+                (
+                    "biorxiv",
+                    [
+                        {"work_id": "W3", "title": "Paper 3", "abstract": "long text", "authors": "C"},
+                        {"work_id": "W4", "title": "Paper 4", "abstract": "long text", "authors": "D"},
+                    ],
+                ),
+            ],
+        },
+        client_surface="search_page",
+        status_code=200,
+    )
+
+    assert payload["results_truncated"] is False
+    assert payload["results_logged_count"] == 2
+    assert payload["results_full_count"] == 2
+    assert payload["response_body"]["results"] == [
+        (
+            "langtaosha",
+            [
+                {"work_id": "W1", "title": "Paper 1"},
+                {"work_id": "W2", "title": "Paper 2"},
+            ],
+        ),
+        (
+            "biorxiv",
+            [
+                {"work_id": "W3", "title": "Paper 3"},
+                {"work_id": "W4", "title": "Paper 4"},
+            ],
+        ),
+    ]
+    assert payload["response_body"]["smart_search"]["results"] == [
+        (
+            "langtaosha",
+            [
+                {"work_id": "W1", "title": "Paper 1"},
+                {"work_id": "W2", "title": "Paper 2"},
+            ],
+        ),
+        (
+            "biorxiv",
+            [
+                {"work_id": "W3", "title": "Paper 3"},
+                {"work_id": "W4", "title": "Paper 4"},
+            ],
+        ),
+    ]
 
 
 def test_insert_frontend_search_request_log_writes_summary_row(monkeypatch):
@@ -159,7 +272,7 @@ def test_emit_frontend_search_log_appends_jsonl_file(monkeypatch, tmp_path):
             lines.append((message, args))
 
     log_path = tmp_path / "search_api_logs" / "2026" / "2026-06-09_frontend_search_requests.jsonl"
-    monkeypatch.setattr(frontend_search_logger, "logger", FakeLogger())
+    monkeypatch.setattr(frontend_search_logger, "event_logger", FakeLogger())
     monkeypatch.setattr(
         frontend_search_logger,
         "get_frontend_search_logging_config",

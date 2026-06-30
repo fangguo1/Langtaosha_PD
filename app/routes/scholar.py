@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import time
 from typing import Any, Callable, Dict, List, Optional
 
@@ -194,6 +195,36 @@ def _build_match_reasons(item: Dict[str, Any]) -> List[Dict[str, Any]]:
     return reasons
 
 
+def _extract_keywords(metadata: Dict[str, Any], item: Dict[str, Any]) -> List[Dict[str, Any]]:
+    keywords = (
+        metadata.get("paper_keywords")
+        or metadata.get("keywords")
+        or item.get("paper_keywords")
+        or item.get("keywords")
+        or []
+    )
+    if not isinstance(keywords, list):
+        return []
+    normalized_keywords: List[Dict[str, Any]] = []
+    for keyword in keywords:
+        if isinstance(keyword, dict):
+            keyword_text = (
+                keyword.get("keyword")
+                or keyword.get("keyword_text")
+                or keyword.get("text")
+                or keyword.get("name")
+            )
+            normalized_keywords.append(
+                {
+                    "keyword_type": keyword.get("keyword_type") or keyword.get("type"),
+                    "keyword": keyword_text,
+                    "weight": keyword.get("weight"),
+                    "source": keyword.get("source"),
+                }
+            )
+    return normalized_keywords
+
+
 def _map_search_item(item: Dict[str, Any], rank: int) -> Dict[str, Any]:
     metadata = item.get("metadata") or item
     preferred_source = _get_display_source(item, metadata)
@@ -214,6 +245,7 @@ def _map_search_item(item: Dict[str, Any], rank: int) -> Dict[str, Any]:
         "doi": doi,
         "ranking_score": _get_ranking_score(item),
         "match_reasons": _build_match_reasons(item),
+        "keywords": _extract_keywords(metadata, item),
     }
 
 
@@ -239,6 +271,7 @@ def _build_query_notice(
     suggested_author = understanding.get("suggested_author")
     corrected_query = understanding.get("corrected_query")
     normalized_query = understanding.get("normalized_query") or query
+    correction_status = understanding.get("correction_status")
 
     if intent == "author_name" and route == "metadata_author" and matched_author:
         return {
@@ -262,15 +295,24 @@ def _build_query_notice(
             },
         }
 
-    if corrected_query and corrected_query != normalized_query:
+    if corrected_query and corrected_query != normalized_query and correction_status == "pending":
         return {
             "type": "query_correction",
             "message": f'您是想搜索 "{corrected_query}" 吗？',
-            "action": {
-                "label": "使用原 query 检索",
-                "mode": "vector",
-                "query": query,
-            },
+            "actions": [
+                {
+                    "label": f'搜索 "{corrected_query}"',
+                    "mode": "smart",
+                    "query": query,
+                    "correction_decision": "accept",
+                },
+                {
+                    "label": "继续搜索原 query",
+                    "mode": "smart",
+                    "query": query,
+                    "correction_decision": "reject",
+                },
+            ],
         }
 
     return None
@@ -292,6 +334,9 @@ def _normalize_legacy_notice(
         return None
 
     action = notice.get("action") or {}
+    actions = notice.get("actions") or []
+    if not action and actions:
+        action = actions[0]
     if action:
         notice["fallback_mode"] = action.get("mode")
         notice["fallback_query"] = action.get("query")
@@ -308,7 +353,7 @@ def _emit_smart_search_debug(
     result_count: int,
     notice: Optional[Dict[str, Any]],
 ) -> None:
-    if search_mode != "smart":
+    if search_mode != "smart" or not _smart_search_debug_enabled():
         return
     understanding = understanding or {}
     debug_line = (
@@ -330,9 +375,8 @@ def _emit_smart_search_result_summary(
     *,
     search_mode: str,
     raw_results: Any,
-    preview_limit: int = 3,
 ) -> None:
-    if search_mode != "smart":
+    if search_mode != "smart" or not _smart_search_debug_enabled():
         return
 
     if not isinstance(raw_results, list):
@@ -351,23 +395,8 @@ def _emit_smart_search_result_summary(
             grouped_detected = True
             source_prefix = item[0]
             source_results = item[1]
-            preview_items = []
-            for result in source_results[:preview_limit]:
-                if not isinstance(result, dict):
-                    continue
-                metadata = result.get("metadata") or result
-                preview_items.append(
-                    {
-                        "work_id": result.get("work_id"),
-                        "title": metadata.get("canonical_title") or metadata.get("title"),
-                        "source": (
-                            (result.get("source_name"))
-                            or ((metadata.get("sources") or [{}])[0].get("source_name"))
-                        ),
-                    }
-                )
             grouped_lines.append(
-                f"SMART SEARCH RESULTS | group={source_prefix} | count={len(source_results)} | preview={preview_items}"
+                f"SMART SEARCH RESULTS | group={source_prefix} | count={len(source_results)}"
             )
 
     if grouped_detected:
@@ -375,24 +404,18 @@ def _emit_smart_search_result_summary(
             print(line)
         return
 
-    preview_items = []
-    for result in raw_results[:preview_limit]:
-        if not isinstance(result, dict):
-            continue
-        metadata = result.get("metadata") or result
-        preview_items.append(
-            {
-                "work_id": result.get("work_id"),
-                "title": metadata.get("canonical_title") or metadata.get("title"),
-                "source": (
-                    result.get("source_name")
-                    or ((metadata.get("sources") or [{}])[0].get("source_name"))
-                ),
-            }
-        )
     print(
-        f"SMART SEARCH RESULTS | group=flat | count={len(raw_results)} | preview={preview_items}"
+        f"SMART SEARCH RESULTS | group=flat | count={len(raw_results)}"
     )
+
+
+def _smart_search_debug_enabled() -> bool:
+    return (os.environ.get("SMART_SEARCH_DEBUG") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 def _build_query_payload(
@@ -410,6 +433,7 @@ def _build_query_payload(
         "corrected_query": understanding.get("corrected_query"),
         "matched_author": understanding.get("matched_author"),
         "suggested_author": understanding.get("suggested_author"),
+        "correction_status": understanding.get("correction_status"),
     }
 
 
@@ -487,6 +511,7 @@ def run_scholar_search(
     top_k: Any = None,
     source_list: Optional[List[str]] = None,
     search_mode: str = "smart",
+    correction_decision: Optional[str] = None,
     request_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     started_at = time.time()
@@ -521,6 +546,7 @@ def run_scholar_search(
             source_list=resolved_sources,
             top_k=normalized_top_k,
             hydrate=True,
+            correction_decision=correction_decision,
         )
         raw_smart_results = smart_payload.get("results")
         _emit_smart_search_result_summary(
@@ -587,6 +613,7 @@ def _collect_request_args() -> Dict[str, Any]:
         "mode": request.args.get("mode") or "smart",
         "top_k": request.args.get("top_k"),
         "source_list": request.args.get("source_list"),
+        "correction_decision": request.args.get("correction_decision"),
     }
 
 
@@ -615,6 +642,7 @@ def register_scholar_search_api_routes(
                 top_k=request.args.get("top_k"),
                 source_list=_parse_source_list(request.args.get("source_list")),
                 search_mode=request.args.get("mode") or "smart",
+                correction_decision=request.args.get("correction_decision"),
                 request_id=request_id,
             )
             if record_frontend_search_request is not None:
