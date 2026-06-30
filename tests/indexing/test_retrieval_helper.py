@@ -28,12 +28,28 @@ from src.docset_hub.storage.vector_db import SearchResult
 class FakeMetadataDB:
     def __init__(self, papers=None):
         self.papers = papers or {}
+        self.read_calls = []
 
     def read_paper_by_work_id(self, work_id):
+        self.read_calls.append(work_id)
         return self.papers.get(work_id)
 
     def lookup_papers_with_keyword_terms(self, **kwargs):
         return []
+
+
+class FakeBatchMetadataDB(FakeMetadataDB):
+    def __init__(self, papers=None):
+        super().__init__(papers=papers)
+        self.batch_calls = []
+
+    def get_search_result_summaries_by_work_ids(self, work_ids):
+        self.batch_calls.append(list(work_ids))
+        return {
+            work_id: self.papers[work_id]
+            for work_id in work_ids
+            if work_id in self.papers
+        }
 
 
 def test_present_search_results_maps_ranked_result_to_api_dict():
@@ -73,6 +89,48 @@ def test_present_search_results_hydrates_metadata():
     )
     rows = present_search_results([hit], metadata_db=metadata_db, hydrate=True)
     assert rows[0]["metadata"]["canonical_title"] == "Example"
+
+
+def test_present_search_results_reuses_metadata_for_duplicate_work_ids():
+    hits = [
+        RankedResult("W1", 1, "langtaosha", 0.88, "title", "dense", 1),
+        RankedResult("W1", 1, "langtaosha", 0.77, "abstract", "sparse", 2),
+    ]
+    metadata_db = FakeMetadataDB(
+        papers={
+            "W1": {
+                "paper_id": 1,
+                "work_id": "W1",
+                "source_name": "langtaosha",
+                "canonical_title": "Example",
+            }
+        }
+    )
+
+    rows = present_search_results(hits, metadata_db=metadata_db, hydrate=True)
+
+    assert len(rows) == 2
+    assert [row["metadata"]["canonical_title"] for row in rows] == ["Example", "Example"]
+    assert metadata_db.read_calls == ["W1"]
+
+
+def test_present_search_results_uses_batch_summary_hydration():
+    hits = [
+        RankedResult("W1", 1, "langtaosha", 0.88, "title", "dense", 1),
+        RankedResult("W2", 2, "langtaosha", 0.77, "abstract", "sparse", 2),
+    ]
+    metadata_db = FakeBatchMetadataDB(
+        papers={
+            "W1": {"paper_id": 1, "work_id": "W1", "canonical_title": "One"},
+            "W2": {"paper_id": 2, "work_id": "W2", "canonical_title": "Two"},
+        }
+    )
+
+    rows = present_search_results(hits, metadata_db=metadata_db, hydrate=True)
+
+    assert [row["metadata"]["canonical_title"] for row in rows] == ["One", "Two"]
+    assert metadata_db.batch_calls == [["W1", "W2"]]
+    assert metadata_db.read_calls == []
 
 
 def test_from_search_result_and_to_lightweight_dicts():

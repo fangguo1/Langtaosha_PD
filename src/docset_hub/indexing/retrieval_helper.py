@@ -182,8 +182,7 @@ def filter_dense_results(
         if payload is None:
             continue
         rank += 1
-        retrieval_debug = dict(hit.retrieval_debug or {})
-        retrieval_debug.setdefault("dense_hard_filter_report", report.to_dict())
+        retrieval_debug = dict(payload.get("retrieval_debug") or hit.retrieval_debug or {})
         filtered.append(
             RankedResult(
                 work_id=hit.work_id,
@@ -229,6 +228,11 @@ def filter_positive_score_results(
             )
         )
     return filtered
+
+
+def filter_sparse_results(hits: Sequence[RankedResult]) -> List[RankedResult]:
+    """Apply hybrid sparse hard rules: keep only positive-score evidence."""
+    return filter_positive_score_results(hits, drop_non_positive=True)
 
 
 def filter_keyword_lookup_results(hits: Sequence[RankedResult]) -> List[RankedResult]:
@@ -363,9 +367,39 @@ def hydrate_results(
     metadata_db: MetadataDB,
 ) -> List[Dict[str, Any]]:
     hydrated: List[Dict[str, Any]] = []
+    work_ids = list(dict.fromkeys(hit.work_id for hit in hits if hit.work_id))
+    metadata_by_work_id: Dict[str, Optional[Dict[str, Any]]] = {}
+    batch_loader = getattr(metadata_db, "get_search_result_summaries_by_work_ids", None)
+    if callable(batch_loader) and work_ids:
+        try:
+            batch_rows = batch_loader(work_ids)
+            if isinstance(batch_rows, Mapping):
+                metadata_by_work_id.update(
+                    {
+                        str(work_id): dict(paper_info)
+                        for work_id, paper_info in batch_rows.items()
+                        if paper_info
+                    }
+                )
+            else:
+                for paper_info in batch_rows or []:
+                    if not isinstance(paper_info, Mapping):
+                        continue
+                    work_id = str(paper_info.get("work_id") or "")
+                    if work_id:
+                        metadata_by_work_id[work_id] = dict(paper_info)
+        except Exception as exc:  # noqa: BLE001
+            logging.warning(
+                "批量补全 metadata 失败，降级为逐条补全: error=%s",
+                exc,
+                exc_info=True,
+            )
+
     for hit in hits:
         try:
-            paper_info = metadata_db.read_paper_by_work_id(hit.work_id)
+            if hit.work_id not in metadata_by_work_id:
+                metadata_by_work_id[hit.work_id] = metadata_db.read_paper_by_work_id(hit.work_id)
+            paper_info = metadata_by_work_id[hit.work_id]
             if not paper_info:
                 logging.warning("搜索结果的 metadata 不存在: work_id=%s", hit.work_id)
                 continue

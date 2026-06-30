@@ -3,7 +3,7 @@ import json
 import re
 from difflib import SequenceMatcher
 from typing import Dict, Any, Optional, List, Iterable, Mapping, Sequence
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
@@ -2346,14 +2346,20 @@ class MetadataDB:
     # 更新的查询方法
     # =========================================================================
 
-    def get_paper_info_by_paper_id(self, paper_id: int) -> Optional[Dict[str, Any]]:
+    def get_paper_info_by_paper_id(
+        self,
+        paper_id: int,
+        source_name: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
         """根据 paper_id 获取论文完整信息
 
         Args:
             paper_id: 论文 ID
+            source_name: 可选的 source 过滤；传入后仅返回该 source 的数据
 
         Returns:
-            Optional[Dict]: 论文完整信息，包含所有 source 记录
+            Optional[Dict]: 论文完整信息。
+            未传 source_name 时包含所有 source；传入后仅包含该 source。
         """
         with self.engine.connect() as conn:
             # 获取 papers 表数据
@@ -2394,20 +2400,37 @@ class MetadataDB:
             }
 
             # 获取所有 source 记录
-            result = conn.execute(
-                text("""
-                    SELECT
-                        paper_source_id, source_name, platform, source_record_id,
-                        source_url, abstract_url, pdf_url, title, abstract,
-                        publisher, language, doi, arxiv_id, pubmed_id,
-                        semantic_scholar_id, submitted_at, online_at, published_at,
-                        version, is_preprint, is_published
-                    FROM paper_sources
-                    WHERE paper_id = :paper_id
-                    ORDER BY online_at DESC
-                """),
-                {"paper_id": paper_id}
-            )
+            if source_name is None:
+                result = conn.execute(
+                    text("""
+                        SELECT
+                            paper_source_id, source_name, platform, source_record_id,
+                            source_url, abstract_url, pdf_url, title, abstract,
+                            publisher, language, doi, arxiv_id, pubmed_id,
+                            semantic_scholar_id, submitted_at, online_at, published_at,
+                            version, is_preprint, is_published
+                        FROM paper_sources
+                        WHERE paper_id = :paper_id
+                        ORDER BY online_at DESC
+                    """),
+                    {"paper_id": paper_id}
+                )
+            else:
+                result = conn.execute(
+                    text("""
+                        SELECT
+                            paper_source_id, source_name, platform, source_record_id,
+                            source_url, abstract_url, pdf_url, title, abstract,
+                            publisher, language, doi, arxiv_id, pubmed_id,
+                            semantic_scholar_id, submitted_at, online_at, published_at,
+                            version, is_preprint, is_published
+                        FROM paper_sources
+                        WHERE paper_id = :paper_id
+                          AND source_name = :source_name
+                        ORDER BY online_at DESC
+                    """),
+                    {"paper_id": paper_id, "source_name": source_name}
+                )
 
             for row in result.fetchall():
                 source_info = {
@@ -2434,6 +2457,9 @@ class MetadataDB:
                     'is_published': row[20]
                 }
                 paper_info['sources'].append(source_info)
+
+            if source_name is not None and not paper_info['sources']:
+                return None
 
             # 获取 metadata 记录
             for source in paper_info['sources']:
@@ -3439,3 +3465,176 @@ class MetadataDB:
                     papers.append(paper_info)
 
             return papers
+
+    def get_search_result_summaries_by_work_ids(
+        self,
+        work_ids: List[str],
+    ) -> Dict[str, Dict[str, Any]]:
+        """批量获取搜索结果卡片所需的轻量论文信息。"""
+        ordered_work_ids = [str(work_id) for work_id in dict.fromkeys(work_ids or []) if work_id]
+        if not ordered_work_ids:
+            return {}
+
+        with self.engine.connect() as conn:
+            paper_rows = conn.execute(
+                text("""
+                    SELECT
+                        paper_id, work_id, canonical_title, canonical_abstract,
+                        canonical_language, canonical_publisher,
+                        submitted_at, online_at, published_at,
+                        canonical_source_id, merge_status,
+                        created_at, updated_at
+                    FROM papers
+                    WHERE work_id = ANY(:work_ids)
+                """),
+                {"work_ids": ordered_work_ids}
+            ).mappings().fetchall()
+
+            summaries_by_work_id: Dict[str, Dict[str, Any]] = {}
+            paper_id_to_work_id: Dict[int, str] = {}
+            for row in paper_rows:
+                paper_id = int(row["paper_id"])
+                work_id = str(row["work_id"])
+                paper_id_to_work_id[paper_id] = work_id
+                summaries_by_work_id[work_id] = {
+                    "paper_id": paper_id,
+                    "work_id": work_id,
+                    "canonical_title": row["canonical_title"],
+                    "canonical_abstract": row["canonical_abstract"],
+                    "canonical_language": row["canonical_language"],
+                    "canonical_publisher": row["canonical_publisher"],
+                    "submitted_at": row["submitted_at"].isoformat() if row["submitted_at"] else None,
+                    "online_at": row["online_at"].isoformat() if row["online_at"] else None,
+                    "published_at": row["published_at"].isoformat() if row["published_at"] else None,
+                    "canonical_source_id": row["canonical_source_id"],
+                    "merge_status": row["merge_status"],
+                    "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                    "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+                    "sources": [],
+                    "authors": [],
+                    "keywords": [],
+                }
+
+            paper_ids = list(paper_id_to_work_id)
+            if not paper_ids:
+                return {}
+
+            source_rows = conn.execute(
+                text("""
+                    SELECT
+                        paper_source_id, paper_id, source_name, platform, source_record_id,
+                        source_url, abstract_url, pdf_url, title, abstract,
+                        publisher, language, doi, arxiv_id, pubmed_id,
+                        semantic_scholar_id, submitted_at, online_at, published_at,
+                        version, is_preprint, is_published
+                    FROM paper_sources
+                    WHERE paper_id = ANY(:paper_ids)
+                    ORDER BY paper_id, online_at DESC NULLS LAST
+                """),
+                {"paper_ids": paper_ids}
+            ).mappings().fetchall()
+            for row in source_rows:
+                work_id = paper_id_to_work_id.get(int(row["paper_id"]))
+                if not work_id:
+                    continue
+                summaries_by_work_id[work_id]["sources"].append({
+                    "paper_source_id": row["paper_source_id"],
+                    "source_name": row["source_name"],
+                    "platform": row["platform"],
+                    "source_record_id": row["source_record_id"],
+                    "source_url": row["source_url"],
+                    "abstract_url": row["abstract_url"],
+                    "pdf_url": row["pdf_url"],
+                    "title": row["title"],
+                    "abstract": row["abstract"],
+                    "publisher": row["publisher"],
+                    "language": row["language"],
+                    "doi": row["doi"],
+                    "arxiv_id": row["arxiv_id"],
+                    "pubmed_id": row["pubmed_id"],
+                    "semantic_scholar_id": row["semantic_scholar_id"],
+                    "submitted_at": row["submitted_at"].isoformat() if row["submitted_at"] else None,
+                    "online_at": row["online_at"].isoformat() if row["online_at"] else None,
+                    "published_at": row["published_at"].isoformat() if row["published_at"] else None,
+                    "version": row["version"],
+                    "is_preprint": row["is_preprint"],
+                    "is_published": row["is_published"],
+                })
+
+            author_rows = conn.execute(
+                text("""
+                    SELECT paper_id, authors
+                    FROM paper_author_affiliation
+                    WHERE paper_id = ANY(:paper_ids)
+                """),
+                {"paper_ids": paper_ids}
+            ).mappings().fetchall()
+            for row in author_rows:
+                work_id = paper_id_to_work_id.get(int(row["paper_id"]))
+                if work_id:
+                    summaries_by_work_id[work_id]["authors"] = row["authors"] or []
+
+            keyword_rows = conn.execute(
+                text("""
+                    SELECT paper_id, keyword_type, keyword, weight, source
+                    FROM paper_keywords
+                    WHERE paper_id = ANY(:paper_ids)
+                    ORDER BY paper_id, keyword_type, keyword
+                """),
+                {"paper_ids": paper_ids}
+            ).mappings().fetchall()
+            for row in keyword_rows:
+                work_id = paper_id_to_work_id.get(int(row["paper_id"]))
+                if not work_id:
+                    continue
+                summaries_by_work_id[work_id]["keywords"].append({
+                    "keyword_type": row["keyword_type"],
+                    "keyword": row["keyword"],
+                    "weight": row["weight"],
+                    "source": row["source"],
+                })
+
+        return {
+            work_id: summaries_by_work_id[work_id]
+            for work_id in ordered_work_ids
+            if work_id in summaries_by_work_id
+        }
+
+
+    def retrieve_paper_ids_by_time_interval(self, date_from: str, date_to: str) -> List[int]:
+        """获取指定时间间隔内的 paper_id 列表。
+
+        当 `date_from` / `date_to` 传入日期字符串（YYYY-MM-DD）时，
+        查询范围覆盖对应自然日；若传入完整时间戳，则按精确时间边界查询。
+        """
+        start_at = datetime.fromisoformat(date_from)
+        end_at = datetime.fromisoformat(date_to)
+        end_has_time = ("T" in date_to) or (" " in date_to)
+
+        with self.engine.connect() as conn:
+            if end_has_time:
+                result = conn.execute(
+                    text("""
+                        SELECT paper_id
+                        FROM papers
+                        WHERE online_at >= :date_from
+                          AND online_at <= :date_to
+                        ORDER BY online_at DESC NULLS LAST, paper_id DESC
+                    """),
+                    {"date_from": start_at, "date_to": end_at}
+                )
+            else:
+                result = conn.execute(
+                    text("""
+                        SELECT paper_id
+                        FROM papers
+                        WHERE online_at >= :date_from
+                          AND online_at < :date_to_exclusive
+                        ORDER BY online_at DESC NULLS LAST, paper_id DESC
+                    """),
+                    {
+                        "date_from": start_at,
+                        "date_to_exclusive": end_at + timedelta(days=1)
+                    }
+                )
+            return [row[0] for row in result.fetchall()]

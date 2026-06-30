@@ -11,6 +11,7 @@ from src.docset_hub.indexing.retrieval_helper import (
     RankedResult,
     filter_keyword_lookup_results,
     filter_positive_score_results,
+    filter_sparse_results,
     from_keyword_lookup_result,
     from_search_result,
 )
@@ -107,6 +108,79 @@ def test_three_way_hybrid_retrieval_promotes_multi_branch_hits(monkeypatch):
     assert results[0]["retrieval_debug"]["retrieval_weights"] == DEFAULT_HYBRID_RETRIEVAL_WEIGHTS
 
 
+def test_run_dense_retrieval_branch_applies_dense_hard_filter(monkeypatch):
+    indexer = _indexer()
+    filter_calls = {}
+    dense_hits = [
+        _ranked("dense", "raw-1", 1, 0.9, "1"),
+        _ranked("dense", "raw-2", 2, 0.2, "2"),
+    ]
+
+    monkeypatch.setattr(
+        indexer,
+        "dense_search",
+        lambda query, source_list, top_k: list(dense_hits),
+    )
+
+    def fake_filter(hits, **kwargs):
+        filter_calls["hits"] = list(hits)
+        filter_calls["kwargs"] = kwargs
+        return ([dense_hits[0]], {"kept_count": 1})
+
+    monkeypatch.setattr(
+        "src.docset_hub.indexing.paper_indexer.filter_dense_results",
+        fake_filter,
+    )
+
+    results = indexer._run_dense_retrieval_branch(
+        query="kidney fibrosis",
+        source_list=["biorxiv_history"],
+        top_k=5,
+        keyword_sources=["paper_keywords"],
+        min_similarity=0.46,
+    )
+
+    assert [item.work_id for item in results] == ["raw-1"]
+    assert [item.work_id for item in filter_calls["hits"]] == ["raw-1", "raw-2"]
+    assert filter_calls["kwargs"]["query"] == "kidney fibrosis"
+    assert filter_calls["kwargs"]["metadata_db"] is indexer.metadata_db
+    assert filter_calls["kwargs"]["min_similarity"] == 0.46
+    assert filter_calls["kwargs"]["keyword_sources"] == ["paper_keywords"]
+
+
+def test_run_sparse_retrieval_branch_applies_positive_score_filter(monkeypatch):
+    indexer = _indexer()
+    filter_calls = {}
+    sparse_hits = [
+        _ranked("sparse", "zero", 1, 0.0, "1"),
+        _ranked("sparse", "positive", 2, 2.0, "2"),
+    ]
+
+    monkeypatch.setattr(
+        indexer,
+        "sparse_search",
+        lambda query, source_list, top_k: list(sparse_hits),
+    )
+
+    def fake_filter(hits):
+        filter_calls["hits"] = list(hits)
+        return [sparse_hits[1]]
+
+    monkeypatch.setattr(
+        "src.docset_hub.indexing.paper_indexer.filter_sparse_results",
+        fake_filter,
+    )
+
+    results = indexer._run_sparse_retrieval_branch(
+        query="kidney fibrosis",
+        source_list=["biorxiv_history"],
+        top_k=5,
+    )
+
+    assert [item.work_id for item in results] == ["positive"]
+    assert [item.work_id for item in filter_calls["hits"]] == ["zero", "positive"]
+
+
 def test_sparse_and_keyword_filters_drop_non_positive_evidence():
     sparse_hits = [
         from_search_result(
@@ -150,6 +224,9 @@ def test_sparse_and_keyword_filters_drop_non_positive_evidence():
 
     assert [item.work_id for item in sparse] == ["positive"]
     assert sparse[0].rank == 1
+    hybrid_sparse = filter_sparse_results(sparse_hits)
+    assert [item.work_id for item in hybrid_sparse] == ["positive"]
+    assert hybrid_sparse[0].rank == 1
     assert [item.work_id for item in keyword] == ["kw-positive"]
     assert keyword[0].rank == 1
     assert keyword[0].retrieval_debug["matched_concepts"] == [{"group_id": 1}]

@@ -45,6 +45,7 @@
 
 import logging
 import os
+import time
 from collections import defaultdict as ddict
 from functools import partial
 from pathlib import Path
@@ -65,7 +66,7 @@ from .retrieval_helper import (
     RankedResult,
     filter_dense_results,
     filter_keyword_lookup_results,
-    filter_positive_score_results,
+    filter_sparse_results,
     from_expanded_sparse_candidate,
     from_keyword_lookup_result,
     from_search_result,
@@ -349,15 +350,19 @@ class PaperIndexer:
         """Vector dense recall only; no hard filter, no hydrate."""
         if not self.vector_db:
             raise ValueError("向量数据库未启用，无法执行 dense 检索")
+        total_started = time.perf_counter()
         dense_results = self.vector_db.dense_search(
             query=query,
             source_list=source_list,
             top_k=top_k,
         )
-        return [
+        search_results=[
             from_search_result(result, retriever="dense", rank=index)
             for index, result in enumerate(dense_results, start=1)
         ]
+        total_elapsed_ms = round((time.perf_counter() - total_started) * 1000.0, 3)
+        logging.info(f'total_elapsed_ms: {total_elapsed_ms}ms')
+        return search_results
 
     def sparse_search(
         self,
@@ -368,15 +373,18 @@ class PaperIndexer:
         """BM25 sparse recall only; no positive-score filter."""
         if not self.vector_db:
             raise ValueError("向量数据库未启用，无法执行 sparse 检索")
+        total_started = time.perf_counter()
         sparse_results = self.vector_db.sparse_search(
             query=query,
             source_list=source_list,
             top_k=top_k,
         )
-        return [
+        search_results=[
             from_search_result(result, retriever="sparse", rank=index)
-            for index, result in enumerate(sparse_results, start=1)
-        ]
+            for index, result in enumerate(sparse_results, start=1)]
+        total_elapsed_ms = round((time.perf_counter() - total_started) * 1000.0, 3)
+        logging.info(f'total_elapsed_ms: {total_elapsed_ms}ms')
+        return search_results 
 
     def expanded_sparse_search(
         self,
@@ -386,14 +394,22 @@ class PaperIndexer:
         keyword_sources: Optional[Sequence[str]] = None,
     ) -> List[RankedResult]:
         """Semantic plan + expanded sparse DB match; score = coverage_ratio."""
+        total_started = time.perf_counter()
+        plan_started = time.perf_counter()
         plan = self.build_query_semantic_plan(
             query=query,
             source_list=source_list,
             keyword_sources=keyword_sources,
         )
+        plan_elapsed_ms = round((time.perf_counter() - plan_started) * 1000.0, 3)
+        logging.info(f"build_query_semantic_plan_ms: {plan_elapsed_ms}ms")
+        
         if plan is None:
+            total_elapsed_ms = round((time.perf_counter() - total_started) * 1000.0, 3)
+            logging.info(f'total_elapsed_ms: {total_elapsed_ms}ms')
             return []
 
+        match_started = time.perf_counter()
         candidates = match_papers_by_expanded_sparse_plan(
             metadata_db=self.metadata_db,
             plan=plan,
@@ -401,6 +417,9 @@ class PaperIndexer:
             keyword_sources=keyword_sources,
             top_k=top_k,
         )
+
+        match_elapsed_ms = round((time.perf_counter() - match_started) * 1000.0, 3)
+        logging.info(f"match_papers_by_expanded_sparse_plan_ms: {match_elapsed_ms}ms")
         results: List[RankedResult] = []
         rank = 0
         for candidate in candidates:
@@ -409,6 +428,8 @@ class PaperIndexer:
                 continue
             rank += 1
             results.append(from_expanded_sparse_candidate(candidate, rank=rank))
+        total_elapsed_ms = round((time.perf_counter() - total_started) * 1000.0, 3)
+        logging.info(f'total_elapsed_ms: {total_elapsed_ms}ms')
         return results
 
     def _keyword_lookup_search(
@@ -446,6 +467,70 @@ class PaperIndexer:
             ranked.append(from_keyword_lookup_result(lookup_result, rank=index))
         return ranked
 
+    def _run_dense_retrieval_branch(
+        self,
+        query: str,
+        source_list: List[str],
+        top_k: int,
+        *,
+        keyword_sources: Optional[Sequence[str]] = None,
+        min_similarity: float = DENSE_DEFAULT_MIN_SIMILARITY,
+    ) -> List[RankedResult]:
+        branch_started = time.perf_counter()
+        dense_hits = self.dense_search(query, source_list, top_k)
+        recall_elapsed_ms = round((time.perf_counter() - branch_started) * 1000.0, 3)
+        logging.info(
+            "hybrid dense branch raw hits: query=%r, top_k=%s, count=%s, recall_elapsed_ms=%s",
+            query,
+            top_k,
+            len(dense_hits),
+            recall_elapsed_ms,
+        )
+        filter_started = time.perf_counter()
+        filtered_hits, _ = filter_dense_results(
+            dense_hits,
+            query=query,
+            metadata_db=self.metadata_db,
+            min_similarity=min_similarity,
+            keyword_sources=keyword_sources,
+        )
+        filter_elapsed_ms = round((time.perf_counter() - filter_started) * 1000.0, 3)
+        logging.info(
+            "hybrid dense branch filtered hits: query=%r, min_similarity=%.3f, count=%s, filter_elapsed_ms=%s",
+            query,
+            min_similarity,
+            len(filtered_hits),
+            filter_elapsed_ms,
+        )
+        return filtered_hits
+
+    def _run_sparse_retrieval_branch(
+        self,
+        query: str,
+        source_list: List[str],
+        top_k: int,
+    ) -> List[RankedResult]:
+        branch_started = time.perf_counter()
+        sparse_hits = self.sparse_search(query, source_list, top_k)
+        recall_elapsed_ms = round((time.perf_counter() - branch_started) * 1000.0, 3)
+        logging.info(
+            "hybrid sparse branch raw hits: query=%r, top_k=%s, count=%s, recall_elapsed_ms=%s",
+            query,
+            top_k,
+            len(sparse_hits),
+            recall_elapsed_ms,
+        )
+        filter_started = time.perf_counter()
+        filtered_hits = filter_sparse_results(sparse_hits)
+        filter_elapsed_ms = round((time.perf_counter() - filter_started) * 1000.0, 3)
+        logging.info(
+            "hybrid sparse branch filtered hits: query=%r, count=%s, filter_elapsed_ms=%s",
+            query,
+            len(filtered_hits),
+            filter_elapsed_ms,
+        )
+        return filtered_hits
+
     def search(
         self,
         query: str,
@@ -458,7 +543,7 @@ class PaperIndexer:
     ) -> List[Dict[str, Any]]:
         """单路检索 wrapper：L1 raw recall + present/hydrate。
 
-        仅支持 dense / sparse / expanded_sparse。混合检索请使用
+        仅支持 dense / sparse / expanded_sparse/hrbrid_retrieval 混合检索请使用
         ``hybrid_retrieval_search()``。
         """
         try:
@@ -477,13 +562,23 @@ class PaperIndexer:
                 hits = self.dense_search(query, resolved_source_list, top_k)
             elif search_type == "sparse":
                 hits = self.sparse_search(query, resolved_source_list, top_k)
-            else:
+            elif search_type == "hybrid_retrieval":
+                hits = self.hybrid_retrieval_search(
+                    query,
+                    resolved_source_list,
+                    top_k,
+                    hydrate=hydrate,
+                    keyword_sources=keyword_sources,
+                )
+            elif search_type == "expanded_sparse":
                 hits = self.expanded_sparse_search(
                     query,
                     resolved_source_list,
                     top_k,
                     keyword_sources=keyword_sources,
                 )
+            else:
+                raise ValueError(f"不支持的 search_type: {search_type}")
             return present_search_results(
                 hits,
                 metadata_db=self.metadata_db,
@@ -516,6 +611,7 @@ class PaperIndexer:
         if not self.vector_db:
             raise ValueError("向量数据库未启用，无法执行三路混合检索")
 
+        total_started = time.perf_counter()
         resolved_source_list = self._resolve_source_list(source_list)
         top_k = max(1, int(top_k))
 
@@ -543,19 +639,13 @@ class PaperIndexer:
         )
 
         retrievers = {
-            "dense": self.dense_search,
-            "sparse": self.sparse_search,
-            "keyword_lookup": partial(
-                self._keyword_lookup_search,
+            "dense": partial(
+                self._run_dense_retrieval_branch,
                 keyword_sources=keyword_sources,
+                min_similarity=effective_dense_min_similarity,
             ),
+            "sparse": self._run_sparse_retrieval_branch
         }
-        if not include_keyword_lookup:
-            retrievers = {
-                name: retriever
-                for name, retriever in retrievers.items()
-                if name != "keyword_lookup"
-            }
 
         branch_raw, branch_failures = run_retrievers_parallel(
             retrievers,
@@ -564,29 +654,15 @@ class PaperIndexer:
             top_k=candidate_k,
             max_workers=max(1, len(retrievers)),
         )
+        retrieval_elapsed_ms = round((time.perf_counter() - total_started) * 1000.0, 3)
+        logging.info(f"hybrid_retrieval_elapsed_ms: {retrieval_elapsed_ms}ms")
 
         if branch_failures and len(branch_failures) == len(retrievers):
             raise RuntimeError(f"三路混合检索全部 branch 失败: {branch_failures}")
 
-        branch_filtered: Dict[str, List[RankedResult]] = {}
-        if "dense" in branch_raw:
-            branch_filtered["dense"], _ = filter_dense_results(
-                branch_raw["dense"],
-                query=query,
-                metadata_db=self.metadata_db,
-                min_similarity=effective_dense_min_similarity,
-                keyword_sources=keyword_sources,
-            )
-        if "sparse" in branch_raw:
-            branch_filtered["sparse"] = filter_positive_score_results(branch_raw["sparse"])
-        if "keyword_lookup" in branch_raw:
-            branch_filtered["keyword_lookup"] = filter_keyword_lookup_results(
-                branch_raw["keyword_lookup"]
-            )
-
         branch_results = {
             name: hits_to_branch_results(hits)
-            for name, hits in branch_filtered.items()
+            for name, hits in branch_raw.items()
         }
         fused_hits = weighted_rrf_merge(
             branch_results,
@@ -595,11 +671,24 @@ class PaperIndexer:
             rrf_k=effective_rrf_k,
             branch_failures=branch_failures,
         )
-        return present_search_results(
+        total_fused_hits_elapsed_ms= round((time.perf_counter() - total_started) * 1000.0, 3)
+        logging.info(f"fused_hits_elapsed_ms: {total_fused_hits_elapsed_ms}ms")
+        presentation_started = time.perf_counter()
+        presented_results = present_search_results(
             fused_hits,
             metadata_db=self.metadata_db,
             hydrate=hydrate,
         )
+        presentation_elapsed_ms = round((time.perf_counter() - presentation_started) * 1000.0, 3)
+        total_elapsed_ms = round((time.perf_counter() - total_started) * 1000.0, 3)
+        logging.info(
+            "hybrid presentation elapsed: hydrate=%s, count=%s, presentation_elapsed_ms=%sms, total_elapsed_ms=%sms",
+            hydrate,
+            len(presented_results),
+            presentation_elapsed_ms,
+            total_elapsed_ms,
+        )
+        return presented_results
 
     def merge_source_list(self, source_list: List[str]) -> Dict[str, List[str]]:
         merge_source_dict = ddict(list)
@@ -621,7 +710,8 @@ class PaperIndexer:
         top_k: int = 10,
         hydrate: bool = True,
         *,
-        search_type: str = "dense",
+        search_type: str = "hybrid_retrieval",
+        correction_decision: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Search with query understanding and route selection.
 
@@ -640,8 +730,16 @@ class PaperIndexer:
         - expanded_search_queries: the expanded search queries
         - results: the results from the search. The results are grouped by source and returned as a list of tuples, where the first element is the source prefix and the second element is the results for that source.
         """
+        total_started = time.perf_counter()
         understanding = self.query_understanding.analyze(query)
+        query_understanding_time=time.perf_counter() - total_started
+        logging.info(f"query_understanding_time: {query_understanding_time}ms")
         understanding_payload = understanding.to_dict()
+        corrected_query = understanding.corrected_query
+        normalized_query = understanding.normalized_query or query
+
+        if correction_decision not in {None, "accept", "reject"}:
+            raise ValueError("correction_decision 只能是 accept 或 reject")
 
         if understanding.route == "none":
             return {
@@ -685,7 +783,25 @@ class PaperIndexer:
                 "results": [],
             }
 
-        search_query = understanding.corrected_query or understanding.normalized_query
+        if corrected_query and corrected_query != normalized_query and correction_decision is None:
+            understanding_payload["correction_status"] = "pending"
+            return {
+                "success": True,
+                "query": query,
+                "search_query": None,
+                "query_understanding": understanding_payload,
+                "expanded_search_queries": [],
+                "results": [],
+            }
+
+        if corrected_query and corrected_query != normalized_query:
+            understanding_payload["correction_status"] = (
+                "accepted" if correction_decision == "accept" else "rejected"
+            )
+            search_query = corrected_query if correction_decision == "accept" else normalized_query
+        else:
+            understanding_payload["correction_status"] = "not_needed"
+            search_query = normalized_query
         results = []
         for source_prefix, grouped_source_list in merged_source_dict.items():
             if search_type == "hybrid_retrieval":
@@ -872,6 +988,26 @@ class PaperIndexer:
             logging.error(f"read 失败: {str(e)}", exc_info=True)
             raise e
 
+
+    def retrieve_papers_by_time_interval(
+        self,
+        date_from: str,
+        date_to: str,
+        source_name: Optional[str] = "langtaosha"
+    ) -> List[Dict[str, Any]]:
+        """获取指定时间间隔内的论文完整信息。"""
+        paper_ids = self.metadata_db.retrieve_paper_ids_by_time_interval(date_from, date_to)
+
+        papers: List[Dict[str, Any]] = []
+        for paper_id in paper_ids:
+            paper_info = self.metadata_db.get_paper_info_by_paper_id(
+                paper_id,
+                source_name=source_name,
+            )
+            if paper_info is not None:
+                papers.append(paper_info)
+
+        return papers
     # =========================================================================
     # 私有辅助方法
     # =========================================================================

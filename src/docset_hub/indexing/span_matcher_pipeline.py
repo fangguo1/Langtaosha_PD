@@ -65,6 +65,19 @@ class SpanMatcherTrace:
     keyword_evidence: Dict[str, List[ConceptMatchEvidence]] = field(default_factory=dict)
 
 
+#The SpanMatcherRunResult is the output of the SpanMatcherPipeline.
+#It contains the following fields:
+# - profile_name: The name of the profile used to run the span matcher.
+# - query: The original query.
+# - normalized_query: The normalized query.
+# - extractor_candidates: The extractor candidates.
+# - expanded_candidates: The expanded candidates.
+# - span_results: The span results.
+# - selected_concepts: The selected concepts.
+# - semantic_plan: The semantic plan.
+# - timings_ms: The timings in milliseconds.
+# - trace: The trace.
+
 @dataclass
 class SpanMatcherRunResult:
     profile_name: str
@@ -78,6 +91,8 @@ class SpanMatcherRunResult:
     timings_ms: Dict[str, float] = field(default_factory=dict)
     trace: Optional[SpanMatcherTrace] = None
 
+
+# The output
 
 class SpanMatcherPipeline:
     def __init__(
