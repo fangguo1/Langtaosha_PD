@@ -416,6 +416,41 @@ def test_scholar_search_ignores_limit_and_offset_for_public_api():
     assert [call["top_k"] for call in indexer.smart_search_calls] == [5]
 
 
+def test_scholar_search_response_includes_timing_breakdown(monkeypatch):
+    perf_counter_values = iter([100.0, 101.5, 102.25, 102.25])
+    monkeypatch.setattr("app.routes.scholar.time.perf_counter", lambda: next(perf_counter_values))
+
+    understanding_result = FakeUnderstandingResult(normalized_query="breast cancer risk")
+    original_to_dict = understanding_result.to_dict
+    understanding_result.to_dict = lambda: {
+        **original_to_dict(),
+        "timings": {
+            "author_match_elapsed_ms": 12.5,
+            "query_correction_elapsed_ms": 34.5,
+            "query_expansion_elapsed_ms": 321.0,
+            "total_elapsed_ms": 368.0,
+        },
+    }
+
+    recorded = {}
+    client = _client(
+        indexer=FakeIndexer(understanding_result=understanding_result),
+        recorder=lambda **kwargs: recorded.update(kwargs),
+    )
+
+    response = client.get(
+        "/api/scholar/search?query=breast+cancer+risk&mode=smart&top_k=20&source_list=langtaosha"
+    )
+    data = response.get_json()
+
+    assert response.status_code == 200
+    assert data["meta"]["query_understanding_elapsed_ms"] == 368.0
+    assert data["meta"]["frontend_logging_elapsed_ms"] == 750.0
+    assert data["meta"]["server_elapsed_ms"] == 2250.0
+    assert data["query_understanding"]["timings"]["query_expansion_elapsed_ms"] == 321.0
+    assert recorded["client_surface"] == "test_surface"
+
+
 def test_scholar_search_normalizes_top_k_to_one_to_one_hundred():
     indexer_low = FakeIndexer()
     _client(indexer=indexer_low).get(

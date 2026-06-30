@@ -258,7 +258,7 @@ def _build_query_notice(
     if search_mode == "vector":
         return {
             "type": "vector",
-            "message": "已按原 query 执行向量检索。",
+            "message": "Searching using the original query with semantic search.",
             "action": None,
         }
 
@@ -276,9 +276,9 @@ def _build_query_notice(
     if intent == "author_name" and route == "metadata_author" and matched_author:
         return {
             "type": "author_name",
-            "message": f"已识别为作者名，正在根据作者 {matched_author} 完成搜索。",
+            "message": f"Recognized as an author name. Searching papers by {matched_author}.",
             "action": {
-                "label": "改用向量检索",
+                "label": "Search by Query Instead",
                 "mode": "vector",
                 "query": query,
             },
@@ -287,9 +287,9 @@ def _build_query_notice(
     if intent == "author_name" and route == "author_suggestion" and suggested_author:
         return {
             "type": "author_suggestion",
-            "message": f'未找到 "{query}" 的高置信作者匹配，是否搜索作者 {suggested_author}？',
+            "message": f'No high-confidence author match was found for "{query}". Did you mean the author {suggested_author}?',
             "action": {
-                "label": f"搜索作者 {suggested_author}",
+                "label": f"Search for {suggested_author}",
                 "mode": "smart",
                 "query": suggested_author,
             },
@@ -298,16 +298,16 @@ def _build_query_notice(
     if corrected_query and corrected_query != normalized_query and correction_status == "pending":
         return {
             "type": "query_correction",
-            "message": f'您是想搜索 "{corrected_query}" 吗？',
+            "message": f'Did you mean "{corrected_query}"?',
             "actions": [
                 {
-                    "label": f'搜索 "{corrected_query}"',
+                    "label": f'Search for "{corrected_query}"',
                     "mode": "smart",
                     "query": query,
                     "correction_decision": "accept",
                 },
                 {
-                    "label": "继续搜索原 query",
+                    "label": "Search for original query",
                     "mode": "smart",
                     "query": query,
                     "correction_decision": "reject",
@@ -567,6 +567,7 @@ def run_scholar_search(
         ]
         mapped_result_count = len(mapped_results)
     elapsed_ms = int((time.time() - started_at) * 1000)
+    understanding_timings = understanding.get("timings") if isinstance(understanding, dict) else None
     notice = _normalize_legacy_notice(
         query=normalized_query,
         search_query=search_query,
@@ -600,6 +601,11 @@ def run_scholar_search(
             "count": mapped_result_count,
             "elapsed_ms": elapsed_ms,
             "request_id": request_id,
+            "query_understanding_elapsed_ms": (
+                understanding_timings.get("total_elapsed_ms")
+                if isinstance(understanding_timings, dict)
+                else None
+            ),
         },
         "notice": notice,
         "count": mapped_result_count,
@@ -634,6 +640,7 @@ def register_scholar_search_api_routes(
 
     @app.route("/api/scholar/search", methods=["GET"])
     def api_scholar_search():
+        request_started = time.perf_counter()
         try:
             request_id = current_request_id()
             data = run_scholar_search(
@@ -646,6 +653,7 @@ def register_scholar_search_api_routes(
                 request_id=request_id,
             )
             if record_frontend_search_request is not None:
+                logging_started = time.perf_counter()
                 record_frontend_search_request(
                     request_args=_collect_request_args(),
                     response_body=dict(data),
@@ -656,6 +664,14 @@ def register_scholar_search_api_routes(
                     request_path=request.path,
                     request_method=request.method,
                 )
+                data.setdefault("meta", {})["frontend_logging_elapsed_ms"] = round(
+                    (time.perf_counter() - logging_started) * 1000.0,
+                    3,
+                )
+            data.setdefault("meta", {})["server_elapsed_ms"] = round(
+                (time.perf_counter() - request_started) * 1000.0,
+                3,
+            )
             return api_success(data)
         except ValueError as exc:
             response, status_code = api_error(

@@ -1,6 +1,7 @@
 """元数据库操作类"""
 import json
 import re
+import time
 from difflib import SequenceMatcher
 from typing import Dict, Any, Optional, List, Iterable, Mapping, Sequence
 from datetime import datetime, timedelta
@@ -49,6 +50,7 @@ class MetadataDB:
         # 新增：缓存 default_sources（source 合法性校验依据）
         from config.config_loader import get_default_sources
         self.default_sources = get_default_sources()
+        self._ensure_pg_trgm_extension()
         logging.info(f"✅ MetadataDB 初始化完成，default_sources={self.default_sources}")
 
     # =========================================================================
@@ -56,6 +58,7 @@ class MetadataDB:
     # =========================================================================
 
     GENERATED_KEYWORD_SOURCE = "scispacy-en_core_sci_lg-generated"
+    AUTHOR_SUGGESTION_SOURCE = "langtaosha"
     ALLOWED_GENERATED_KEYWORD_TYPES = {
         "domain",
         "concept",
@@ -169,6 +172,27 @@ class MetadataDB:
             {"paper_id": paper_id}
         ).fetchone()
         return row[0] if row else None
+
+    def _ensure_pg_trgm_extension(self) -> None:
+        """Ensure pg_trgm is available once during initialization."""
+        started = time.perf_counter()
+        try:
+            with self.engine.connect() as conn:
+                conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
+                conn.commit()
+            self._pg_trgm_available = True
+            logging.info(
+                "[metadata_db] pg_trgm extension ensured elapsed_ms=%s",
+                round((time.perf_counter() - started) * 1000.0, 3),
+            )
+        except Exception as exc:
+            self._pg_trgm_available = False
+            logging.warning(
+                "[metadata_db] pg_trgm extension ensure failed elapsed_ms=%s error=%s",
+                round((time.perf_counter() - started) * 1000.0, 3),
+                exc,
+                exc_info=True,
+            )
 
     def _get_work_id_by_paper_id(self, conn: Connection, paper_id: Optional[int]) -> Optional[str]:
         """根据 paper_id 查询 work_id。"""
@@ -1244,6 +1268,7 @@ class MetadataDB:
         candidate_pool_limit: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         """Return keyword candidates for query correction from paper_keywords."""
+        total_started = time.perf_counter()
         normalized_query = self._normalize_keyword(query)
         if not normalized_query:
             return []
@@ -1264,8 +1289,7 @@ class MetadataDB:
             "scispacy-en_ner_bionlp13cg_md-generated-test",
         ]
         params: Dict[str, Any] = {
-            "final_limit": limit if candidate_pool_limit is not None else max(limit * 5, 50),
-            "candidate_limit": candidate_pool_limit if candidate_pool_limit is not None else max(limit * 10, 100),
+            "candidate_limit": candidate_pool_limit if candidate_pool_limit is not None else 10,
             "min_weight": min_weight,
             "normalized_query": normalized_query.lower(),
             "query_token_count": len(tokens),
@@ -1317,6 +1341,7 @@ class MetadataDB:
             """
 
         with self.engine.connect() as conn:
+            sql_started = time.perf_counter()
             if use_trigram:
                 rows = conn.execute(
                     text(f"""
@@ -1416,8 +1441,10 @@ class MetadataDB:
                     """),
                     params,
                 ).fetchall()
+        sql_elapsed_ms = round((time.perf_counter() - sql_started) * 1000.0, 3)
 
-        return [
+        postprocess_started = time.perf_counter()
+        candidates = [
             {
                 "keyword": row[0],
                 "keyword_type": row[1],
@@ -1427,6 +1454,20 @@ class MetadataDB:
             }
             for row in rows
         ]
+        postprocess_elapsed_ms = round((time.perf_counter() - postprocess_started) * 1000.0, 3)
+        total_elapsed_ms = round((time.perf_counter() - total_started) * 1000.0, 3)
+        logging.info(
+            "[metadata_db] suggest_query_terms query=%r use_trigram=%s candidate_limit=%s sql_elapsed_ms=%s postprocess_elapsed_ms=%s total_elapsed_ms=%s row_count=%s candidate_count=%s",
+            query,
+            use_trigram,
+            params["candidate_limit"],
+            sql_elapsed_ms,
+            postprocess_elapsed_ms,
+            total_elapsed_ms,
+            len(rows),
+            len(candidates),
+        )
+        return candidates[: min(limit, int(params["candidate_limit"]))]
 
     def lookup_papers_by_keyword_terms(
         self,
@@ -2610,6 +2651,7 @@ class MetadataDB:
         limit: int = 5,
     ) -> List[Dict[str, Any]]:
         """Return ranked author-name candidates from the current JSONB author pool."""
+        total_started = time.perf_counter()
         normalized_query = self.normalize_author_name(query)
         if not normalized_query:
             return []
@@ -2626,13 +2668,14 @@ class MetadataDB:
         )
         params: Dict[str, Any] = {
             "candidate_limit": max(limit * 20, 50),
+            "author_source_name": self.AUTHOR_SUGGESTION_SOURCE,
             "raw_query": query,
             "normalized_query": normalized_query,
             "query_tokens": tokens,
         }
 
         with self.engine.connect() as conn:
-            conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
+            sql_started = time.perf_counter()
             rows = conn.execute(
                 text(f"""
                     WITH authors AS (
@@ -2647,6 +2690,12 @@ class MetadataDB:
                              jsonb_array_elements(paa.authors) AS author
                         WHERE author->>'name' IS NOT NULL
                           AND btrim(author->>'name') != ''
+                          AND EXISTS (
+                              SELECT 1
+                              FROM paper_sources ps
+                              WHERE ps.paper_id = paa.paper_id
+                                AND ps.source_name = :author_source_name
+                          )
                     )
                     SELECT
                         author_name,
@@ -2681,7 +2730,9 @@ class MetadataDB:
                 """),
                 params
             ).fetchall()
+        sql_elapsed_ms = round((time.perf_counter() - sql_started) * 1000.0, 3)
 
+        postprocess_started = time.perf_counter()
         best_by_normalized: Dict[str, Dict[str, Any]] = {}
         for row in rows:
             name = row[0]
@@ -2705,6 +2756,18 @@ class MetadataDB:
         candidates = sorted(
             best_by_normalized.values(),
             key=lambda item: (-item["score"], item["name"].lower())
+        )
+        postprocess_elapsed_ms = round((time.perf_counter() - postprocess_started) * 1000.0, 3)
+        total_elapsed_ms = round((time.perf_counter() - total_started) * 1000.0, 3)
+        logging.info(
+            "[metadata_db] suggest_author_names query=%r author_source=%s sql_elapsed_ms=%s postprocess_elapsed_ms=%s total_elapsed_ms=%s row_count=%s candidate_count=%s",
+            query,
+            self.AUTHOR_SUGGESTION_SOURCE,
+            sql_elapsed_ms,
+            postprocess_elapsed_ms,
+            total_elapsed_ms,
+            len(rows),
+            len(candidates),
         )
         return candidates[:limit]
 

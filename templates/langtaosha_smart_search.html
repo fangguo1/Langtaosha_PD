@@ -548,7 +548,7 @@
       <a
         class="header-left"
         href="https://langtaosha.org.cn/"
-        aria-label="打开浪淘沙官网"
+        aria-label="Go to Langtaosha Home"
       >
         <div class="logo-link">
           <img
@@ -561,7 +561,7 @@
       <a
         class="hero-content"
         href="http://43.143.246.163:5015/search-use"
-        aria-label="返回搜索首页"
+        aria-label="Return to Search Home"
       >
         <p class="hero-brand">
           <span class="hero-brand-name"><span class="brand-initial">L</span>ang<span class="brand-initial">T</span>ao<span class="brand-initial">S</span>ha</span>
@@ -758,8 +758,8 @@
 
       const normalizedPapers = (papers || []).map(normalizeRecentPaper);
       if (!normalizedPapers.length) {
-        recentStatusEl.textContent = "最近一个月暂无浪淘沙文章";
-        recentListEl.innerHTML = "<div class='paper-card'>最近一个月暂无浪淘沙文章</div>";
+        recentStatusEl.textContent = "No Langtaosha papers have been published in the past month.";
+        recentListEl.innerHTML = "<div class='paper-card'>No Langtaosha papers have been published in the past month.</div>";
         return;
       }
 
@@ -831,6 +831,7 @@
     }
 
     function showSearchingStatus() {
+      statusEl.hidden = false;
       statusEl.innerHTML = `<span class="search-loading"><span class="search-spinner" aria-hidden="true"></span><span>Searching</span></span>`;
     }
 
@@ -877,9 +878,10 @@
         : selectedSource === "biorxiv"
           ? "Biorxiv"
           : "All";
+      statusEl.hidden = false;
       statusEl.textContent = `Results: ${allResults.length} | Showing ${sourceLabel}: ${filtered.length}`;
       if (!filtered.length) {
-        resultsEl.innerHTML = `<div class='paper-card'>当前筛选条件下暂无结果</div>${renderBiorxivJump()}`;
+        resultsEl.innerHTML = `<div class='paper-card'>No results match the current filters.</div>${renderBiorxivJump()}`;
         return;
       }
       resultsEl.innerHTML = `${filtered.map((item) => renderItem(item)).join("")}${renderBiorxivJump()}`;
@@ -957,8 +959,8 @@
       }
       const langtaoshaCount = countBySource("langtaosha");
       const message = langtaoshaCount > 0
-        ? "符合要求的浪淘沙的结果已展示，想查看来自Biorxiv的结果？"
-        : "浪淘沙暂无符合要求的结果，想查看来自Biorxiv的结果？";
+        ? "All matching Langtaosha papers have been shown. Would you like to view results from bioRxiv as well?"
+        : "No matching Langtaosha papers were found. Would you like to view results from bioRxiv instead?";
       return `
         <div class="paper-card">
           <a
@@ -1075,11 +1077,9 @@
       renderQueryNotice(payload.notice);
       if (!allResults.length) {
         filterBarEl.style.display = "none";
-        const route = payload.query_understanding && payload.query_understanding.route;
-        statusEl.textContent = route === "author_suggestion"
-          ? "发现可能的作者名匹配，请确认是否按建议作者搜索。"
-          : `Results: ${payload.meta.count}`;
-        resultsEl.innerHTML = "<div class='paper-card'>暂无结果</div>";
+        statusEl.hidden = true;
+        statusEl.textContent = "";
+        resultsEl.innerHTML = "<div class='paper-card'>No results found.</div>";
         return;
       }
       filterBarEl.style.display = "grid";

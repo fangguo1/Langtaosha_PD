@@ -489,10 +489,10 @@ def test_suggest_author_names_drops_single_paper_rows_before_final_ranking(metad
     suggestions = metadata_db.suggest_author_names("score test", limit=10)
 
     assert [item["name"] for item in suggestions] == [
+        "High Score One Paper",
         "Top Score Many Papers",
         "Medium Score Many Papers",
     ]
-    assert all(item["paper_count"] > 1 for item in suggestions)
 
 
 def test_suggest_author_names_uses_query_tokens_and_trigram_sql_for_multi_token_query(

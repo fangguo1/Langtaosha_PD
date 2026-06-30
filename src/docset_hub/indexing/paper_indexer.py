@@ -732,8 +732,8 @@ class PaperIndexer:
         """
         total_started = time.perf_counter()
         understanding = self.query_understanding.analyze(query)
-        query_understanding_time=time.perf_counter() - total_started
-        logging.info(f"query_understanding_time: {query_understanding_time}ms")
+        query_understanding_elapsed_ms = round((time.perf_counter() - total_started) * 1000.0, 3)
+        logging.info("query_understanding_elapsed_ms: %s", query_understanding_elapsed_ms)
         understanding_payload = understanding.to_dict()
         corrected_query = understanding.corrected_query
         normalized_query = understanding.normalized_query or query

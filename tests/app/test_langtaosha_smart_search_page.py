@@ -99,6 +99,8 @@ def test_langtaosha_smart_search_page_renders_template_with_query_defaults():
     assert "overflow-wrap: anywhere;" in html
     assert "word-break: break-word;" in html
     assert "min-width: 0;" in html
+    assert 'statusEl.hidden = true;' in html
+    assert "Results: 0" not in html
     assert 'data-api-endpoint="/api/scholar/search"' in html
     assert f'data-client-surface="{DEFAULT_CLIENT_SURFACE}"' in html
     assert "renal adhesion" in html
@@ -186,3 +188,4 @@ def test_langtaosha_smart_search_page_keeps_legacy_page_hooks():
     assert "submitNoticeAction(actionQuery, action.mode || \"smart\", action.correction_decision || null);" in html
     assert 'searchUrl.searchParams.set("q", query)' in html
     assert "window.location.assign(searchUrl.toString())" in html
+    assert "Results: 0" not in html
