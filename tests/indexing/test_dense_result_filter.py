@@ -52,7 +52,7 @@ def test_build_dense_keyword_filter_terms_adds_hyphen_variants():
     assert "em" not in terms
 
 
-def test_filter_dense_results_prunes_by_similarity_and_keyword_presence():
+def test_filter_dense_results_prunes_by_similarity_only():
     metadata_db = FakeMetadataDB()
     results = [
         {"paper_id": 1, "work_id": "W1", "similarity": 0.61},
@@ -68,27 +68,28 @@ def test_filter_dense_results_prunes_by_similarity_and_keyword_presence():
         keyword_sources=["generated"],
     )
 
-    assert [item["work_id"] for item in kept] == ["W1"]
+    assert [item["work_id"] for item in kept] == ["W1", "W2"]
     assert report.initial_count == 3
-    assert report.kept_count == 1
+    assert report.kept_count == 2
     assert report.score_pruned_count == 1
-    assert report.keyword_pruned_count == 1
-    assert kept[0]["retrieval_debug"]["dense_hard_filter"]["matched_keywords"][0]["keyword"] == "cryo-EM"
+    assert report.keyword_pruned_count == 0
+    assert report.query_terms == []
+    assert report.matched_paper_ids == []
 
 
-def test_filter_dense_results_keeps_keyword_substring_match():
+def test_filter_dense_results_does_not_require_keyword_match():
     metadata_db = FakeMetadataDB()
     results = [
-        {"paper_id": 3, "work_id": "W3", "similarity": 0.55},
+        {"paper_id": 999, "work_id": "W999", "similarity": 0.55},
     ]
 
     kept, report = filter_dense_results_by_hard_rules(
         metadata_db=metadata_db,
-        query="electron microscopy",
+        query="not in keyword table",
         results=results,
         min_similarity=0.46,
         keyword_sources=["generated"],
     )
 
-    assert [item["work_id"] for item in kept] == ["W3"]
+    assert [item["work_id"] for item in kept] == ["W999"]
     assert report.keyword_pruned_count == 0

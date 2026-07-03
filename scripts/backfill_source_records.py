@@ -527,6 +527,77 @@ def _print_summary(stage: str, pg_stats: Optional[Dict[str, Any]], vector_stats:
     print("=" * 72)
 
 
+def _jsonable_stats(stats: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if stats is None:
+        return None
+    payload = dict(stats)
+    for key, value in payload.items():
+        if isinstance(value, Counter):
+            payload[key] = dict(value)
+    return payload
+
+
+def _build_summary_payload(
+    stage: str,
+    pg_stats: Optional[Dict[str, Any]],
+    vector_stats: Optional[Dict[str, Any]],
+    dry_run: bool,
+) -> Dict[str, Any]:
+    pg_payload = _jsonable_stats(pg_stats)
+    vector_payload = _jsonable_stats(vector_stats)
+    substeps = []
+
+    if pg_payload is not None:
+        substeps.append(
+            {
+                "step": "pg_backfill",
+                "status": "failed" if pg_payload.get("failed", 0) else "ok",
+                "metrics": pg_payload,
+            }
+        )
+    else:
+        substeps.append(
+            {
+                "step": "pg_backfill",
+                "status": "skipped_expected",
+                "reason": "stage_disabled",
+            }
+        )
+
+    if vector_payload is not None:
+        substeps.append(
+            {
+                "step": "dense_backfill",
+                "status": "failed" if vector_payload.get("failed", 0) else "ok",
+                "metrics": vector_payload,
+            }
+        )
+    else:
+        substeps.append(
+            {
+                "step": "dense_backfill",
+                "status": "skipped_expected",
+                "reason": "stage_disabled",
+            }
+        )
+
+    return {
+        "schema_version": 1,
+        "operation": "source_records_backfill",
+        "stage": stage,
+        "dry_run": dry_run,
+        "status": "failed" if any(step["status"] == "failed" for step in substeps) else "ok",
+        "substeps": substeps,
+    }
+
+
+def _write_summary_json(path: Optional[Path], payload: Dict[str, Any]) -> None:
+    if path is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="bioRxiv history 两阶段 backfill（阶段 5/6）",
@@ -591,6 +662,12 @@ def parse_args() -> argparse.Namespace:
         "--verbose",
         action="store_true",
         help="显示中间处理过程（详细日志 + tqdm 进度条）",
+    )
+    parser.add_argument(
+        "--summary-json",
+        type=Path,
+        default=None,
+        help="可选：写入机器可读的 PG/Dense backfill 汇总 JSON",
     )
 
     return parser.parse_args()
@@ -659,6 +736,13 @@ def main() -> int:
             )
 
         _print_summary(args.stage, pg_stats, vector_stats, args.dry_run)
+        summary_payload = _build_summary_payload(
+            stage=args.stage,
+            pg_stats=pg_stats,
+            vector_stats=vector_stats,
+            dry_run=args.dry_run,
+        )
+        _write_summary_json(args.summary_json, summary_payload)
 
         has_failures = False
         if pg_stats and pg_stats.get("failed", 0) > 0:
@@ -670,6 +754,18 @@ def main() -> int:
 
     except Exception as exc:
         logging.exception("backfill 执行失败: %s", exc)
+        _write_summary_json(
+            args.summary_json,
+            {
+                "schema_version": 1,
+                "operation": "source_records_backfill",
+                "stage": args.stage,
+                "dry_run": args.dry_run,
+                "status": "failed",
+                "error_summary": str(exc),
+                "substeps": [],
+            },
+        )
         return 1
 
 

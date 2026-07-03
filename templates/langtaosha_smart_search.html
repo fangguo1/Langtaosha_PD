@@ -1,0 +1,1134 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LangTaosha Smart Search Demo</title>
+  <link rel="icon" type="image/png" href="/lib/ui-library/src/resources/favicon_en.png" />
+  <style>
+    :root {
+      --primary: #0F4C81;
+      --secondary: #2C7FB8;
+      --accent: #D98C2B;
+      --bg-main: #FAFBFC;
+      --bg-card: #FFFFFF;
+      --bg-sidebar: #F5F7F9;
+      --text-primary: #1A1A1A;
+      --text-secondary: #5B6675;
+      --text-meta: #8A94A6;
+      --border-light: #E6EAF0;
+      --border-medium: #D7DDE5;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Inter, "Helvetica Neue", Arial, sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(44, 127, 184, 0.08), transparent 32%),
+        linear-gradient(180deg, #fdfefe 0%, var(--bg-main) 100%);
+      color: var(--text-primary);
+    }
+
+    .page-shell {
+      width: min(1080px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 56px 0 72px;
+    }
+
+    .hero {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      padding: 12px 32px;
+      margin-bottom: 28px;
+      border-radius: 18px;
+      background: #244C94;
+    }
+
+    .header-left,
+    .hero-content {
+      text-decoration: none;
+      color: inherit;
+    }
+
+    .header-left {
+      flex: 0 0 auto;
+    }
+
+    .logo-link {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 116px;
+      height: 116px;
+      border: 1px solid #244C94;
+      border-radius: 16px;
+      background: #244C94;
+      box-shadow: none;
+    }
+
+    .logo-image {
+      width: 94px;
+      height: auto;
+      display: block;
+    }
+
+    .hero-content {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      flex: 1;
+      min-width: 0;
+      min-height: 116px;
+    }
+
+    .hero-kicker {
+      margin: 0 0 10px;
+      color: #F2D16B;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .hero-brand {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin: 0 0 10px;
+      color: #FFFFFF;
+      font-size: 44px;
+      font-weight: 800;
+      line-height: 1.15;
+      letter-spacing: 0;
+      text-transform: none;
+      overflow-wrap: anywhere;
+    }
+
+    .hero-brand-name,
+    .hero-brand-title {
+      display: block;
+    }
+
+    .brand-initial {
+      color: #F2D16B;
+    }
+
+    .hero-subtitle {
+      margin: 6px 0 0;
+      color: #D1D5DB;
+      font-size: 15px;
+      line-height: 1.35;
+    }
+
+    .search-panel {
+      padding: 24px;
+      border: 1px solid var(--border-light);
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.96);
+      box-shadow: 0 18px 42px rgba(15, 76, 129, 0.06);
+      backdrop-filter: blur(6px);
+    }
+
+    #search-form {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+    }
+
+    #search-input {
+      width: 100%;
+      min-height: 52px;
+      border: 1px solid var(--border-medium);
+      border-radius: 12px;
+      padding: 0 16px;
+      font-size: 16px;
+      color: var(--text-primary);
+      background: #FFFFFF;
+      outline: none;
+      transition: border-color 120ms ease, box-shadow 120ms ease;
+    }
+
+    #search-input:focus {
+      border-color: #0F4C81;
+      box-shadow: 0 0 0 3px rgba(15,76,129,0.12);
+    }
+
+    #search-button {
+      min-height: 52px;
+      border: 0;
+      border-radius: 12px;
+      padding: 0 22px;
+      background: #0F4C81;
+      color: #fff;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    #search-button:hover {
+      background: #0A3B66;
+    }
+
+    #status {
+      min-height: 24px;
+      margin-top: 14px;
+      color: var(--text-secondary);
+      font-size: 14px;
+    }
+
+    .search-loading {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--primary);
+      font-weight: 600;
+    }
+
+    .search-spinner {
+      width: 16px;
+      height: 16px;
+      border: 2px solid rgba(15, 76, 129, 0.18);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 850ms linear infinite;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    .filter-bar {
+      display: none;
+      grid-template-columns: minmax(0, 1fr) 220px;
+      align-items: start;
+      width: 100%;
+      gap: 12px;
+      margin: 14px 0 10px;
+      padding: 12px;
+      background: var(--bg-sidebar);
+      border: 1px solid var(--border-light);
+      border-radius: 12px;
+    }
+
+    .filter-main {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .filter-group {
+      min-width: 220px;
+    }
+
+    .sort-group {
+      min-width: 220px;
+      align-self: start;
+    }
+
+    .filter-title {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--text-secondary);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .sort-select {
+      width: 100%;
+      height: 26px;
+      border: 1px solid var(--border-medium);
+      border-radius: 6px;
+      background: #FFFFFF;
+      color: var(--text-primary);
+      padding: 0 24px 0 10px;
+      font: inherit;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .chip {
+      border: 1px solid var(--border-medium);
+      background: white;
+      color: var(--primary);
+      border-radius: 999px;
+      padding: 5px 10px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .chip.active {
+      border-color: var(--primary);
+      background: rgba(15, 76, 129, 0.08);
+      color: var(--primary);
+      font-weight: 700;
+    }
+
+    .query-notice {
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 12px;
+      padding: 12px 14px;
+      border: 1px solid rgba(217, 140, 43, 0.28);
+      border-radius: 12px;
+      background: rgba(217, 140, 43, 0.08);
+      color: #7b531f;
+    }
+
+    .query-notice-actions {
+      display: inline-flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-left: auto;
+    }
+
+    .query-notice button {
+      border: 1px solid rgba(15, 76, 129, 0.18);
+      border-radius: 999px;
+      background: white;
+      color: var(--primary);
+      padding: 8px 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    #results {
+      display: grid;
+      gap: 16px;
+      margin-top: 20px;
+    }
+
+    .paper-card {
+      padding: 24px;
+      border: 1px solid var(--border-light);
+      border-radius: 12px;
+      background: white;
+      transition: box-shadow 120ms ease, transform 120ms ease;
+    }
+
+    .paper-card:hover {
+      box-shadow: 0 4px 16px rgba(0,0,0,0.05);
+      transform: translateY(-1px);
+    }
+
+    .result-jump-link {
+      color: var(--primary);
+      font-weight: 600;
+      text-decoration: underline;
+      text-underline-offset: 0.18em;
+    }
+
+    .result-jump-link:hover {
+      color: var(--secondary);
+    }
+
+    .paper-card h2 {
+      margin: 0 0 10px;
+      font-size: 22px;
+      font-weight: 600;
+      line-height: 1.35;
+      min-width: 0;
+    }
+
+    .paper-card h2 a {
+      color: var(--primary);
+      text-decoration: none;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+
+    .paper-card h2 a:hover {
+      color: var(--secondary);
+      text-decoration: underline;
+    }
+
+    .meta {
+      margin: 0 0 12px;
+      color: var(--text-meta);
+      font-size: 13px;
+      line-height: 1.6;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+
+    .abstract {
+      margin: 0;
+      color: var(--text-secondary);
+      font-size: 15px;
+      line-height: 1.7;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+
+    .section-label {
+      margin: 14px 0 6px;
+      color: var(--text-secondary);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .concept-keyword-tags {
+      display: flex;
+      align-items: flex-start;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 10px 0 12px;
+      color: var(--text-meta);
+      font-size: 13px;
+      line-height: 1.6;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+
+    .concept-keyword-tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      max-width: 100%;
+      border: 1px solid rgba(217, 140, 43, 0.24);
+      border-radius: 999px;
+      background: rgba(217, 140, 43, 0.08);
+      color: #7b531f;
+      padding: 4px 9px;
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+
+    .home-recent-section {
+      display: none;
+      margin-top: 24px;
+      padding: 20px;
+      border: 1px solid var(--border-light);
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.96);
+      box-shadow: 0 12px 32px rgba(15, 76, 129, 0.05);
+    }
+
+    .page-shell[data-has-initial-query="false"] .home-recent-section {
+      display: block;
+    }
+
+    .page-shell[data-has-initial-query="false"] #status,
+    .page-shell[data-has-initial-query="false"] #queryNotice {
+      display: none;
+    }
+
+    .home-recent-header {
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 12px;
+    }
+
+    .home-recent-header h2 {
+      margin: 0;
+      color: var(--primary);
+      font-size: 24px;
+      line-height: 1.25;
+    }
+
+    .recent-status {
+      color: var(--text-secondary);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .recent-list {
+      display: grid;
+      gap: 14px;
+      max-height: 640px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+
+    @media (max-width: 720px) {
+      .page-shell {
+        width: min(100%, calc(100% - 24px));
+        padding-top: 24px;
+      }
+
+      .hero {
+        align-items: center;
+        gap: 12px;
+        padding: 12px 16px;
+      }
+
+      .logo-link {
+        width: 80px;
+        height: 80px;
+        border-radius: 12px;
+      }
+
+      .logo-image {
+        width: 64px;
+      }
+
+      .hero-content {
+        min-height: 0;
+      }
+
+      .hero-brand {
+        margin-bottom: 4px;
+        font-size: 18px;
+        line-height: 1.2;
+        gap: 2px;
+      }
+
+      .hero-subtitle {
+        margin-top: 2px;
+        font-size: 12px;
+        line-height: 1.3;
+      }
+
+      #search-form {
+        grid-template-columns: 1fr;
+      }
+
+      #search-button {
+        width: 100%;
+      }
+
+      .query-notice {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .filter-bar {
+        grid-template-columns: 1fr;
+      }
+
+      .filter-main {
+        flex-direction: column;
+        width: 100%;
+      }
+
+      .filter-group {
+        min-width: 0;
+        width: 100%;
+      }
+
+      .sort-group {
+        width: 100%;
+      }
+
+      .home-recent-header {
+        flex-direction: column;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main
+    class="page-shell"
+    data-has-initial-query="{{ 'true' if initial_query else 'false' }}"
+  >
+    <header class="hero">
+      <a
+        class="header-left"
+        href="https://langtaosha.org.cn/"
+        aria-label="Go to Langtaosha Home"
+      >
+        <div class="logo-link">
+          <img
+            src="/lib/ui-library/src/resources/ltslogo_new.png"
+            class="logo-image"
+            alt="LangTaoSha"
+          />
+        </div>
+      </a>
+      <a
+        class="hero-content"
+        href="http://43.143.246.163:5015/search-use"
+        aria-label="Return to Search Home"
+      >
+        <p class="hero-brand">
+          <span class="hero-brand-name"><span class="brand-initial">L</span>ang<span class="brand-initial">T</span>ao<span class="brand-initial">S</span>ha</span>
+          <span class="hero-brand-title">Smart Search Demo</span>
+        </p>
+        <p class="hero-subtitle">Making academic search understand you better.</p>
+      </a>
+    </header>
+
+    <section class="search-panel">
+      <form
+        id="search-form"
+        data-api-endpoint="/api/scholar/search"
+        data-client-surface="{{ client_surface }}"
+      >
+        <input
+          id="search-input"
+          name="query"
+          type="text"
+          value="{{ initial_query }}"
+          placeholder="Search Langtaosha Preprints and bioRxiv"
+        />
+        <input id="top-k-input" name="limit" type="hidden" value="{{ default_top_k }}" />
+        <input id="correction-decision-input" name="correction_decision" type="hidden" value="" />
+        <button id="search-button" type="submit">Search</button>
+      </form>
+      <div id="status" aria-live="polite"></div>
+      <div id="queryNotice" class="query-notice"></div>
+      <div id="filterBar" class="filter-bar">
+        <div class="filter-main">
+          <div class="filter-group">
+            <span class="filter-title">Source</span>
+            <div id="sourceFilters" class="chips"></div>
+          </div>
+          <div class="filter-group">
+            <span class="filter-title">Year</span>
+            <div id="yearFilters" class="chips"></div>
+          </div>
+        </div>
+        <div class="filter-group sort-group">
+          <span class="filter-title">Sort</span>
+          <select id="sortSelect" class="sort-select" aria-label="Sort results">
+            <option value="relevance" selected>Sort by Relevance</option>
+            <option value="recency">Sort by Recency</option>
+          </select>
+        </div>
+      </div>
+      <div id="results"></div>
+    </section>
+
+    <section id="homeRecentSection" class="home-recent-section" aria-labelledby="homeRecentTitle">
+      <div class="home-recent-header">
+        <div>
+          <p class="hero-kicker">Recent New</p>
+          <h2 id="homeRecentTitle">Recent Langtaosha Papers</h2>
+        </div>
+      </div>
+      <div id="recentStatus" class="recent-status" aria-live="polite">Loading latest Langtaosha papers...</div>
+      <div id="recentList" class="recent-list"></div>
+    </section>
+  </main>
+
+  <script>
+    const form = document.getElementById("search-form");
+    const input = document.getElementById("search-input");
+    const correctionDecisionInput = document.getElementById("correction-decision-input");
+    const statusEl = document.getElementById("status");
+    const queryNoticeEl = document.getElementById("queryNotice");
+    const filterBarEl = document.getElementById("filterBar");
+    const sourceFiltersEl = document.getElementById("sourceFilters");
+    const yearFiltersEl = document.getElementById("yearFilters");
+    const sortSelectEl = document.getElementById("sortSelect");
+    const resultsEl = document.getElementById("results");
+    const pageShell = document.querySelector(".page-shell");
+    const hasInitialQuery = pageShell?.dataset.hasInitialQuery === "true";
+    const homeRecentSectionEl = document.getElementById("homeRecentSection");
+    const recentStatusEl = document.getElementById("recentStatus");
+    const recentListEl = document.getElementById("recentList");
+    let allResults = [];
+    let groupedResults = { langtaosha: [], biorxiv: [] };
+    let selectedSource = "langtaosha";
+    let selectedYear = "all";
+    let selectedSort = "relevance";
+    let currentSearchMeta = null;
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+    }
+
+    function formatDate(value) {
+      if (!value) return "-";
+      const text = String(value);
+      const match = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (!match) return text;
+      return `${match[1]}-${match[2]}-${match[3]}`;
+    }
+
+    function toDateOnly(value) {
+      const year = value.getFullYear();
+      const month = String(value.getMonth() + 1).padStart(2, "0");
+      const day = String(value.getDate()).padStart(2, "0");
+      return `${year}-${month}-${day}`;
+    }
+
+    function getRecentOneMonthInterval(referenceDate = new Date()) {
+      const dateTo = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), referenceDate.getDate());
+      const dateFrom = new Date(dateTo);
+      dateFrom.setMonth(dateFrom.getMonth() - 1);
+      return {
+        dateFrom: toDateOnly(dateFrom),
+        dateTo: toDateOnly(dateTo),
+      };
+    }
+
+    function extractYear(value) {
+      if (!value) return "Unknown";
+      const match = String(value).match(/^(\d{4})-/);
+      return match ? match[1] : "Unknown";
+    }
+
+    function makeChip(label, active, onClick) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = active ? "chip active" : "chip";
+      btn.textContent = label;
+      btn.addEventListener("click", onClick);
+      return btn;
+    }
+
+    function renderItem(item) {
+      const title = escapeHtml(item.title || "(Untitled)");
+      const abstract = escapeHtml(item.abstract || "(No abstract)");
+      const authors = escapeHtml(item.authors || "Unknown authors");
+      const doi = escapeHtml(item.doi || "-");
+      const onlineDate = escapeHtml(formatDate(item.online_date));
+      const source = escapeHtml(item.source || "-");
+      const link = item.link ? escapeHtml(item.link) : "";
+      const linkHtml = link
+        ? `<a href="${link}" target="_blank" rel="noopener noreferrer">${link}</a>`
+        : "-";
+
+      return `
+        <article class="paper-card">
+          <h2 class="title">${title}</h2>
+          <p class="meta"><strong>Authors:</strong> ${authors}</p>
+          <p class="meta"><strong>Source:</strong> ${source}</p>
+          <p class="meta"><strong>DOI:</strong> ${doi} | <strong>Online Date:</strong> ${onlineDate}</p>
+          <p class="meta"><strong>Link:</strong> ${linkHtml}</p>
+          ${renderConceptKeywords(item)}
+          <p class="section-label">Abstract</p>
+          <p class="abstract">${abstract}</p>
+        </article>
+      `;
+    }
+
+    function normalizeAuthors(value) {
+      if (Array.isArray(value)) {
+        return value.map((author) => {
+          if (typeof author === "string") return author;
+          return author?.name || author?.full_name || "";
+        }).filter(Boolean).join(", ");
+      }
+      return value || "";
+    }
+
+    function firstSourceRecord(item) {
+      if (Array.isArray(item.sources) && item.sources.length) {
+        return item.sources[0] || {};
+      }
+      return {};
+    }
+
+    function normalizeRecentPaper(item) {
+      const sourceRecord = firstSourceRecord(item);
+      return {
+        title: item.title || item.canonical_title || "(Untitled)",
+        abstract: item.abstract || item.canonical_abstract || "(No abstract)",
+        authors: normalizeAuthors(item.authors || item.canonical_authors),
+        doi: item.doi || sourceRecord.doi || "-",
+        online_date: item.online_date || item.online_at || item.published_at || "",
+        source: item.source || sourceRecord.source_name || "langtaosha",
+        source_key: "langtaosha",
+        link: item.link || item.url || sourceRecord.source_url || "",
+      };
+    }
+
+    function renderRecentPapers(papers) {
+      if (!recentListEl || !recentStatusEl) return;
+
+      const normalizedPapers = (papers || []).map(normalizeRecentPaper);
+      if (!normalizedPapers.length) {
+        recentStatusEl.textContent = "No Langtaosha papers have been published in the past month.";
+        recentListEl.innerHTML = "<div class='paper-card'>No Langtaosha papers have been published in the past month.</div>";
+        return;
+      }
+
+      recentStatusEl.textContent = "";
+      recentListEl.innerHTML = normalizedPapers.map((item) => renderItem(item)).join("");
+    }
+
+    async function loadRecentLangtaoshaPapers() {
+      if (!homeRecentSectionEl || hasInitialQuery) return;
+
+      const interval = getRecentOneMonthInterval();
+      if (recentStatusEl) {
+        recentStatusEl.textContent = "Loading latest Langtaosha papers...";
+      }
+
+      try {
+        const response = await fetch("/api/retrieve_papers_by_time_interval", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            date_from: interval.dateFrom,
+            date_to: interval.dateTo,
+          }),
+        });
+        const payload = await response.json();
+
+        if (!response.ok || !payload.success) {
+          throw new Error(payload.error || "Failed to load latest Langtaosha papers");
+        }
+
+        renderRecentPapers(payload.papers || []);
+      } catch (err) {
+        if (recentStatusEl) {
+          recentStatusEl.textContent = `Error: ${err.message}`;
+        }
+      }
+    }
+
+    function normalizeGroupedResults(rawResults) {
+      const normalized = { langtaosha: [], biorxiv: [] };
+      if (!Array.isArray(rawResults)) {
+        return normalized;
+      }
+
+      rawResults.forEach((entry) => {
+        if (!Array.isArray(entry) || entry.length !== 2) {
+          return;
+        }
+        const sourcePrefix = String(entry[0] || "").trim();
+        const items = Array.isArray(entry[1]) ? entry[1] : [];
+        if (sourcePrefix === "langtaosha" || sourcePrefix === "biorxiv") {
+          normalized[sourcePrefix] = items;
+        }
+      });
+      return normalized;
+    }
+
+    function flattenGroupedResults(groups) {
+      return [
+        ...(groups.langtaosha || []),
+        ...(groups.biorxiv || []),
+      ];
+    }
+
+    function renderResults(items) {
+      resultsEl.innerHTML = (items || []).map((item) => renderItem(item)).join("");
+    }
+
+    function showSearchingStatus() {
+      statusEl.hidden = false;
+      statusEl.innerHTML = `<span class="search-loading"><span class="search-spinner" aria-hidden="true"></span><span>Searching</span></span>`;
+    }
+
+    function renderConceptKeywords(item) {
+      if (!item || item.source_key !== "langtaosha") return "";
+      const conceptKeywords = (Array.isArray(item.keywords) ? item.keywords : [])
+        .filter((keyword) => String(keyword?.source || "").trim().toLowerCase() === "langtaosha")
+        .filter((keyword) => String(keyword?.keyword_type || "").trim().toLowerCase() === "concept")
+        .map((keyword) => keyword?.keyword || keyword?.keyword_text || keyword?.text || keyword?.name)
+        .filter(Boolean);
+      if (!conceptKeywords.length) return "";
+
+      const tags = conceptKeywords
+        .map((keyword) => `<span class="concept-keyword-tag">${escapeHtml(keyword)}</span>`)
+        .join("");
+      return `<p class="concept-keyword-tags"><strong>Keywords:</strong> ${tags}</p>`;
+    }
+
+    function getFilteredResults() {
+      return allResults.filter((item) => {
+        const sourceOk = selectedSource === "all" || item.source_key === selectedSource;
+        const yearOk = selectedYear === "all" || extractYear(item.online_date) === selectedYear;
+        return sourceOk && yearOk;
+      });
+    }
+
+    function parseOnlineDateForSort(item) {
+      if (!item || !item.online_date) return Number.NEGATIVE_INFINITY;
+      const timestamp = Date.parse(item.online_date);
+      return Number.isNaN(timestamp) ? Number.NEGATIVE_INFINITY : timestamp;
+    }
+
+    function sortResults(items) {
+      if (selectedSort === "recency") {
+        return [...items].sort((a, b) => parseOnlineDateForSort(b) - parseOnlineDateForSort(a));
+      }
+      return items;
+    }
+
+    function renderFilteredResults() {
+      const filtered = sortResults(getFilteredResults());
+      const sourceLabel = selectedSource === "langtaosha"
+        ? "Langtaosha"
+        : selectedSource === "biorxiv"
+          ? "Biorxiv"
+          : "All";
+      statusEl.hidden = false;
+      statusEl.textContent = `Results: ${allResults.length} | Showing ${sourceLabel}: ${filtered.length}`;
+      if (!filtered.length) {
+        resultsEl.innerHTML = `<div class='paper-card'>No results match the current filters.</div>${renderBiorxivJump()}`;
+        return;
+      }
+      resultsEl.innerHTML = `${filtered.map((item) => renderItem(item)).join("")}${renderBiorxivJump()}`;
+    }
+
+    function renderFilters() {
+      const sourceCounts = { all: allResults.length, langtaosha: 0, biorxiv: 0 };
+      const yearCounts = {};
+
+      allResults.forEach((item) => {
+        const sourceKey = item.source_key || "unknown";
+        if (sourceCounts[sourceKey] !== undefined) {
+          sourceCounts[sourceKey] += 1;
+        }
+      });
+
+      const sourceScopedResults = allResults.filter((item) => {
+        return selectedSource === "all" || item.source_key === selectedSource;
+      });
+
+      sourceScopedResults.forEach((item) => {
+        const year = extractYear(item.online_date);
+        yearCounts[year] = (yearCounts[year] || 0) + 1;
+      });
+
+      sourceFiltersEl.innerHTML = "";
+      sourceFiltersEl.appendChild(makeChip(`All (${sourceCounts.all || 0})`, selectedSource === "all", () => {
+        selectedSource = "all";
+        selectedYear = "all";
+        renderFilters();
+        renderFilteredResults();
+      }));
+      sourceFiltersEl.appendChild(makeChip(`Langtaosha (${sourceCounts.langtaosha || 0})`, selectedSource === "langtaosha", () => {
+        selectedSource = "langtaosha";
+        selectedYear = "all";
+        renderFilters();
+        renderFilteredResults();
+      }));
+      sourceFiltersEl.appendChild(makeChip(`Biorxiv (${sourceCounts.biorxiv || 0})`, selectedSource === "biorxiv", () => {
+        selectedSource = "biorxiv";
+        selectedYear = "all";
+        renderFilters();
+        renderFilteredResults();
+      }));
+
+      const sortedYears = Object.keys(yearCounts).sort((a, b) => {
+        if (a === "Unknown") return 1;
+        if (b === "Unknown") return -1;
+        return Number(b) - Number(a);
+      });
+
+      yearFiltersEl.innerHTML = "";
+      yearFiltersEl.appendChild(makeChip(`All (${sourceScopedResults.length})`, selectedYear === "all", () => {
+        selectedYear = "all";
+        renderFilters();
+        renderFilteredResults();
+      }));
+      sortedYears.forEach((year) => {
+        yearFiltersEl.appendChild(makeChip(`${year} (${yearCounts[year]})`, selectedYear === year, () => {
+          selectedYear = year;
+          renderFilters();
+          renderFilteredResults();
+        }));
+      });
+    }
+
+    function countBySource(sourceKey) {
+      return allResults.filter((item) => item.source_key === sourceKey).length;
+    }
+
+    function renderBiorxivJump() {
+      const biorxivCount = countBySource("biorxiv");
+      if (selectedSource !== "langtaosha" || selectedYear !== "all" || biorxivCount <= 0) {
+        return "";
+      }
+      const langtaoshaCount = countBySource("langtaosha");
+      const message = langtaoshaCount > 0
+        ? "All matching Langtaosha papers have been shown. Would you like to view results from bioRxiv as well?"
+        : "No matching Langtaosha papers were found. Would you like to view results from bioRxiv instead?";
+      return `
+        <div class="paper-card">
+          <a
+            href="#results"
+            class="result-jump-link"
+            data-action="show-biorxiv-link"
+          >${escapeHtml(message)}</a>
+        </div>
+      `;
+    }
+
+    function clearQueryNotice() {
+      queryNoticeEl.style.display = "none";
+      queryNoticeEl.innerHTML = "";
+    }
+
+    function renderQueryNotice(notice) {
+      clearQueryNotice();
+      if (!notice || !notice.message) return;
+
+      const message = document.createElement("span");
+      message.textContent = notice.message;
+      queryNoticeEl.appendChild(message);
+      const actionsEl = document.createElement("div");
+      actionsEl.className = "query-notice-actions";
+
+      const actions = Array.isArray(notice.actions) && notice.actions.length
+        ? notice.actions
+        : (notice.fallback_mode && notice.fallback_query && notice.action_label
+          ? [{
+              label: notice.action_label,
+              mode: notice.fallback_mode,
+              query: notice.fallback_query,
+              correction_decision: notice.correction_decision,
+            }]
+          : []);
+
+      actions.forEach((action) => {
+        if (!action || !action.label) return;
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.textContent = action.label;
+        btn.addEventListener("click", () => {
+          const actionQuery = action.query || input.value.trim();
+          input.value = actionQuery;
+          submitNoticeAction(actionQuery, action.mode || "smart", action.correction_decision || null);
+        });
+        actionsEl.appendChild(btn);
+      });
+
+      if (actionsEl.childElementCount) {
+        queryNoticeEl.appendChild(actionsEl);
+      }
+      queryNoticeEl.style.display = "flex";
+    }
+
+    function submitNoticeAction(query, mode = "smart", correctionDecision = null) {
+      input.value = query;
+      form.dataset.pendingMode = mode;
+      correctionDecisionInput.value = correctionDecision || "";
+      form.requestSubmit();
+    }
+
+    async function runSearch(query, mode = "smart", correctionDecision = null) {
+      if (!query) {
+        statusEl.textContent = "Please enter a query.";
+        return;
+      }
+
+      const endpoint = form.dataset.apiEndpoint;
+      const clientSurface = form.dataset.clientSurface;
+      const url = new URL(endpoint, window.location.origin);
+      url.searchParams.set("query", query);
+      url.searchParams.set("mode", mode);
+      url.searchParams.set("top_k", document.getElementById("top-k-input").value);
+      if (correctionDecision) {
+        url.searchParams.set("correction_decision", correctionDecision);
+      }
+
+      showSearchingStatus();
+      clearQueryNotice();
+      filterBarEl.style.display = "none";
+      resultsEl.innerHTML = "";
+
+      const response = await fetch(url.toString(), {
+        headers: {
+          "X-Langtaosha-Client-Surface": clientSurface,
+        },
+      });
+      const payload = await response.json();
+      correctionDecisionInput.value = "";
+      form.dataset.pendingMode = "";
+
+      if (!response.ok || !payload.success) {
+        statusEl.textContent = payload.error || "Search failed.";
+        return;
+      }
+
+      currentSearchMeta = {
+        query: payload.query,
+        search_mode: payload.search_mode,
+        search_query: payload.search_query,
+      };
+      const displayedQuery = payload.search_query || payload.query?.executed || query;
+      input.value = displayedQuery;
+      groupedResults = normalizeGroupedResults(payload.results);
+      allResults = flattenGroupedResults(groupedResults);
+      selectedSource = "langtaosha";
+      selectedYear = "all";
+      selectedSort = "relevance";
+      if (sortSelectEl) {
+        sortSelectEl.value = selectedSort;
+      }
+      renderQueryNotice(payload.notice);
+      if (!allResults.length) {
+        filterBarEl.style.display = "none";
+        statusEl.hidden = true;
+        statusEl.textContent = "";
+        resultsEl.innerHTML = "<div class='paper-card'>No results found.</div>";
+        return;
+      }
+      filterBarEl.style.display = "grid";
+      renderFilters();
+      renderFilteredResults();
+    }
+
+    resultsEl.addEventListener("click", (event) => {
+      const actionEl = event.target.closest("[data-action]");
+      if (!actionEl) return;
+
+      if (actionEl.dataset.action === "show-biorxiv" || actionEl.dataset.action === "show-biorxiv-link") {
+        event.preventDefault();
+        selectedSource = "biorxiv";
+        selectedYear = "all";
+        renderFilters();
+        renderFilteredResults();
+        resultsEl.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    });
+
+    sortSelectEl.addEventListener("change", () => {
+      selectedSort = sortSelectEl.value === "recency" ? "recency" : "relevance";
+      renderFilteredResults();
+    });
+
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const query = input.value.trim();
+      const mode = form.dataset.pendingMode || "smart";
+      const correctionDecision = correctionDecisionInput.value || null;
+      if (!query) {
+        statusEl.textContent = "Please enter a query.";
+        return;
+      }
+      if (!hasInitialQuery && mode === "smart" && !correctionDecision) {
+        const searchUrl = new URL(window.location.pathname, window.location.origin);
+        searchUrl.searchParams.set("q", query);
+        window.location.assign(searchUrl.toString());
+        return;
+      }
+      void runSearch(query, mode, correctionDecision);
+    });
+
+    if (hasInitialQuery && input.value.trim()) {
+      void runSearch(input.value.trim());
+    } else {
+      void loadRecentLangtaoshaPapers();
+    }
+  </script>
+</body>
+</html>

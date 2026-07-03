@@ -20,15 +20,16 @@ def parse_date(value: str) -> date:
     return datetime.strptime(value, "%Y-%m-%d").date()
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run daily fetch, ingest, and author-enrichment pipeline.")
     parser.add_argument("--date", default=None, help="Target date YYYY-MM-DD. Defaults to yesterday.")
     parser.add_argument("--config-path", default="src/config/config_tecent_backend_server_test.yaml")
     parser.add_argument("--project-root", default=str(PROJECT_ROOT))
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--skip-vector", action="store_true")
+    parser.add_argument("--skip-sparse", action="store_true")
     parser.add_argument("--skip-author-enrichment", action="store_true")
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def main() -> int:
@@ -41,6 +42,7 @@ def main() -> int:
             target_date=target_date,
             dry_run=args.dry_run,
             run_vector_stage=not args.skip_vector,
+            run_sparse_stage=not args.skip_sparse,
             run_author_enrichment=not args.skip_author_enrichment,
         )
     )

@@ -28,6 +28,7 @@ import pytest
 import logging
 import argparse
 import os
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List
 from sqlalchemy import text
@@ -1157,6 +1158,75 @@ class TestQueryMethods:
         assert "canonical_title" in paper_info
         assert "sources" in paper_info
 
+    def test_get_paper_info_by_paper_id_filters_sources_when_source_name_provided(self):
+        """传入 source_name 时应只返回该 source 的 sources/metadata。"""
+        class FakeResult:
+            def __init__(self, rows):
+                self.rows = rows
+
+            def fetchone(self):
+                return self.rows[0] if self.rows else None
+
+            def fetchall(self):
+                return list(self.rows)
+
+        class FakeConnection:
+            def execute(self, statement, params):
+                sql = str(statement)
+                if "FROM papers" in sql:
+                    return FakeResult([
+                        (
+                            101, "W101", "Title", "Abstract", "en", "Publisher",
+                            None, None, None, 501, "merged", None, None,
+                        )
+                    ])
+                if "FROM paper_sources" in sql:
+                    if params["source_name"] == "langtaosha":
+                        return FakeResult([
+                            (
+                                501, "langtaosha", "web", "src-1",
+                                "https://example.org/paper", None, None,
+                                "Title", "Abstract", "Publisher", "en",
+                                "10.1000/test", None, None, None,
+                                None, None, None, "v1", False, True,
+                            )
+                        ])
+                    return FakeResult([])
+                if "FROM paper_source_metadata" in sql:
+                    return FakeResult([
+                        ({"raw": True}, {"normalized": True}, "v1", "schema-v1")
+                    ])
+                if "FROM paper_author_affiliation" in sql:
+                    return FakeResult([])
+                if "FROM paper_keywords" in sql:
+                    return FakeResult([])
+                if "FROM paper_references" in sql:
+                    return FakeResult([])
+                raise AssertionError(f"Unexpected SQL: {sql}")
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class FakeEngine:
+            def connect(self):
+                return FakeConnection()
+
+        metadata_db = MetadataDB.__new__(MetadataDB)
+        metadata_db.engine = FakeEngine()
+
+        paper_info = metadata_db.get_paper_info_by_paper_id(101, source_name="langtaosha")
+
+        assert paper_info is not None
+        assert len(paper_info["sources"]) == 1
+        assert paper_info["sources"][0]["source_name"] == "langtaosha"
+        assert paper_info["sources"][0]["metadata"]["raw_metadata_json"] == {"raw": True}
+
+        missing_source = metadata_db.get_paper_info_by_paper_id(101, source_name="biorxiv_history")
+        assert missing_source is None
+
     def test_read_paper(self, metadata_db, transformer, test_papers):
         """测试读取完整论文数据"""
         paper_data = test_papers["biorxiv_history"][0]
@@ -1261,6 +1331,37 @@ class TestQueryMethods:
         assert len(papers) == 3
         assert all(p["paper_id"] is not None for p in papers)
 
+    def test_get_search_result_summaries_by_work_ids_returns_lightweight_metadata(
+        self,
+        metadata_db,
+        transformer,
+        test_papers,
+    ):
+        """搜索结果 summary 应返回列表页字段，但不返回 raw metadata/references。"""
+        paper_data = test_papers["biorxiv_history"][0]
+        paper_id = insert_paper_via_transformer(
+            metadata_db, transformer, paper_data, "biorxiv_history"
+        )
+        with metadata_db.engine.connect() as conn:
+            work_id = conn.execute(
+                text("SELECT work_id FROM papers WHERE paper_id = :paper_id"),
+                {"paper_id": paper_id}
+            ).scalar()
+
+        summaries = metadata_db.get_search_result_summaries_by_work_ids([work_id])
+
+        assert list(summaries) == [work_id]
+        summary = summaries[work_id]
+        assert summary["paper_id"] == paper_id
+        assert summary["work_id"] == work_id
+        assert summary["canonical_title"]
+        assert "sources" in summary
+        assert "authors" in summary
+        assert "keywords" in summary
+        assert "references" not in summary
+        assert "metadata" not in summary
+        assert all("metadata" not in source for source in summary["sources"])
+
     def test_delete_paper_by_work_id(self, metadata_db, transformer, test_papers):
         """测试通过 work_id 删除论文"""
         paper_data = test_papers["biorxiv_history"][0]
@@ -1306,6 +1407,47 @@ class TestQueryMethods:
         with metadata_db.engine.connect() as conn:
             count = count_papers(conn)
             assert count == 0
+
+    def test_retrieve_paper_ids_by_time_interval_returns_ids_for_full_end_day(self):
+        """日期字符串查询应覆盖 date_to 当天，并且只返回 paper_id 列表。"""
+        class FakeResult:
+            def fetchall(self):
+                return [(101,), (102,)]
+
+        class FakeConnection:
+            def __init__(self):
+                self.statement = None
+                self.params = None
+
+            def execute(self, statement, params):
+                self.statement = statement
+                self.params = params
+                return FakeResult()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class FakeEngine:
+            def __init__(self):
+                self.connection = FakeConnection()
+
+            def connect(self):
+                return self.connection
+
+        stub_db = MetadataDB.__new__(MetadataDB)
+        stub_db.engine = FakeEngine()
+
+        paper_ids = stub_db.retrieve_paper_ids_by_time_interval(
+            date_from="2026-04-10",
+            date_to="2026-04-10",
+        )
+
+        assert paper_ids == [101, 102]
+        assert stub_db.engine.connection.params["date_from"] == datetime(2026, 4, 10, 0, 0, 0)
+        assert stub_db.engine.connection.params["date_to_exclusive"] == datetime(2026, 4, 11, 0, 0, 0)
 
 
 # =============================================================================

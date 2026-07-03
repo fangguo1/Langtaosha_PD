@@ -3,10 +3,18 @@ from __future__ import annotations
 import pytest
 
 from src.docset_hub.indexing.paper_indexer import (
-    DEFAULT_HYBRID_RETRIEVAL_WEIGHTS,
     PaperIndexer,
 )
 from src.docset_hub.indexing.paper_keyword_lookup import PaperKeywordLookupResult
+from src.docset_hub.indexing.retrieval_helper import (
+    DEFAULT_HYBRID_RETRIEVAL_WEIGHTS,
+    RankedResult,
+    filter_keyword_lookup_results,
+    filter_positive_score_results,
+    filter_sparse_results,
+    from_keyword_lookup_result,
+    from_search_result,
+)
 from src.docset_hub.storage.vector_db import SearchResult
 
 
@@ -23,56 +31,64 @@ def _indexer() -> PaperIndexer:
     indexer = PaperIndexer.__new__(PaperIndexer)
     indexer.vector_db = FakeVectorDB()
     indexer.default_sources = ["biorxiv_history", "langtaosha"]
+    indexer.metadata_db = object()
     return indexer
 
 
-def _branch_result(
+def _ranked(
     retriever: str,
     work_id: str,
     rank: int,
     raw_score: float,
     paper_id: str | int | None = None,
-) -> dict:
-    return {
-        "work_id": work_id,
-        "paper_id": paper_id,
-        "source_name": "biorxiv_history",
-        "text_type": "abstract",
-        "raw_score": raw_score,
-        "retriever": retriever,
-        "rank": rank,
-        "payload": {},
-        "retrieval_debug": {"branch": retriever},
-    }
+) -> RankedResult:
+    return RankedResult(
+        work_id=work_id,
+        paper_id=paper_id,
+        source_name="biorxiv_history",
+        score=raw_score,
+        text_type="abstract",
+        retriever=retriever,
+        rank=rank,
+        retrieval_debug={"branch": retriever},
+    )
+
+
+@pytest.fixture(autouse=True)
+def passthrough_dense_filter(monkeypatch):
+    monkeypatch.setattr(
+        "src.docset_hub.indexing.paper_indexer.filter_dense_results",
+        lambda hits, **kwargs: (list(hits), {}),
+    )
 
 
 def test_three_way_hybrid_retrieval_promotes_multi_branch_hits(monkeypatch):
     indexer = _indexer()
     calls = []
 
-    def dense_branch(**kwargs):
-        calls.append(("dense", kwargs["top_k"]))
+    def dense_branch(query, source_list, top_k):
+        calls.append(("dense", top_k))
         return [
-            _branch_result("dense", "dense-only", 1, 0.92, "1"),
-            _branch_result("dense", "shared", 2, 0.85, "2"),
+            _ranked("dense", "dense-only", 1, 0.92, "1"),
+            _ranked("dense", "shared", 2, 0.85, "2"),
         ]
 
-    def sparse_branch(**kwargs):
-        calls.append(("sparse", kwargs["top_k"]))
+    def sparse_branch(query, source_list, top_k):
+        calls.append(("sparse", top_k))
         return [
-            _branch_result("sparse", "shared", 1, 13.0, "2"),
-            _branch_result("sparse", "sparse-only", 2, 10.0, "3"),
+            _ranked("sparse", "shared", 1, 13.0, "2"),
+            _ranked("sparse", "sparse-only", 2, 10.0, "3"),
         ]
 
-    def keyword_branch(**kwargs):
-        calls.append(("keyword_lookup", kwargs["top_k"]))
+    def keyword_branch(query, source_list, top_k, keyword_sources=None):
+        calls.append(("keyword_lookup", top_k))
         return [
-            _branch_result("keyword_lookup", "shared", 1, 1.6, "2"),
+            _ranked("keyword_lookup", "shared", 1, 1.6, "2"),
         ]
 
-    monkeypatch.setattr(indexer, "_run_dense_retrieval_branch", dense_branch)
-    monkeypatch.setattr(indexer, "_run_sparse_retrieval_branch", sparse_branch)
-    monkeypatch.setattr(indexer, "_run_keyword_lookup_retrieval_branch", keyword_branch)
+    monkeypatch.setattr(indexer, "dense_search", dense_branch)
+    monkeypatch.setattr(indexer, "sparse_search", sparse_branch)
+    monkeypatch.setattr(indexer, "_keyword_lookup_search", keyword_branch)
 
     results = indexer.hybrid_retrieval_search(
         "exhausted t cell",
@@ -82,31 +98,115 @@ def test_three_way_hybrid_retrieval_promotes_multi_branch_hits(monkeypatch):
     )
 
     assert {call[0] for call in calls} == {"dense", "sparse", "keyword_lookup"}
-    assert {call[1] for call in calls} == {5}
+    assert {call[1] for call in calls} == {6}
     assert results[0]["work_id"] == "shared"
-    assert results[0]["retrieval_debug"]["matched_retrievers"] == [
+    assert set(results[0]["retrieval_debug"]["matched_retrievers"]) == {
         "dense",
         "sparse",
         "keyword_lookup",
-    ]
+    }
     assert results[0]["retrieval_debug"]["retrieval_weights"] == DEFAULT_HYBRID_RETRIEVAL_WEIGHTS
 
 
-def test_sparse_and_keyword_adapters_drop_non_positive_evidence():
+def test_run_dense_retrieval_branch_applies_dense_hard_filter(monkeypatch):
     indexer = _indexer()
+    filter_calls = {}
+    dense_hits = [
+        _ranked("dense", "raw-1", 1, 0.9, "1"),
+        _ranked("dense", "raw-2", 2, 0.2, "2"),
+    ]
 
-    sparse = indexer._adapt_search_results_to_branch_results(
-        [
-            SearchResult("biorxiv_history", "zero", 0.0, "abstract", "1"),
-            SearchResult("biorxiv_history", "negative", -1.0, "abstract", "2"),
-            SearchResult("biorxiv_history", "positive", 3.2, "abstract", "3"),
-        ],
-        retriever="sparse",
-        drop_non_positive=True,
+    monkeypatch.setattr(
+        indexer,
+        "dense_search",
+        lambda query, source_list, top_k: list(dense_hits),
     )
-    keyword = indexer._adapt_keyword_lookup_results_to_branch_results(
-        [
+
+    def fake_filter(hits, **kwargs):
+        filter_calls["hits"] = list(hits)
+        filter_calls["kwargs"] = kwargs
+        return ([dense_hits[0]], {"kept_count": 1})
+
+    monkeypatch.setattr(
+        "src.docset_hub.indexing.paper_indexer.filter_dense_results",
+        fake_filter,
+    )
+
+    results = indexer._run_dense_retrieval_branch(
+        query="kidney fibrosis",
+        source_list=["biorxiv_history"],
+        top_k=5,
+        keyword_sources=["paper_keywords"],
+        min_similarity=0.46,
+    )
+
+    assert [item.work_id for item in results] == ["raw-1"]
+    assert [item.work_id for item in filter_calls["hits"]] == ["raw-1", "raw-2"]
+    assert filter_calls["kwargs"]["query"] == "kidney fibrosis"
+    assert filter_calls["kwargs"]["metadata_db"] is indexer.metadata_db
+    assert filter_calls["kwargs"]["min_similarity"] == 0.46
+    assert filter_calls["kwargs"]["keyword_sources"] == ["paper_keywords"]
+
+
+def test_run_sparse_retrieval_branch_applies_positive_score_filter(monkeypatch):
+    indexer = _indexer()
+    filter_calls = {}
+    sparse_hits = [
+        _ranked("sparse", "zero", 1, 0.0, "1"),
+        _ranked("sparse", "positive", 2, 2.0, "2"),
+    ]
+
+    monkeypatch.setattr(
+        indexer,
+        "sparse_search",
+        lambda query, source_list, top_k: list(sparse_hits),
+    )
+
+    def fake_filter(hits):
+        filter_calls["hits"] = list(hits)
+        return [sparse_hits[1]]
+
+    monkeypatch.setattr(
+        "src.docset_hub.indexing.paper_indexer.filter_sparse_results",
+        fake_filter,
+    )
+
+    results = indexer._run_sparse_retrieval_branch(
+        query="kidney fibrosis",
+        source_list=["biorxiv_history"],
+        top_k=5,
+    )
+
+    assert [item.work_id for item in results] == ["positive"]
+    assert [item.work_id for item in filter_calls["hits"]] == ["zero", "positive"]
+
+
+def test_sparse_and_keyword_filters_drop_non_positive_evidence():
+    sparse_hits = [
+        from_search_result(
+            SearchResult("biorxiv_history", "zero", 0.0, "abstract", "1"),
+            retriever="sparse",
+            rank=1,
+        ),
+        from_search_result(
+            SearchResult("biorxiv_history", "negative", -1.0, "abstract", "2"),
+            retriever="sparse",
+            rank=2,
+        ),
+        from_search_result(
+            SearchResult("biorxiv_history", "positive", 3.2, "abstract", "3"),
+            retriever="sparse",
+            rank=3,
+        ),
+    ]
+    sparse = filter_positive_score_results(sparse_hits, drop_non_positive=True)
+
+    keyword_hits = [
+        from_keyword_lookup_result(
             PaperKeywordLookupResult(1, "kw-zero", 0, 1, 0.0, [], ["keyword_lookup"], {}),
+            rank=1,
+        ),
+        from_keyword_lookup_result(
             PaperKeywordLookupResult(
                 2,
                 "kw-positive",
@@ -117,31 +217,36 @@ def test_sparse_and_keyword_adapters_drop_non_positive_evidence():
                 ["keyword_lookup"],
                 {"retriever": "keyword_lookup"},
             ),
-        ]
-    )
+            rank=2,
+        ),
+    ]
+    keyword = filter_keyword_lookup_results(keyword_hits)
 
-    assert [item["work_id"] for item in sparse] == ["positive"]
-    assert sparse[0]["rank"] == 1
-    assert [item["work_id"] for item in keyword] == ["kw-positive"]
-    assert keyword[0]["rank"] == 1
-    assert keyword[0]["retrieval_debug"]["matched_concepts"] == [{"group_id": 1}]
+    assert [item.work_id for item in sparse] == ["positive"]
+    assert sparse[0].rank == 1
+    hybrid_sparse = filter_sparse_results(sparse_hits)
+    assert [item.work_id for item in hybrid_sparse] == ["positive"]
+    assert hybrid_sparse[0].rank == 1
+    assert [item.work_id for item in keyword] == ["kw-positive"]
+    assert keyword[0].rank == 1
+    assert keyword[0].retrieval_debug["matched_concepts"] == [{"group_id": 1}]
 
 
 def test_hybrid_retrieval_continues_when_one_branch_fails(monkeypatch):
     indexer = _indexer()
 
-    def dense_branch(**kwargs):
+    def dense_branch(query, source_list, top_k):
         raise RuntimeError("dense unavailable")
 
-    def sparse_branch(**kwargs):
-        return [_branch_result("sparse", "sparse-only", 1, 10.0, "3")]
+    def sparse_branch(query, source_list, top_k):
+        return [_ranked("sparse", "sparse-only", 1, 10.0, "3")]
 
-    def keyword_branch(**kwargs):
+    def keyword_branch(query, source_list, top_k, keyword_sources=None):
         return []
 
-    monkeypatch.setattr(indexer, "_run_dense_retrieval_branch", dense_branch)
-    monkeypatch.setattr(indexer, "_run_sparse_retrieval_branch", sparse_branch)
-    monkeypatch.setattr(indexer, "_run_keyword_lookup_retrieval_branch", keyword_branch)
+    monkeypatch.setattr(indexer, "dense_search", dense_branch)
+    monkeypatch.setattr(indexer, "sparse_search", sparse_branch)
+    monkeypatch.setattr(indexer, "_keyword_lookup_search", keyword_branch)
 
     results = indexer.hybrid_retrieval_search(
         "p53 mutation",
@@ -159,12 +264,12 @@ def test_hybrid_retrieval_continues_when_one_branch_fails(monkeypatch):
 def test_hybrid_retrieval_raises_when_all_requested_branches_fail(monkeypatch):
     indexer = _indexer()
 
-    def failing_branch(**kwargs):
+    def failing_branch(*args, **kwargs):
         raise RuntimeError("branch down")
 
-    monkeypatch.setattr(indexer, "_run_dense_retrieval_branch", failing_branch)
-    monkeypatch.setattr(indexer, "_run_sparse_retrieval_branch", failing_branch)
-    monkeypatch.setattr(indexer, "_run_keyword_lookup_retrieval_branch", failing_branch)
+    monkeypatch.setattr(indexer, "dense_search", failing_branch)
+    monkeypatch.setattr(indexer, "sparse_search", failing_branch)
+    monkeypatch.setattr(indexer, "_keyword_lookup_search", failing_branch)
 
     with pytest.raises(RuntimeError, match="全部 branch 失败"):
         indexer.hybrid_retrieval_search(
@@ -175,30 +280,14 @@ def test_hybrid_retrieval_raises_when_all_requested_branches_fail(monkeypatch):
         )
 
 
-def test_search_type_hybrid_retrieval_routes_to_three_way_method(monkeypatch):
+def test_search_rejects_hybrid_retrieval_dispatch():
     indexer = _indexer()
-    calls = []
 
-    def fake_hybrid_retrieval_search(**kwargs):
-        calls.append(kwargs)
-        return [{"work_id": "W1"}]
-
-    monkeypatch.setattr(indexer, "hybrid_retrieval_search", fake_hybrid_retrieval_search)
-
-    results = indexer.search(
-        "CRISPR-Cas9",
-        source_list=["biorxiv_history"],
-        top_k=4,
-        hydrate=False,
-        search_type="hybrid_retrieval",
-    )
-
-    assert results == [{"work_id": "W1"}]
-    assert calls == [
-        {
-            "query": "CRISPR-Cas9",
-            "source_list": ["biorxiv_history"],
-            "top_k": 4,
-            "hydrate": False,
-        }
-    ]
+    with pytest.raises(ValueError, match="hybrid_retrieval_search"):
+        indexer.search(
+            "CRISPR-Cas9",
+            source_list=["biorxiv_history"],
+            top_k=4,
+            hydrate=False,
+            search_type="hybrid_retrieval",
+        )

@@ -44,42 +44,38 @@
 """
 
 import logging
-import math
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import os
+import time
+from collections import defaultdict as ddict
+from functools import partial
 from pathlib import Path
-from typing import Dict, Any, List, Mapping, Optional, Sequence, Union
+from typing import Dict, Any, List, Optional, Sequence, Union
 
 from config import init_config, get_default_sources
 from ..metadata.transformer import MetadataTransformer, TransformResult
 from ..storage.metadata_db import MetadataDB
-from ..storage.vector_db import VectorDB, SearchResult
-from .dense_result_filter import (
-    DENSE_DEFAULT_MIN_SIMILARITY,
-    filter_dense_results_by_hard_rules,
-)
+from ..storage.vector_db import VectorDB
+from .dense_result_filter import DENSE_DEFAULT_MIN_SIMILARITY
+from .expanded_sparse_retrieval import match_papers_by_expanded_sparse_plan
 from .keyword_enrichment import KeywordEnrichmentService
-from .paper_keyword_lookup import (
-    PaperKeywordLookupResult,
-    match_paper_keywords_with_lookup_plan,
-)
-from .query_phrase_analyzer import (
-    AtomicPhraseExtractor,
-    MetadataDBPhraseLexicon,
-    QueryPhraseNormalizer,
-)
-from .span_matcher import (
-    KeywordSurfaceSpanMatcher,
-    MaximalConceptSelector,
-    SpanMatcherExecutor,
-)
+from .paper_keyword_lookup import match_paper_keywords_with_lookup_plan
+from .span_matcher_pipeline import SpanMatcherPipeline, SpanMatcherProfile
 from .query_understanding import QueryUnderstandingService
-
-
-DEFAULT_HYBRID_RETRIEVAL_WEIGHTS = {
-    "dense": 0.4,
-    "sparse": 0.4,
-    "keyword_lookup": 0.2,
-}
+from .retrieval_helper import (
+    DEFAULT_HYBRID_RETRIEVAL_WEIGHTS,
+    RankedResult,
+    filter_dense_results,
+    filter_keyword_lookup_results,
+    filter_sparse_results,
+    from_expanded_sparse_candidate,
+    from_keyword_lookup_result,
+    from_search_result,
+    hits_to_branch_results,
+    present_search_results,
+    resolve_hybrid_retrieval_weights,
+    run_retrievers_parallel,
+    weighted_rrf_merge,
+)
 
 
 class PaperIndexer:
@@ -96,6 +92,8 @@ class PaperIndexer:
         metadata_db: 元数据库
         vector_db: 向量数据库（可选）
     """
+
+    _SINGLE_PATH_SEARCH_TYPES = frozenset({"dense", "sparse", "expanded_sparse"})
 
     def __init__(
         self,
@@ -339,75 +337,253 @@ class PaperIndexer:
                 "mode": self._normalize_insert_mode(mode)
             }
 
+    # =========================================================================
+    # Retrieval L1 — raw recall (List[RankedResult])
+    # =========================================================================
+
+    def dense_search(
+        self,
+        query: str,
+        source_list: List[str],
+        top_k: int = 10,
+    ) -> List[RankedResult]:
+        """Vector dense recall only; no hard filter, no hydrate."""
+        if not self.vector_db:
+            raise ValueError("向量数据库未启用，无法执行 dense 检索")
+        total_started = time.perf_counter()
+        dense_results = self.vector_db.dense_search(
+            query=query,
+            source_list=source_list,
+            top_k=top_k,
+        )
+        search_results=[
+            from_search_result(result, retriever="dense", rank=index)
+            for index, result in enumerate(dense_results, start=1)
+        ]
+        total_elapsed_ms = round((time.perf_counter() - total_started) * 1000.0, 3)
+        logging.info(f'total_elapsed_ms: {total_elapsed_ms}ms')
+        return search_results
+
+    def sparse_search(
+        self,
+        query: str,
+        source_list: List[str],
+        top_k: int = 10,
+    ) -> List[RankedResult]:
+        """BM25 sparse recall only; no positive-score filter."""
+        if not self.vector_db:
+            raise ValueError("向量数据库未启用，无法执行 sparse 检索")
+        total_started = time.perf_counter()
+        sparse_results = self.vector_db.sparse_search(
+            query=query,
+            source_list=source_list,
+            top_k=top_k,
+        )
+        search_results=[
+            from_search_result(result, retriever="sparse", rank=index)
+            for index, result in enumerate(sparse_results, start=1)]
+        total_elapsed_ms = round((time.perf_counter() - total_started) * 1000.0, 3)
+        logging.info(f'total_elapsed_ms: {total_elapsed_ms}ms')
+        return search_results 
+
+    def expanded_sparse_search(
+        self,
+        query: str,
+        source_list: List[str],
+        top_k: int = 10,
+        keyword_sources: Optional[Sequence[str]] = None,
+    ) -> List[RankedResult]:
+        """Semantic plan + expanded sparse DB match; score = coverage_ratio."""
+        total_started = time.perf_counter()
+        plan_started = time.perf_counter()
+        plan = self.build_query_semantic_plan(
+            query=query,
+            source_list=source_list,
+            keyword_sources=keyword_sources,
+        )
+        plan_elapsed_ms = round((time.perf_counter() - plan_started) * 1000.0, 3)
+        logging.info(f"build_query_semantic_plan_ms: {plan_elapsed_ms}ms")
+        
+        if plan is None:
+            total_elapsed_ms = round((time.perf_counter() - total_started) * 1000.0, 3)
+            logging.info(f'total_elapsed_ms: {total_elapsed_ms}ms')
+            return []
+
+        match_started = time.perf_counter()
+        candidates = match_papers_by_expanded_sparse_plan(
+            metadata_db=self.metadata_db,
+            plan=plan,
+            source_list=source_list,
+            keyword_sources=keyword_sources,
+            top_k=top_k,
+        )
+
+        match_elapsed_ms = round((time.perf_counter() - match_started) * 1000.0, 3)
+        logging.info(f"match_papers_by_expanded_sparse_plan_ms: {match_elapsed_ms}ms")
+        results: List[RankedResult] = []
+        rank = 0
+        for candidate in candidates:
+            matched_span_count = int(getattr(candidate, "matched_span_count", 0) or 0)
+            if matched_span_count <= 0:
+                continue
+            rank += 1
+            results.append(from_expanded_sparse_candidate(candidate, rank=rank))
+        total_elapsed_ms = round((time.perf_counter() - total_started) * 1000.0, 3)
+        logging.info(f'total_elapsed_ms: {total_elapsed_ms}ms')
+        return results
+
+    def _keyword_lookup_search(
+        self,
+        query: str,
+        source_list: List[str],
+        top_k: int = 10,
+        keyword_sources: Optional[Sequence[str]] = None,
+    ) -> List[RankedResult]:
+        """Internal hybrid branch; span matcher + paper keyword lookup."""
+        profile = self._build_span_matcher_profile(
+            source_list=source_list,
+            keyword_sources=keyword_sources,
+            profile_name="keyword_only",
+        )
+        result = SpanMatcherPipeline.from_profile(
+            profile=profile,
+            metadata_db=self.metadata_db,
+        ).run(query)
+        if not result.selected_concepts:
+            return []
+
+        lookup_results = match_paper_keywords_with_lookup_plan(
+            metadata_db=self.metadata_db,
+            selected_concepts=result.selected_concepts,
+            span_results=result.span_results,
+            source_list=source_list,
+            keyword_sources=keyword_sources,
+            top_k=top_k,
+            include_sub_concepts=True,
+            include_substring_candidates=True,
+        )
+        ranked: List[RankedResult] = []
+        for index, lookup_result in enumerate(lookup_results, start=1):
+            ranked.append(from_keyword_lookup_result(lookup_result, rank=index))
+        return ranked
+
+    def _run_dense_retrieval_branch(
+        self,
+        query: str,
+        source_list: List[str],
+        top_k: int,
+        *,
+        keyword_sources: Optional[Sequence[str]] = None,
+        min_similarity: float = DENSE_DEFAULT_MIN_SIMILARITY,
+    ) -> List[RankedResult]:
+        branch_started = time.perf_counter()
+        dense_hits = self.dense_search(query, source_list, top_k)
+        recall_elapsed_ms = round((time.perf_counter() - branch_started) * 1000.0, 3)
+        logging.info(
+            "hybrid dense branch raw hits: query=%r, top_k=%s, count=%s, recall_elapsed_ms=%s",
+            query,
+            top_k,
+            len(dense_hits),
+            recall_elapsed_ms,
+        )
+        filter_started = time.perf_counter()
+        filtered_hits, _ = filter_dense_results(
+            dense_hits,
+            query=query,
+            metadata_db=self.metadata_db,
+            min_similarity=min_similarity,
+            keyword_sources=keyword_sources,
+        )
+        filter_elapsed_ms = round((time.perf_counter() - filter_started) * 1000.0, 3)
+        logging.info(
+            "hybrid dense branch filtered hits: query=%r, min_similarity=%.3f, count=%s, filter_elapsed_ms=%s",
+            query,
+            min_similarity,
+            len(filtered_hits),
+            filter_elapsed_ms,
+        )
+        return filtered_hits
+
+    def _run_sparse_retrieval_branch(
+        self,
+        query: str,
+        source_list: List[str],
+        top_k: int,
+    ) -> List[RankedResult]:
+        branch_started = time.perf_counter()
+        sparse_hits = self.sparse_search(query, source_list, top_k)
+        recall_elapsed_ms = round((time.perf_counter() - branch_started) * 1000.0, 3)
+        logging.info(
+            "hybrid sparse branch raw hits: query=%r, top_k=%s, count=%s, recall_elapsed_ms=%s",
+            query,
+            top_k,
+            len(sparse_hits),
+            recall_elapsed_ms,
+        )
+        filter_started = time.perf_counter()
+        filtered_hits = filter_sparse_results(sparse_hits)
+        filter_elapsed_ms = round((time.perf_counter() - filter_started) * 1000.0, 3)
+        logging.info(
+            "hybrid sparse branch filtered hits: query=%r, count=%s, filter_elapsed_ms=%s",
+            query,
+            len(filtered_hits),
+            filter_elapsed_ms,
+        )
+        return filtered_hits
+
     def search(
         self,
         query: str,
         source_list: Optional[List[str]] = None,
         top_k: int = 10,
         hydrate: bool = True,
-        search_type: str = "dense"
+        search_type: str = "dense",
+        *,
+        keyword_sources: Optional[Sequence[str]] = None,
     ) -> List[Dict[str, Any]]:
-        """搜索论文
+        """单路检索 wrapper：L1 raw recall + present/hydrate。
 
-        Args:
-            query: 查询文本
-            source_list: 来源列表（如果不提供则使用 default_sources）
-            top_k: 返回结果数量
-            hydrate: 是否补全完整 metadata（默认 True）
-            search_type: 检索类型，支持 dense / sparse / hybrid / hybrid_retrieval
-
-        Returns:
-            List[Dict[str, Any]]: 搜索结果列表，每个结果包含:
-                - work_id (str): 作品 ID
-                - paper_id (Optional[int]): 论文 ID
-                - source_name (str): 来源名称
-                - similarity (float): 相似度分数
-                - text_type (str): 文本类型
-                - metadata (Optional[Dict]): 完整 metadata（如果 hydrate=True）
-
-        Raises:
-            ValueError: vector_db 未启用或参数错误
+        仅支持 dense / sparse / expanded_sparse/hrbrid_retrieval 混合检索请使用
+        ``hybrid_retrieval_search()``。
         """
-        if not self.vector_db:
-            raise ValueError("向量数据库未启用，无法执行搜索")
-
         try:
-            # 1. 解析 source_list
             resolved_source_list = self._resolve_source_list(source_list)
+        except Exception:
+            raise ValueError("source_list 解析失败")
 
-            if search_type == "hybrid_retrieval":
-                return self.hybrid_retrieval_search(
-                    query=query,
-                    source_list=resolved_source_list,
-                    top_k=top_k,
-                    hydrate=hydrate,
-                )
-
-            # 2. 执行向量搜索
-            search_results = self.vector_db.search(
-                query=query,
-                source_list=resolved_source_list,
-                top_k=top_k,
-                search_type=search_type
+        if search_type not in self._SINGLE_PATH_SEARCH_TYPES:
+            raise ValueError(
+                f"search() 仅支持 {sorted(self._SINGLE_PATH_SEARCH_TYPES)}；"
+                f"请使用 hybrid_retrieval_search() 执行混合检索"
             )
 
-            # 3. 可选：补全 metadata
-            if hydrate:
-                return self._hydrate_search_results(search_results)
+        try:
+            if search_type == "dense":
+                hits = self.dense_search(query, resolved_source_list, top_k)
+            elif search_type == "sparse":
+                hits = self.sparse_search(query, resolved_source_list, top_k)
+            elif search_type == "hybrid_retrieval":
+                hits = self.hybrid_retrieval_search(
+                    query,
+                    resolved_source_list,
+                    top_k,
+                    hydrate=hydrate,
+                    keyword_sources=keyword_sources,
+                )
+            elif search_type == "expanded_sparse":
+                hits = self.expanded_sparse_search(
+                    query,
+                    resolved_source_list,
+                    top_k,
+                    keyword_sources=keyword_sources,
+                )
             else:
-                # 返回轻量级结果
-                return [
-                    {
-                        "work_id": result.work_id,
-                        "paper_id": result.paper_id,
-                        "source_name": result.source_name,
-                        "similarity": result.score,
-                        "text_type": result.text_type,
-                        "retrieval_debug": result.retrieval_debug,
-                    }
-                    for result in search_results
-                ]
-
+                raise ValueError(f"不支持的 search_type: {search_type}")
+            return present_search_results(
+                hits,
+                metadata_db=self.metadata_db,
+                hydrate=hydrate,
+            )
         except Exception as e:
             logging.error(f"search 失败: {str(e)}", exc_info=True)
             raise e
@@ -435,6 +611,7 @@ class PaperIndexer:
         if not self.vector_db:
             raise ValueError("向量数据库未启用，无法执行三路混合检索")
 
+        total_started = time.perf_counter()
         resolved_source_list = self._resolve_source_list(source_list)
         top_k = max(1, int(top_k))
 
@@ -451,91 +628,118 @@ class PaperIndexer:
         )
         candidate_k = max(top_k * effective_candidate_multiplier, effective_min_candidate_k)
         effective_rrf_k = float(rrf_k if rrf_k is not None else hybrid_config.get("rrf_k", 60))
-        effective_weights = self._resolve_hybrid_retrieval_weights(retrieval_weights)
+        effective_weights = resolve_hybrid_retrieval_weights(
+            retrieval_weights,
+            default_weights=DEFAULT_HYBRID_RETRIEVAL_WEIGHTS,
+        )
         effective_dense_min_similarity = float(
             dense_min_similarity
             if dense_min_similarity is not None
             else hybrid_config.get("dense_min_similarity", DENSE_DEFAULT_MIN_SIMILARITY)
         )
 
-        branch_results: Dict[str, List[Dict[str, Any]]] = {}
-        branch_failures: Dict[str, str] = {}
-        futures = {}
+        retrievers = {
+            "dense": partial(
+                self._run_dense_retrieval_branch,
+                keyword_sources=keyword_sources,
+                min_similarity=effective_dense_min_similarity,
+            ),
+            "sparse": self._run_sparse_retrieval_branch
+        }
 
-        with ThreadPoolExecutor(max_workers=3) as executor:
-            futures[
-                executor.submit(
-                    self._run_dense_retrieval_branch,
-                    query=query,
-                    source_list=resolved_source_list,
-                    top_k=candidate_k,
-                    keyword_sources=keyword_sources,
-                    min_similarity=effective_dense_min_similarity,
-                )
-            ] = "dense"
-            futures[
-                executor.submit(
-                    self._run_sparse_retrieval_branch,
-                    query=query,
-                    source_list=resolved_source_list,
-                    top_k=candidate_k,
-                )
-            ] = "sparse"
-            if include_keyword_lookup:
-                futures[
-                    executor.submit(
-                        self._run_keyword_lookup_retrieval_branch,
-                        query=query,
-                        source_list=resolved_source_list,
-                        top_k=candidate_k,
-                        keyword_sources=keyword_sources,
-                    )
-                ] = "keyword_lookup"
+        branch_raw, branch_failures = run_retrievers_parallel(
+            retrievers,
+            query=query,
+            source_list=resolved_source_list,
+            top_k=candidate_k,
+            max_workers=max(1, len(retrievers)),
+        )
+        retrieval_elapsed_ms = round((time.perf_counter() - total_started) * 1000.0, 3)
+        logging.info(f"hybrid_retrieval_elapsed_ms: {retrieval_elapsed_ms}ms")
 
-            for future in as_completed(futures):
-                branch_name = futures[future]
-                try:
-                    branch_results[branch_name] = future.result()
-                except Exception as exc:
-                    branch_failures[branch_name] = str(exc)
-                    logging.warning(
-                        "三路混合检索 branch 失败: branch=%s, error=%s",
-                        branch_name,
-                        exc,
-                        exc_info=True,
-                    )
-
-        requested_branch_count = len(futures)
-        if branch_failures and len(branch_failures) == requested_branch_count:
+        if branch_failures and len(branch_failures) == len(retrievers):
             raise RuntimeError(f"三路混合检索全部 branch 失败: {branch_failures}")
 
-        merged_results = self._weighted_rrf_merge_retrieval_branches(
-            branch_results=branch_results,
+        branch_results = {
+            name: hits_to_branch_results(hits)
+            for name, hits in branch_raw.items()
+        }
+        fused_hits = weighted_rrf_merge(
+            branch_results,
             top_k=top_k,
             weights=effective_weights,
             rrf_k=effective_rrf_k,
             branch_failures=branch_failures,
         )
+        total_fused_hits_elapsed_ms= round((time.perf_counter() - total_started) * 1000.0, 3)
+        logging.info(f"fused_hits_elapsed_ms: {total_fused_hits_elapsed_ms}ms")
+        presentation_started = time.perf_counter()
+        presented_results = present_search_results(
+            fused_hits,
+            metadata_db=self.metadata_db,
+            hydrate=hydrate,
+        )
+        presentation_elapsed_ms = round((time.perf_counter() - presentation_started) * 1000.0, 3)
+        total_elapsed_ms = round((time.perf_counter() - total_started) * 1000.0, 3)
+        logging.info(
+            "hybrid presentation elapsed: hydrate=%s, count=%s, presentation_elapsed_ms=%sms, total_elapsed_ms=%sms",
+            hydrate,
+            len(presented_results),
+            presentation_elapsed_ms,
+            total_elapsed_ms,
+        )
+        return presented_results
 
-        if hydrate:
-            return self._hydrate_search_results(merged_results)
-        return self._search_results_to_lightweight_dicts(merged_results)
+    def merge_source_list(self, source_list: List[str]) -> Dict[str, List[str]]:
+        merge_source_dict = ddict(list)
+        for source in source_list:
+            if "langtaosha" in source:
+                merge_source_dict["langtaosha"].append(source)
+            elif "biorxiv" in source:
+                merge_source_dict["biorxiv"].append(source)
+            else:
+                continue
+        return dict(merge_source_dict)
 
+
+            
     def smart_search(
         self,
         query: str,
         source_list: Optional[List[str]] = None,
         top_k: int = 10,
         hydrate: bool = True,
+        *,
+        search_type: str = "hybrid_retrieval",
+        correction_decision: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Search with query understanding and route selection.
 
         Author-name queries are routed to MetadataDB.search_by_author().
         Semantic queries keep using vector search, optionally with a high
         confidence corrected query from paper_keywords candidates.
+
+        Smart_search is a wrapper around the query understanding and search logic.
+        It first analyzes the query using query understanding, then routes the query to the appropriate search logic.
+        It then merges the results from the different search branches and returns the final results.
+        The results are returned in a dictionary format with the following keys:
+        - success: boolean indicating if the search was successful
+        - query: the original query
+        - search_query: the query used for the search
+        - query_understanding: the query understanding payload
+        - expanded_search_queries: the expanded search queries
+        - results: the results from the search. The results are grouped by source and returned as a list of tuples, where the first element is the source prefix and the second element is the results for that source.
         """
+        total_started = time.perf_counter()
         understanding = self.query_understanding.analyze(query)
+        query_understanding_elapsed_ms = round((time.perf_counter() - total_started) * 1000.0, 3)
+        logging.info("query_understanding_elapsed_ms: %s", query_understanding_elapsed_ms)
         understanding_payload = understanding.to_dict()
+        corrected_query = understanding.corrected_query
+        normalized_query = understanding.normalized_query or query
+
+        if correction_decision not in {None, "accept", "reject"}:
+            raise ValueError("correction_decision 只能是 accept 或 reject")
 
         if understanding.route == "none":
             return {
@@ -543,22 +747,29 @@ class PaperIndexer:
                 "query": query,
                 "search_query": None,
                 "query_understanding": understanding_payload,
+                "expanded_search_queries": [],
                 "results": [],
             }
 
         resolved_source_list = self._resolve_source_list(source_list)
+        merged_source_dict = self.merge_source_list(resolved_source_list)
+        results = []
         if understanding.route == "metadata_author":
-            results = self.metadata_db.search_by_author(
-                author_name=understanding.matched_author or understanding.normalized_query,
-                limit=top_k,
-                source_list=resolved_source_list,
-                fuzzy=True,
-            )
+            for source_prefix, grouped_source_list in merged_source_dict.items():
+                result = self.metadata_db.search_by_author(
+                    author_name=understanding.matched_author or understanding.normalized_query,
+                    limit=top_k,
+                    source_list=grouped_source_list,
+                    fuzzy=False,
+                )
+                results.append((source_prefix, result))
+            
             return {
                 "success": True,
                 "query": query,
                 "search_query": understanding.matched_author or understanding.normalized_query,
                 "query_understanding": understanding_payload,
+                "expanded_search_queries": [],
                 "results": results,
             }
 
@@ -568,397 +779,126 @@ class PaperIndexer:
                 "query": query,
                 "search_query": None,
                 "query_understanding": understanding_payload,
+                "expanded_search_queries": [],
                 "results": [],
             }
 
-        search_query = understanding.corrected_query or understanding.normalized_query
-        expansion = understanding_payload.get("expansion") or {}
-        expanded_queries = expansion.get("expanded_queries") if expansion.get("status") == "ok" else []
-        queries = [search_query] + [q for q in (expanded_queries or []) if q and q != search_query]
-        result_batches = []
-        for candidate_query in queries:
-            result_batches.append(
-                (
-                    candidate_query,
-                    self.search(
-                        query=candidate_query,
-                        source_list=resolved_source_list,
-                        top_k=top_k,
-                        hydrate=hydrate,
-                    ),
-                )
+        if corrected_query and corrected_query != normalized_query and correction_decision is None:
+            understanding_payload["correction_status"] = "pending"
+            return {
+                "success": True,
+                "query": query,
+                "search_query": None,
+                "query_understanding": understanding_payload,
+                "expanded_search_queries": [],
+                "results": [],
+            }
+
+        if corrected_query and corrected_query != normalized_query:
+            understanding_payload["correction_status"] = (
+                "accepted" if correction_decision == "accept" else "rejected"
             )
-        results = self._merge_search_result_batches(result_batches, top_k=top_k)
+            search_query = corrected_query if correction_decision == "accept" else normalized_query
+        else:
+            understanding_payload["correction_status"] = "not_needed"
+            search_query = normalized_query
+        results = []
+        for source_prefix, grouped_source_list in merged_source_dict.items():
+            if search_type == "hybrid_retrieval":
+                result = self.hybrid_retrieval_search(
+                    query=search_query,
+                    source_list=grouped_source_list,
+                    top_k=top_k,
+                    hydrate=hydrate,
+                )
+            else:
+                result = self.search(
+                    query=search_query,
+                    source_list=grouped_source_list,
+                    top_k=top_k,
+                    hydrate=hydrate,
+                    search_type=search_type,
+                )
+            results.append((source_prefix, result))
+
+
         return {
             "success": True,
             "query": query,
             "search_query": search_query,
-            "expanded_search_queries": queries[1:],
             "query_understanding": understanding_payload,
+            "expanded_search_queries": [],
             "results": results,
         }
 
-    @staticmethod
-    def _merge_search_result_batches(
-        result_batches: List[tuple[str, List[Dict[str, Any]]]],
-        top_k: int,
-    ) -> List[Dict[str, Any]]:
-        """Merge search results from original and expanded queries."""
-        merged: Dict[str, Dict[str, Any]] = {}
-        order = 0
-        for query, results in result_batches:
-            for result in results:
-                order += 1
-                key = str(result.get("work_id") or result.get("paper_id") or order)
-                score = result.get("similarity")
-                existing = merged.get(key)
-                if existing is None or (score is not None and score > existing.get("similarity", -1)):
-                    item = dict(result)
-                    item["matched_query"] = query
-                    item["_merge_order"] = order
-                    merged[key] = item
-        values = list(merged.values())
-        values.sort(key=lambda item: (item.get("similarity") is not None, item.get("similarity", -1)), reverse=True)
-        for item in values:
-            item.pop("_merge_order", None)
-        return values[:top_k]
 
-    def _run_dense_retrieval_branch(
+    def _build_span_matcher_profile(
         self,
-        query: str,
-        source_list: List[str],
-        top_k: int,
+        *,
+        source_list: Sequence[str],
         keyword_sources: Optional[Sequence[str]] = None,
-        min_similarity: float = DENSE_DEFAULT_MIN_SIMILARITY,
-    ) -> List[Dict[str, Any]]:
-        """Run dense search and apply the DB-backed hard filter."""
-        dense_results = self.vector_db.dense_search(
-            query=query,
-            source_list=source_list,
-            top_k=top_k,
-        )
-        dense_payloads = [
-            self._search_result_to_filter_payload(result)
-            for result in dense_results
-        ]
-        filtered_payloads, report = filter_dense_results_by_hard_rules(
-            metadata_db=self.metadata_db,
-            query=query,
-            results=dense_payloads,
-            min_similarity=min_similarity,
-            keyword_sources=keyword_sources,
-        )
-        return self._adapt_dense_payloads_to_branch_results(filtered_payloads, report.to_dict())
+        profile_name: str = "ontology_plus_keyword",
+    ) -> SpanMatcherProfile:
+        if profile_name == "keyword_only":
+            factory = SpanMatcherProfile.keyword_only
+        elif profile_name == "ontology_only":
+            factory = SpanMatcherProfile.ontology_only
+        else:
+            factory = SpanMatcherProfile.ontology_plus_keyword
 
-    def _run_sparse_retrieval_branch(
+        return factory(
+            enable_scispacy=os.environ.get("SKIP_SCISPACY", "0") != "1",
+            ontology_base_url=os.environ.get("ONTOLOGY_LINKER_URL", "http://127.0.0.1:8765"),
+            ontology_sources=tuple(self._parse_csv(os.environ.get("ONTOLOGY_SOURCE_LIST", "umls,mesh"))),
+            ontology_top_k=self._env_int("ONTOLOGY_TOP_K", 2),
+            ontology_threshold=self._env_float("ONTOLOGY_THRESHOLD", 0.9),
+            ontology_timeout=self._env_float("ONTOLOGY_TIMEOUT", 20.0),
+            paper_sources=tuple(source_list or self.default_sources),
+            keyword_sources=tuple(keyword_sources or ()),
+        )
+
+    def build_query_semantic_plan(
         self,
         query: str,
         source_list: List[str],
-        top_k: int,
-    ) -> List[Dict[str, Any]]:
-        """Run BM25 sparse search and keep only positive-evidence results."""
-        sparse_results = self.vector_db.sparse_search(
-            query=query,
-            source_list=source_list,
-            top_k=top_k,
-        )
-        return self._adapt_search_results_to_branch_results(
-            sparse_results,
-            retriever="sparse",
-            drop_non_positive=True,
-        )
-
-    def _run_keyword_lookup_retrieval_branch(
-        self,
-        query: str,
-        source_list: List[str],
-        top_k: int,
         keyword_sources: Optional[Sequence[str]] = None,
-    ) -> List[Dict[str, Any]]:
-        """Run DB-backed keyword lookup recall from query span matches."""
-        normalizer = QueryPhraseNormalizer()
-        normalized = normalizer.normalize_query(query)
-        if not normalized.normalized_query:
-            return []
+        profile_name: str = "ontology_plus_keyword",
+    ):
+        """构建查询语义计划（公开 Domain 能力，供检索分支与 dev API 使用）。
 
-        lexicon = MetadataDBPhraseLexicon(
-            metadata_db=self.metadata_db,
-            paper_source_names=source_list,
-            keyword_sources=keyword_sources,
-            normalizer=normalizer,
-        )
-        extractor = AtomicPhraseExtractor(normalizer=normalizer)
-        candidates = extractor.extract(normalized.normalized_query)
-        if not candidates:
-            return []
-
-        matcher = KeywordSurfaceSpanMatcher(lexicon=lexicon, normalizer=normalizer)
-        executor = SpanMatcherExecutor(matcher=matcher)
-        span_results = executor.match_candidates(candidates)
-        selected_concepts = MaximalConceptSelector(normalizer=normalizer).select(span_results)
-        if not selected_concepts:
-            return []
-
-        lookup_results = match_paper_keywords_with_lookup_plan(
-            metadata_db=self.metadata_db,
-            selected_concepts=selected_concepts,
-            span_results=span_results,
+        Returns:
+            QuerySemanticPlan，无可用 selected_concepts 时返回 None。
+        """
+        profile = self._build_span_matcher_profile(
             source_list=source_list,
             keyword_sources=keyword_sources,
-            top_k=top_k,
-            include_sub_concepts=True,
-            include_substring_candidates=True,
+            profile_name=profile_name,
         )
-        return self._adapt_keyword_lookup_results_to_branch_results(lookup_results)
+        result = SpanMatcherPipeline.from_profile(
+            profile=profile,
+            metadata_db=self.metadata_db,
+        ).run(query)
+        if not result.selected_concepts:
+            return None
+        return result.semantic_plan
 
     @staticmethod
-    def _resolve_hybrid_retrieval_weights(
-        retrieval_weights: Optional[Mapping[str, float]] = None,
-    ) -> Dict[str, float]:
-        """Return non-negative branch weights for weighted RRF."""
-        weights = dict(DEFAULT_HYBRID_RETRIEVAL_WEIGHTS)
-        for key, value in (retrieval_weights or {}).items():
-            if key not in weights:
-                continue
-            try:
-                weights[key] = max(0.0, float(value))
-            except (TypeError, ValueError):
-                continue
-        if not any(value > 0 for value in weights.values()):
-            return dict(DEFAULT_HYBRID_RETRIEVAL_WEIGHTS)
-        return weights
+    def _parse_csv(value: Optional[str]) -> List[str]:
+        return [item.strip() for item in str(value or "").split(",") if item.strip()]
 
     @staticmethod
-    def _search_result_to_filter_payload(result: SearchResult) -> Dict[str, Any]:
-        """Convert a dense SearchResult into dense_result_filter input."""
-        return {
-            "work_id": result.work_id,
-            "paper_id": result.paper_id,
-            "source_name": result.source_name,
-            "similarity": result.score,
-            "similarity_score": result.score,
-            "text_type": result.text_type,
-            "retrieval_debug": dict(result.retrieval_debug or {}),
-        }
-
-    def _adapt_dense_payloads_to_branch_results(
-        self,
-        dense_payloads: Sequence[Mapping[str, Any]],
-        filter_report: Optional[Mapping[str, Any]] = None,
-    ) -> List[Dict[str, Any]]:
-        """Convert filtered dense payloads into RRF branch results."""
-        branch_results = []
-        rank = 0
-        for item in dense_payloads:
-            raw_score = self._safe_float(item.get("similarity_score", item.get("similarity")))
-            if not math.isfinite(raw_score):
-                continue
-            rank += 1
-            retrieval_debug = dict(item.get("retrieval_debug") or {})
-            if filter_report is not None:
-                retrieval_debug.setdefault("dense_hard_filter_report", dict(filter_report))
-            branch_results.append(
-                {
-                    "work_id": str(item.get("work_id") or ""),
-                    "paper_id": item.get("paper_id"),
-                    "source_name": str(item.get("source_name") or ""),
-                    "text_type": str(item.get("text_type") or ""),
-                    "raw_score": raw_score,
-                    "retriever": "dense",
-                    "rank": rank,
-                    "payload": dict(item),
-                    "retrieval_debug": retrieval_debug,
-                }
-            )
-        return branch_results
-
-    def _adapt_search_results_to_branch_results(
-        self,
-        search_results: Sequence[SearchResult],
-        retriever: str,
-        drop_non_positive: bool = False,
-    ) -> List[Dict[str, Any]]:
-        """Convert VectorDB SearchResult objects into RRF branch results."""
-        branch_results = []
-        rank = 0
-        for result in search_results:
-            raw_score = self._safe_float(result.score)
-            if not math.isfinite(raw_score):
-                continue
-            if drop_non_positive and raw_score <= 0:
-                continue
-            rank += 1
-            branch_results.append(
-                {
-                    "work_id": result.work_id,
-                    "paper_id": result.paper_id,
-                    "source_name": result.source_name,
-                    "text_type": result.text_type,
-                    "raw_score": raw_score,
-                    "retriever": retriever,
-                    "rank": rank,
-                    "payload": result,
-                    "retrieval_debug": dict(result.retrieval_debug or {}),
-                }
-            )
-        return branch_results
-
-    def _adapt_keyword_lookup_results_to_branch_results(
-        self,
-        lookup_results: Sequence[PaperKeywordLookupResult],
-    ) -> List[Dict[str, Any]]:
-        """Convert keyword lookup results into positive-evidence branch results."""
-        branch_results = []
-        rank = 0
-        for result in lookup_results:
-            raw_score = self._safe_float(result.keyword_lookup_score)
-            if not math.isfinite(raw_score) or raw_score <= 0:
-                continue
-            rank += 1
-            payload = result.to_dict()
-            retrieval_debug = dict(result.retrieval_debug or {})
-            retrieval_debug.setdefault("matched_concepts", result.matched_concepts)
-            retrieval_debug.setdefault("matched_concept_count", result.matched_concept_count)
-            retrieval_debug.setdefault("total_concept_count", result.total_concept_count)
-            branch_results.append(
-                {
-                    "work_id": result.work_id,
-                    "paper_id": result.paper_id,
-                    "source_name": "",
-                    "text_type": "",
-                    "raw_score": raw_score,
-                    "retriever": "keyword_lookup",
-                    "rank": rank,
-                    "payload": payload,
-                    "retrieval_debug": retrieval_debug,
-                }
-            )
-        return branch_results
-
-    def _weighted_rrf_merge_retrieval_branches(
-        self,
-        branch_results: Mapping[str, Sequence[Mapping[str, Any]]],
-        top_k: int,
-        weights: Mapping[str, float],
-        rrf_k: float,
-        branch_failures: Optional[Mapping[str, str]] = None,
-    ) -> List[SearchResult]:
-        """Merge multiple retrieval branch ranked lists with weighted RRF."""
-        merged: Dict[str, Dict[str, Any]] = {}
-        branch_failures = dict(branch_failures or {})
-        rrf_k = float(rrf_k)
-
-        for retriever, results in branch_results.items():
-            branch_weight = max(0.0, self._safe_float(weights.get(retriever, 0.0)))
-            if branch_weight <= 0:
-                continue
-            for fallback_rank, branch_result in enumerate(results, start=1):
-                rank = int(branch_result.get("rank") or fallback_rank)
-                if rank <= 0:
-                    continue
-                work_id = str(branch_result.get("work_id") or "")
-                paper_id = branch_result.get("paper_id")
-                key = self._retrieval_dedupe_key(work_id=work_id, paper_id=paper_id, retriever=retriever, rank=rank)
-                entry = merged.setdefault(
-                    key,
-                    {
-                        "work_id": work_id,
-                        "paper_id": paper_id,
-                        "source_name": str(branch_result.get("source_name") or ""),
-                        "text_type": str(branch_result.get("text_type") or ""),
-                        "rrf_score": 0.0,
-                        "retrieval_debug": {
-                            "matched_retrievers": [],
-                            "rrf_k": rrf_k,
-                            "retrieval_weights": dict(weights),
-                        },
-                    },
-                )
-                entry["rrf_score"] += branch_weight / (rrf_k + rank)
-
-                if not entry.get("work_id") and work_id:
-                    entry["work_id"] = work_id
-                if not entry.get("paper_id") and paper_id:
-                    entry["paper_id"] = paper_id
-                if not entry.get("source_name") and branch_result.get("source_name"):
-                    entry["source_name"] = str(branch_result.get("source_name") or "")
-                if not entry.get("text_type") and branch_result.get("text_type"):
-                    entry["text_type"] = str(branch_result.get("text_type") or "")
-
-                debug = entry["retrieval_debug"]
-                matched_retrievers = debug["matched_retrievers"]
-                if retriever not in matched_retrievers:
-                    matched_retrievers.append(retriever)
-                raw_score = self._safe_float(branch_result.get("raw_score"))
-                debug[f"{retriever}_rank"] = rank
-                debug[f"{retriever}_score"] = raw_score
-                branch_debug = dict(branch_result.get("retrieval_debug") or {})
-                if branch_debug:
-                    debug[f"{retriever}_debug"] = branch_debug
-                payload = branch_result.get("payload")
-                if retriever == "keyword_lookup" and isinstance(payload, Mapping):
-                    debug["keyword_lookup_matched_concepts"] = list(payload.get("matched_concepts") or [])
-
-        fused_results = []
-        for entry in merged.values():
-            debug = entry["retrieval_debug"]
-            if branch_failures:
-                debug["branch_failures"] = branch_failures
-            fused_results.append(
-                SearchResult(
-                    source_name=str(entry.get("source_name") or ""),
-                    work_id=str(entry.get("work_id") or ""),
-                    score=float(entry.get("rrf_score") or 0.0),
-                    text_type=str(entry.get("text_type") or ""),
-                    paper_id=entry.get("paper_id"),
-                    retrieval_debug=debug,
-                )
-            )
-
-        fused_results.sort(
-            key=lambda result: (
-                result.score,
-                len((result.retrieval_debug or {}).get("matched_retrievers", [])),
-                result.work_id,
-            ),
-            reverse=True,
-        )
-        return fused_results[: max(1, int(top_k))]
-
-    @staticmethod
-    def _retrieval_dedupe_key(
-        work_id: str,
-        paper_id: Any,
-        retriever: str,
-        rank: int,
-    ) -> str:
-        if work_id:
-            return f"work:{work_id}"
-        if paper_id not in (None, ""):
-            return f"paper:{paper_id}"
-        return f"{retriever}:{rank}"
-
-    @staticmethod
-    def _safe_float(value: Any) -> float:
+    def _env_int(name: str, default: int) -> int:
         try:
-            return float(value)
+            return int(os.environ.get(name, str(default)))
         except (TypeError, ValueError):
-            return float("nan")
+            return default
 
     @staticmethod
-    def _search_results_to_lightweight_dicts(search_results: Sequence[SearchResult]) -> List[Dict[str, Any]]:
-        """Serialize SearchResult objects without metadata hydration."""
-        return [
-            {
-                "work_id": result.work_id,
-                "paper_id": result.paper_id,
-                "source_name": result.source_name,
-                "similarity": result.score,
-                "text_type": result.text_type,
-                "retrieval_debug": result.retrieval_debug,
-            }
-            for result in search_results
-        ]
+    def _env_float(name: str, default: float) -> float:
+        try:
+            return float(os.environ.get(name, str(default)))
+        except (TypeError, ValueError):
+            return default
 
     def delete(
         self,
@@ -1048,6 +988,26 @@ class PaperIndexer:
             logging.error(f"read 失败: {str(e)}", exc_info=True)
             raise e
 
+
+    def retrieve_papers_by_time_interval(
+        self,
+        date_from: str,
+        date_to: str,
+        source_name: Optional[str] = "langtaosha"
+    ) -> List[Dict[str, Any]]:
+        """获取指定时间间隔内的论文完整信息。"""
+        paper_ids = self.metadata_db.retrieve_paper_ids_by_time_interval(date_from, date_to)
+
+        papers: List[Dict[str, Any]] = []
+        for paper_id in paper_ids:
+            paper_info = self.metadata_db.get_paper_info_by_paper_id(
+                paper_id,
+                source_name=source_name,
+            )
+            if paper_info is not None:
+                papers.append(paper_info)
+
+        return papers
     # =========================================================================
     # 私有辅助方法
     # =========================================================================
@@ -1630,45 +1590,3 @@ class PaperIndexer:
                 "enabled": True,
                 "error": str(e)
             }
-
-    def _hydrate_search_results(self, search_results: List[SearchResult]) -> List[Dict[str, Any]]:
-        """补全搜索结果的 metadata
-
-        Args:
-            search_results: VectorDB 搜索结果列表
-
-        Returns:
-            List[Dict[str, Any]]: 补全后的结果列表
-        """
-        hydrated_results = []
-
-        for result in search_results:
-            try:
-                # 读取 metadata
-                paper_info = self.metadata_db.read_paper_by_work_id(result.work_id)
-
-                if paper_info:
-                    # 补全结果
-                    hydrated_result = {
-                        "work_id": result.work_id,
-                        "paper_id": paper_info.get("paper_id"),
-                        "source_name": result.source_name,
-                        "similarity": result.score,
-                        "text_type": result.text_type,
-                        "retrieval_debug": result.retrieval_debug,
-                        "metadata": paper_info
-                    }
-                    hydrated_results.append(hydrated_result)
-                else:
-                    # metadata 不存在，记录警告
-                    logging.warning(
-                        f"搜索结果的 metadata 不存在: work_id={result.work_id}"
-                    )
-
-            except Exception as e:
-                logging.error(
-                    f"补全 metadata 失败: work_id={result.work_id}, error={str(e)}",
-                    exc_info=True
-                )
-
-        return hydrated_results

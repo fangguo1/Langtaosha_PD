@@ -20,6 +20,7 @@ export class ApiError extends Error {
 }
 
 type QueryValue = string | number | boolean | null | undefined;
+type HeaderValue = string | undefined;
 
 function buildUrl(path: string, params?: Record<string, QueryValue>): string {
   const baseUrl =
@@ -57,6 +58,7 @@ async function parseJson<T>(response: Response): Promise<T> {
 export async function apiGet<T extends ApiEnvelope>(
   path: string,
   params?: Record<string, QueryValue>,
+  extraHeaders?: Record<string, HeaderValue>,
 ): Promise<T> {
   const response = await fetch(buildUrl(path, params), {
     method: "GET",
@@ -64,6 +66,7 @@ export async function apiGet<T extends ApiEnvelope>(
     headers: {
       Accept: "application/json",
       "X-Request-Id": createRequestId(),
+      ...(extraHeaders || {}),
     },
   });
   const data = await parseJson<T>(response);

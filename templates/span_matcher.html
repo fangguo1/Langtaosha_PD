@@ -118,11 +118,67 @@
 
     .result-toolbar {
       display: none;
-      align-items: center;
+      align-items: stretch;
       justify-content: space-between;
       gap: 12px;
       flex-wrap: wrap;
       margin: 12px 0 10px;
+    }
+
+    .timing-panel {
+      display: grid;
+      gap: 8px;
+      flex: 1 1 320px;
+      min-width: 240px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px 14px;
+    }
+
+    .timing-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: baseline;
+      flex-wrap: wrap;
+    }
+
+    .timing-title {
+      font-size: 14px;
+      font-weight: 800;
+      color: #1b1b1b;
+    }
+
+    .timing-total {
+      font-size: 18px;
+      font-weight: 800;
+      color: #3b3212;
+    }
+
+    .timing-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+      gap: 8px;
+    }
+
+    .timing-chip {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--soft);
+      padding: 8px 10px;
+    }
+
+    .timing-label {
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+
+    .timing-value {
+      font-size: 14px;
+      font-weight: 800;
+      color: #1c1c1c;
     }
 
     .evidence-toggle {
@@ -163,7 +219,14 @@
       margin-top: 8px;
     }
 
-    .candidate {
+    .results-title {
+      margin: 0 0 8px;
+      font-size: 16px;
+      font-weight: 800;
+      color: #1b1b1b;
+    }
+
+    .span-card {
       width: 100%;
       background: var(--card);
       border: 1px solid var(--border);
@@ -172,7 +235,7 @@
       overflow-wrap: anywhere;
     }
 
-    .candidate-head {
+    .span-head {
       display: flex;
       align-items: baseline;
       justify-content: space-between;
@@ -181,7 +244,7 @@
       margin-bottom: 8px;
     }
 
-    .candidate-title {
+    .span-title {
       margin: 0;
       font-size: 18px;
       line-height: 1.4;
@@ -189,41 +252,31 @@
       color: #1b1b1b;
     }
 
-    .candidate-meta {
+    .span-meta {
       color: var(--muted);
       font-size: 13px;
       line-height: 1.5;
     }
 
-    .match-list {
+    .term-section {
       display: grid;
       gap: 8px;
       margin-top: 10px;
     }
 
-    .match-row {
+    .term-row {
       display: grid;
-      grid-template-columns: minmax(92px, 130px) 1fr;
-      gap: 10px;
+      gap: 6px;
       padding: 10px;
       border: 1px solid var(--border);
       border-radius: 8px;
       background: var(--soft);
     }
 
-    .source {
+    .term-label {
       font-size: 13px;
       font-weight: 800;
-      text-transform: uppercase;
       color: #3b3212;
-    }
-
-    .match-detail {
-      display: grid;
-      gap: 5px;
-      color: #1e293b;
-      font-size: 14px;
-      line-height: 1.5;
     }
 
     .aliases {
@@ -245,6 +298,64 @@
       overflow-wrap: anywhere;
     }
 
+    .alias.prefix {
+      border-color: #c7b3f3;
+      background: #f7f1ff;
+      color: #4f3a79;
+    }
+
+    .children-block {
+      margin-top: 12px;
+      border-top: 1px dashed var(--border);
+      padding-top: 12px;
+    }
+
+    .children-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: #fffaf0;
+      color: #3b3212;
+      padding: 8px 12px;
+      font-size: 13px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    .children-list {
+      display: grid;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .child-card {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: #fbfbf8;
+      padding: 12px;
+    }
+
+    .child-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 8px;
+    }
+
+    .child-title {
+      font-size: 15px;
+      font-weight: 800;
+      color: #1c1c1c;
+    }
+
+    .child-meta {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
     .empty {
       background: var(--card);
       border: 1px solid var(--border);
@@ -259,9 +370,9 @@
       .matcher-box { flex-direction: column; }
       .matcher-box button { width: 100%; }
       .result-toolbar { align-items: stretch; }
+      .timing-panel { min-width: 0; }
       .evidence-toggle { width: 100%; }
       .evidence-toggle button { flex: 1; }
-      .match-row { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -279,12 +390,13 @@
 
     <div id="status" class="status"></div>
     <div id="resultToolbar" class="result-toolbar">
-      <div class="candidate-meta">显示 evidence</div>
+      <div id="timingPanel" class="timing-panel"></div>
       <div class="evidence-toggle" role="group" aria-label="显示 evidence">
         <button id="primaryEvidenceBtn" type="button" data-evidence-mode="primary">primary_evidence</button>
         <button id="allEvidenceBtn" type="button" data-evidence-mode="all">所有 evidence</button>
       </div>
     </div>
+    <div class="results-title">Semantic spans</div>
     <div id="results" class="results"></div>
   </div>
 
@@ -295,10 +407,13 @@
     const matchBtn = document.getElementById("matchBtn");
     const statusEl = document.getElementById("status");
     const resultToolbar = document.getElementById("resultToolbar");
+    const timingPanel = document.getElementById("timingPanel");
     const resultsEl = document.getElementById("results");
     const evidenceButtons = Array.from(document.querySelectorAll("[data-evidence-mode]"));
     let evidenceMode = "all";
     let currentCandidates = [];
+    let currentSemanticPlan = null;
+    let currentTimings = null;
 
     function escapeHtml(value) {
       return String(value ?? "")
@@ -315,6 +430,25 @@
       return n.toFixed(3);
     }
 
+    function formatMs(value) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return "-";
+      return `${n.toFixed(1)} ms`;
+    }
+
+    function renderTermChips(terms) {
+      const visibleTerms = Array.isArray(terms) ? terms.filter((term) => term && term.text) : [];
+      if (!visibleTerms.length) return "<span class='empty'>无 term</span>";
+      return `
+        <span class="aliases">
+          ${visibleTerms.map((term) => {
+            const klass = term.match_mode === "prefix" ? "alias prefix" : "alias";
+            return `<span class="${klass}">${escapeHtml(term.text)} · ${escapeHtml(term.match_mode || "exact")}</span>`;
+          }).join("")}
+        </span>
+      `;
+    }
+
     function renderAliases(aliases) {
       const visibleAliases = Array.isArray(aliases) ? aliases.filter(Boolean) : [];
       if (!visibleAliases.length) return "-";
@@ -322,20 +456,6 @@
         <span class="aliases">
           ${visibleAliases.map((alias) => `<span class="alias">${escapeHtml(alias)}</span>`).join("")}
         </span>
-      `;
-    }
-
-    function renderMatch(match) {
-      return `
-        <div class="match-row">
-          <div class="source">${escapeHtml(match.source || "-")}</div>
-          <div class="match-detail">
-            <div><strong>Canonical:</strong> ${escapeHtml(match.canonical || "-")}</div>
-            <div><strong>Concept ID:</strong> ${escapeHtml(match.concept_id || "-")}</div>
-            <div><strong>Match:</strong> ${escapeHtml(match.match_type || "-")} · <strong>Confidence:</strong> ${formatConfidence(match.confidence)}</div>
-            <div><strong>Alias:</strong> ${renderAliases(match.aliases)}</div>
-          </div>
-        </div>
       `;
     }
 
@@ -350,24 +470,124 @@
     function renderCandidate(candidate, index) {
       const matches = getVisibleMatches(candidate);
       const matchHtml = matches.length
-        ? matches.map(renderMatch).join("")
+        ? matches.map((match) => `
+          <div class="term-row">
+            <div class="term-label">${escapeHtml(match.source || "-")}</div>
+            <div class="span-meta"><strong>Canonical:</strong> ${escapeHtml(match.canonical || "-")}</div>
+            <div class="span-meta"><strong>Concept ID:</strong> ${escapeHtml(match.concept_id || "-")}</div>
+            <div class="span-meta"><strong>Match:</strong> ${escapeHtml(match.match_type || "-")} · <strong>Confidence:</strong> ${formatConfidence(match.confidence)}</div>
+            <div class="span-meta"><strong>Alias:</strong> ${renderAliases(match.aliases)}</div>
+          </div>
+        `).join("")
         : "<div class='empty'>无 match source</div>";
 
       return `
-        <article class="candidate">
-          <div class="candidate-head">
-            <h2 class="candidate-title">${index + 1}. ${escapeHtml(candidate.text || "-")}</h2>
-            <div class="candidate-meta">${escapeHtml(candidate.kind || "-")} · ${escapeHtml(candidate.start)}:${escapeHtml(candidate.end)}</div>
+        <article class="child-card">
+          <div class="child-head">
+            <div class="child-title">Candidate ${index + 1}: ${escapeHtml(candidate.text || "-")}</div>
+            <div class="child-meta">${escapeHtml(candidate.kind || "-")} · ${escapeHtml(candidate.start)}:${escapeHtml(candidate.end)}</div>
           </div>
-          <div class="candidate-meta">normalized: ${escapeHtml(candidate.normalized_text || "-")}</div>
-          <div class="match-list">${matchHtml}</div>
+          <div class="span-meta">normalized: ${escapeHtml(candidate.normalized_text || "-")}</div>
+          <div class="term-section">${matchHtml}</div>
         </article>
+      `;
+    }
+
+    function renderChildren(children, parentSpanId) {
+      if (!Array.isArray(children) || !children.length) {
+        return "<div class='span-meta'>No children</div>";
+      }
+
+      return `
+        <details class="children-block">
+          <summary class="children-toggle">Children (${children.length}) · 点击展开</summary>
+          <div class="children-list">
+            ${children.map((child) => `
+              <article class="child-card" id="${escapeHtml(`${parentSpanId}-${child.span_id}`)}">
+                <div class="child-head">
+                  <div class="child-title">${escapeHtml(child.span_id)} · ${escapeHtml(child.surface_text || "-")}</div>
+                  <div class="child-meta">${escapeHtml(child.start)}:${escapeHtml(child.end)}</div>
+                </div>
+                <div class="span-meta">canonical: ${escapeHtml(child.canonical_text || "-")}</div>
+                <div class="term-section">
+                  <div class="term-row">
+                    <div class="term-label">own.tier1</div>
+                    <div>${renderTermChips(child.own_terms?.tier1)}</div>
+                  </div>
+                  <div class="term-row">
+                    <div class="term-label">own.tier2</div>
+                    <div>${renderTermChips(child.own_terms?.tier2)}</div>
+                  </div>
+                </div>
+              </article>
+            `).join("")}
+          </div>
+        </details>
+      `;
+    }
+
+    function renderSemanticSpan(span, index) {
+      return `
+        <article class="span-card">
+          <div class="span-head">
+            <h2 class="span-title">${index + 1}. ${escapeHtml(span.surface_text || "-")}</h2>
+            <div class="span-meta">${escapeHtml(span.span_id || "-")} · ${escapeHtml(span.start)}:${escapeHtml(span.end)}</div>
+          </div>
+          <div class="span-meta">canonical: ${escapeHtml(span.canonical_text || "-")}</div>
+          <div class="span-meta">normalized: ${escapeHtml(span.normalized_text || "-")}</div>
+          <div class="term-section">
+            <div class="term-row">
+              <div class="term-label">own.tier1</div>
+              <div>${renderTermChips(span.own_terms?.tier1)}</div>
+            </div>
+            <div class="term-row">
+              <div class="term-label">own.tier2</div>
+              <div>${renderTermChips(span.own_terms?.tier2)}</div>
+            </div>
+          </div>
+          ${renderChildren(span.children, span.span_id)}
+        </article>
+      `;
+    }
+
+    function renderTimingPanel() {
+      if (!currentTimings) {
+        timingPanel.innerHTML = "";
+        return;
+      }
+      const timings = currentTimings.timings_ms || {};
+      const steps = [
+        ["normalize", "Normalize"],
+        ["extract", "Extract"],
+        ["match", "Match"],
+        ["select", "Select"],
+        ["build_plan", "Build Plan"],
+      ];
+      timingPanel.innerHTML = `
+        <div class="timing-header">
+          <div class="timing-title">响应时间</div>
+          <div class="timing-total">${formatMs(currentTimings.elapsed_ms)}</div>
+        </div>
+        <div class="timing-grid">
+          ${steps.map(([key, label]) => `
+            <div class="timing-chip">
+              <div class="timing-label">${label}</div>
+              <div class="timing-value">${formatMs(timings[key])}</div>
+            </div>
+          `).join("")}
+        </div>
       `;
     }
 
     async function runMatcher(query) {
       const url = `/api/span-matcher?query=${encodeURIComponent(query)}`;
       const resp = await fetch(url);
+      const contentType = resp.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        const bodyText = await resp.text();
+        const bodyPreview = bodyText.trim().slice(0, 120);
+        throw new Error(`接口返回了非 JSON 响应（HTTP ${resp.status}）: ${bodyPreview || "empty response"}`);
+      }
       const data = await resp.json();
       if (!resp.ok || !data.success) {
         throw new Error(data.error || "匹配失败");
@@ -385,11 +605,13 @@
 
     function renderResults() {
       updateEvidenceButtons();
-      if (!currentCandidates.length) {
-        resultsEl.innerHTML = "<div class='empty'>暂无 selected candidates</div>";
+      renderTimingPanel();
+      const spans = currentSemanticPlan?.spans || [];
+      if (!spans.length) {
+        resultsEl.innerHTML = "<div class='empty'>暂无 semantic spans</div>";
         return;
       }
-      resultsEl.innerHTML = currentCandidates.map(renderCandidate).join("");
+      resultsEl.innerHTML = spans.map(renderSemanticSpan).join("");
     }
 
     async function submitQuery(query) {
@@ -402,13 +624,22 @@
       statusEl.textContent = "正在匹配...";
       resultToolbar.style.display = "none";
       currentCandidates = [];
+      currentSemanticPlan = null;
+      currentTimings = null;
       resultsEl.innerHTML = "";
+      timingPanel.innerHTML = "";
 
       try {
         const data = await runMatcher(query);
         currentCandidates = data.selected_candidates || [];
-        statusEl.textContent = `Selected candidates: ${currentCandidates.length}`;
-        resultToolbar.style.display = currentCandidates.length ? "flex" : "none";
+        currentSemanticPlan = data.semantic_plan || null;
+        currentTimings = {
+          elapsed_ms: data.elapsed_ms,
+          timings_ms: data.timings_ms || {},
+        };
+        const spanCount = currentSemanticPlan?.spans?.length || 0;
+        statusEl.textContent = `Semantic spans: ${spanCount} · Selected candidates: ${currentCandidates.length}`;
+        resultToolbar.style.display = "flex";
         renderResults();
       } catch (err) {
         statusEl.textContent = `错误: ${err.message}`;

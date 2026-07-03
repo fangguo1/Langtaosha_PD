@@ -6,8 +6,10 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
-from dataclasses import dataclass
+import tempfile
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
@@ -47,6 +49,7 @@ class BackfillSummary:
     skipped: int = 0
     failed: int = 0
     dry_run: bool = False
+    by_source: Dict[str, Dict[str, int]] = field(default_factory=dict)
 
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
@@ -59,6 +62,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument("--state-file", type=Path, default=DEFAULT_STATE_FILE)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--no-progress", action="store_true", help="Disable tqdm progress bars")
+    parser.add_argument("--summary-json", type=Path, default=None, help="Optional machine-readable summary JSON path")
     return parser.parse_args(argv)
 
 
@@ -159,8 +163,25 @@ def load_state(state_file: Path) -> Dict[str, Any]:
 
 def save_state(state_file: Path, state: Dict[str, Any]) -> None:
     state_file.parent.mkdir(parents=True, exist_ok=True)
-    with open(state_file, "w", encoding="utf-8") as f:
-        json.dump(state, f, indent=2, sort_keys=True)
+    temp_path: Optional[Path] = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=state_file.parent,
+            prefix=f".{state_file.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temp_path = Path(handle.name)
+            json.dump(state, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, state_file)
+    finally:
+        if temp_path is not None and temp_path.exists():
+            temp_path.unlink()
 
 
 def _progress_enabled(args: argparse.Namespace) -> bool:
@@ -182,7 +203,10 @@ def run_backfill(
     vector_db = vector_db or VectorDB(config_path=args.config_path)
     sources = parse_sources(args.sources) or list(vector_db.allowed_sources)
     state = load_state(args.state_file) if args.resume else {}
-    summary = BackfillSummary(sources=sources, dry_run=args.dry_run)
+    summary = BackfillSummary(
+        sources=sources,
+        dry_run=args.dry_run,
+    )
     show_progress = _progress_enabled(args)
 
     source_iter = sources
@@ -242,7 +266,7 @@ def run_backfill(
             source_indexed += indexed_count
             after_paper_id = int(candidates[-1]["paper_id"])
 
-            if args.resume:
+            if args.resume and not args.dry_run:
                 state[source_name] = {"last_paper_id": after_paper_id}
                 save_state(args.state_file, state)
 
@@ -268,6 +292,13 @@ def run_backfill(
 
         if source_progress is not None:
             source_progress.close()
+        summary.by_source[source_name] = {
+            "fetched": source_fetched,
+            "indexed": source_indexed,
+            "skipped": source_skipped,
+            "failed": 0,
+            "last_paper_id": after_paper_id,
+        }
 
     return summary
 
@@ -275,22 +306,42 @@ def run_backfill(
 def main(argv: Optional[List[str]] = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     args = parse_args(argv)
-    summary = run_backfill(args)
-    print(
-        json.dumps(
-            {
-                "sources": summary.sources,
-                "fetched": summary.fetched,
-                "indexed": summary.indexed,
-                "skipped": summary.skipped,
-                "failed": summary.failed,
-                "dry_run": summary.dry_run,
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-    )
-    return 0 if summary.failed == 0 else 1
+    try:
+        summary = run_backfill(args)
+        metrics = asdict(summary)
+        payload = {
+            "schema_version": 1,
+            "operation": "sparse_backfill",
+            "status": "failed" if summary.failed else "ok",
+            "metrics": metrics,
+        }
+        print(json.dumps(metrics, ensure_ascii=False, indent=2))
+        if args.summary_json:
+            args.summary_json.parent.mkdir(parents=True, exist_ok=True)
+            args.summary_json.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+        return 0 if summary.failed == 0 else 1
+    except Exception as exc:
+        logging.exception("Sparse backfill failed: %s", exc)
+        if args.summary_json:
+            args.summary_json.parent.mkdir(parents=True, exist_ok=True)
+            args.summary_json.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "operation": "sparse_backfill",
+                        "status": "failed",
+                        "error_summary": str(exc),
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+        return 1
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import logging
 import os
 from pathlib import Path
 import sys
@@ -74,6 +75,24 @@ def test_analyze_routes_semantic_query_to_vector():
     assert result.intent == "semantic_search"
     assert result.route == "vector"
     assert result.matched_author is None
+
+
+def test_analyze_logs_query_and_stage_timings(caplog):
+    service = QueryUnderstandingService(
+        FakeMetadataDB(
+            {"breast cancer risk": []},
+            {"breast cancer risk": [_term("breast cancer rst")]},
+        )
+    )
+
+    with caplog.at_level(logging.INFO):
+        result = service.analyze("breast cancer risk")
+
+    assert result.route == "vector"
+    assert "query='breast cancer risk'" in caplog.text
+    assert "author_match_elapsed_ms=" in caplog.text
+    assert "query_correction_elapsed_ms=" in caplog.text
+    assert "query_expansion_elapsed_ms=" in caplog.text
 
 
 def test_analyze_author_match_has_priority_over_future_query_correction():
@@ -251,6 +270,35 @@ def test_analyze_uses_phrase_corrections_for_sentence_query():
         "solvent formation",
         "cancer cell therapy",
     ]
+
+
+def test_analyze_exposes_stage_timings_in_milliseconds():
+    service = QueryUnderstandingService(
+        FakeMetadataDB({"cancer therapy": []})
+    )
+    service.query_expander = type(
+        "FakeExpander",
+        (),
+        {
+            "expand": lambda self, query: type(
+                "ExpansionResult",
+                (),
+                {"to_dict": lambda self: {"enabled": False, "status": "disabled"}},
+            )()
+        },
+    )()
+
+    result = service.analyze("cancer therapy")
+
+    assert result.intent == "semantic_search"
+    assert result.route == "vector"
+    assert set(result.timings) >= {
+        "author_match_elapsed_ms",
+        "query_correction_elapsed_ms",
+        "query_expansion_elapsed_ms",
+        "total_elapsed_ms",
+    }
+    assert all(result.timings[key] >= 0 for key in result.timings)
 
 
 def test_analyze_includes_phrase_corrections_in_payload():

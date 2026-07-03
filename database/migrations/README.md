@@ -1,3 +1,15 @@
+# 数据库迁移文档
+
+## 新增迁移
+
+### 2026-06-08 Retrieval Feedback Testbed
+
+- Migration: `database/migrations/20260608_retrieval_feedback_testbed.sql`
+- Purpose: create the canonical retrieval feedback testbed tables, frozen version tables, and evaluation run/result tables.
+- Dependency: apply after `20260507_user_study_events.sql` and `20260507_user_study_search_results.sql`.
+
+---
+
 # work_id 字段迁移文档
 
 **版本**: v1.0

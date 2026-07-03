@@ -35,6 +35,22 @@ _engine_lock = threading.Lock()
 _db_engines: Dict[str, Engine] = {}
 _engines_lock = threading.Lock()
 
+_DEFAULT_FRONTEND_SEARCH_LOGGING_CONFIG: Dict[str, Any] = {
+    "enabled": True,
+    "local_jsonl": {
+        "enabled": True,
+        "root_dir": "local_data/search_api_logs",
+        "partition_by_year": True,
+        "filename_pattern": "{date}_frontend_search_requests.jsonl",
+    },
+    "db_summary": {
+        "enabled": True,
+    },
+    "response_log": {
+        "max_results": 10,
+    },
+}
+
 
 
 def load_config_from_yaml(config_path: Path) -> Dict[str, Any]:
@@ -532,6 +548,27 @@ def get_default_sources() -> List[str]:
 
     # 6. 返回深拷贝，避免调用方原地修改
     return deepcopy(default_sources)
+
+
+def get_frontend_search_logging_config() -> Dict[str, Any]:
+    """获取 frontend search logging 配置。
+
+    返回默认值与配置文件中 logging.frontend_search 的深度合并结果。
+    """
+    if not _initialized or not _config_cache:
+        raise ValueError("配置未初始化，请先调用 init_config(config_path)")
+
+    config = deepcopy(_DEFAULT_FRONTEND_SEARCH_LOGGING_CONFIG)
+    logging_config = _config_cache.get("logging") or {}
+    frontend_search_config = logging_config.get("frontend_search") or {}
+
+    for key, value in frontend_search_config.items():
+        if isinstance(value, dict) and isinstance(config.get(key), dict):
+            config[key].update(deepcopy(value))
+        else:
+            config[key] = deepcopy(value)
+
+    return config
 
 
 def build_routing_to_shard_ids_map() -> Dict[str, Dict[str, List[int]]]:

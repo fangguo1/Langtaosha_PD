@@ -436,3 +436,144 @@ def test_suggest_author_names_respects_limit(metadata_db, author_papers):
     suggestions = metadata_db.suggest_author_names(author_papers["first_author_token"], limit=1)
 
     assert len(suggestions) == 1
+
+
+def test_suggest_author_names_filters_single_paper_candidates_and_sorts_by_score(metadata_db, author_papers):
+    suggestions = metadata_db.suggest_author_names(author_papers["first_author_token"], limit=10)
+
+    assert suggestions
+    assert all(item["paper_count"] > 1 for item in suggestions)
+    scores = [item["score"] for item in suggestions]
+    assert scores == sorted(scores, reverse=True)
+
+
+def test_suggest_author_names_drops_single_paper_rows_before_final_ranking(metadata_db, monkeypatch):
+    rows = [
+        ("High Score One Paper", 1, 2, 1),
+        ("Medium Score Many Papers", 4, 2, 1),
+        ("Top Score Many Papers", 3, 2, 1),
+    ]
+    scores = {
+        "High Score One Paper": 0.99,
+        "Medium Score Many Papers": 0.82,
+        "Top Score Many Papers": 0.95,
+    }
+
+    class FakeResult:
+        def fetchall(self):
+            return rows
+
+    class FakeConn:
+        def execute(self, stmt, params=None):
+            if "CREATE EXTENSION" in str(stmt):
+                return FakeResult()
+            return FakeResult()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeEngine:
+        def connect(self):
+            return FakeConn()
+
+    monkeypatch.setattr(metadata_db, "engine", FakeEngine())
+    monkeypatch.setattr(
+        metadata_db,
+        "author_match_score",
+        lambda query, name: scores[name],
+    )
+
+    suggestions = metadata_db.suggest_author_names("score test", limit=10)
+
+    assert [item["name"] for item in suggestions] == [
+        "High Score One Paper",
+        "Top Score Many Papers",
+        "Medium Score Many Papers",
+    ]
+
+
+def test_suggest_author_names_uses_query_tokens_and_trigram_sql_for_multi_token_query(
+    metadata_db,
+    monkeypatch,
+):
+    captured = {"stmts": [], "params": []}
+
+    class FakeResult:
+        def fetchall(self):
+            return []
+
+    class FakeConn:
+        def execute(self, stmt, params=None):
+            stmt_text = str(stmt)
+            captured["stmts"].append(stmt_text)
+            captured["params"].append(None if params is None else dict(params))
+            if "CREATE EXTENSION" in stmt_text:
+                return FakeResult()
+            return FakeResult()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeEngine:
+        def connect(self):
+            return FakeConn()
+
+    monkeypatch.setattr(metadata_db, "engine", FakeEngine())
+
+    suggestions = metadata_db.suggest_author_names("niang yan", limit=10)
+
+    assert suggestions == []
+    main_stmt = next(stmt for stmt in captured["stmts"] if "WITH authors AS" in stmt)
+    main_params = next(params for params in captured["params"] if params and "query_tokens" in params)
+    assert main_params["query_tokens"] == ["niang", "yan"]
+    assert "unnest(:query_tokens)" in main_stmt
+    assert "similarity(" in main_stmt
+
+
+def test_suggest_author_names_multi_token_query_filters_substring_only_noise(
+    metadata_db,
+    transformer,
+    test_papers,
+):
+    paper_ids = []
+    try:
+        cases = [
+            ("Niang Yan", "niang-yan-a", "langtaosha"),
+            ("Niang Yan", "niang-yan-b", "biorxiv_daily"),
+            ("Aghayan S", "aghayan-a", "langtaosha"),
+            ("Aghayan S", "aghayan-b", "biorxiv_daily"),
+        ]
+
+        for author_name, suffix, source_name in cases:
+            if source_name == "langtaosha":
+                payload = _payload_with_author(
+                    test_papers["langtaosha"][0],
+                    source_name,
+                    author_name,
+                )
+                payload = _unique_langtaosha_payload(payload, suffix)
+            else:
+                payload = _payload_with_author(
+                    test_papers["biorxiv_daily"][0],
+                    source_name,
+                    author_name,
+                )
+                payload = _unique_biorxiv_payload(payload, suffix)
+            paper_ids.append(
+                _insert_real_payload(metadata_db, transformer, payload, source_name)
+            )
+
+        suggestions = metadata_db.suggest_author_names("niang yan", limit=10)
+        names = [item["name"] for item in suggestions]
+
+        assert "Niang Yan" in names
+        assert "Aghayan S" not in names
+    finally:
+        for paper_id in paper_ids:
+            metadata_db.delete_paper_by_paper_id(paper_id)

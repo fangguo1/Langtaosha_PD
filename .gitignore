@@ -14,6 +14,7 @@ dist/
 .env
 .venv/
 venv/
+.worktrees/
 
 # Local runtime data and logs
 import_mimic.log
