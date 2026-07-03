@@ -11,7 +11,6 @@
       --text: #181818;
       --muted: #555555;
       --primary: #c8b15a;
-      --primary-dark: #a48f3f;
       --border: #d8d8d4;
       --good: #146c43;
       --good-bg: #e8f5ee;
@@ -21,7 +20,6 @@
     }
 
     * { box-sizing: border-box; }
-
     body {
       margin: 0;
       font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
@@ -55,7 +53,13 @@
       margin: 0 0 14px;
       font-size: 26px;
       line-height: 1.25;
-      letter-spacing: 0;
+    }
+
+    .subtitle {
+      margin: 0 0 18px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
     }
 
     .label {
@@ -64,38 +68,6 @@
       color: var(--muted);
       font-size: 12px;
       font-weight: 700;
-    }
-
-    .toggle-row {
-      display: flex;
-      gap: 9px;
-      align-items: flex-start;
-      margin: 10px 0 16px;
-      padding: 10px;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      background: #ffffff;
-    }
-
-    .toggle-row input {
-      width: 16px;
-      height: 16px;
-      margin-top: 2px;
-      accent-color: var(--primary-dark);
-    }
-
-    .toggle-row strong {
-      display: block;
-      font-size: 13px;
-      line-height: 1.35;
-    }
-
-    .toggle-row span {
-      display: block;
-      margin-top: 3px;
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.45;
     }
 
     select {
@@ -110,11 +82,6 @@
       outline: none;
     }
 
-    select:focus {
-      border-color: var(--primary);
-      box-shadow: 0 0 0 3px rgba(200, 177, 90, 0.18);
-    }
-
     .summary {
       display: grid;
       grid-template-columns: repeat(5, minmax(120px, 1fr));
@@ -122,71 +89,19 @@
       margin-bottom: 16px;
     }
 
-    .metric {
+    .metric, .query-card, .controls, .paper, .empty {
       background: var(--card);
       border: 1px solid var(--border);
       border-radius: 8px;
-      padding: 12px;
     }
 
-    .metric span {
-      display: block;
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 700;
-    }
+    .metric { padding: 12px; }
+    .metric span { display: block; color: var(--muted); font-size: 12px; font-weight: 700; }
+    .metric strong { display: block; margin-top: 5px; font-size: 18px; line-height: 1.3; overflow-wrap: anywhere; }
 
-    .metric strong {
-      display: block;
-      margin-top: 5px;
-      font-size: 18px;
-      line-height: 1.3;
-      overflow-wrap: anywhere;
-    }
-
-    .query-card {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 14px;
-      margin-bottom: 14px;
-    }
-
-    .query-title {
-      margin: 0 0 8px;
-      font-size: 20px;
-      line-height: 1.35;
-      overflow-wrap: anywhere;
-    }
-
-    .meta {
-      margin: 0;
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.65;
-      overflow-wrap: anywhere;
-    }
-
-    .source-score-table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 10px;
-      font-size: 13px;
-    }
-
-    .source-score-table th,
-    .source-score-table td {
-      border-top: 1px solid var(--border);
-      padding: 7px 6px;
-      text-align: left;
-      vertical-align: top;
-    }
-
-    .source-score-table th {
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 800;
-    }
+    .query-card { padding: 14px; margin-bottom: 14px; }
+    .query-title { margin: 0 0 8px; font-size: 20px; line-height: 1.35; overflow-wrap: anywhere; }
+    .meta { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; }
 
     .controls {
       display: flex;
@@ -195,30 +110,12 @@
       align-items: flex-start;
       margin-bottom: 14px;
       padding: 12px;
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 8px;
     }
 
-    .control-group {
-      display: grid;
-      gap: 7px;
-    }
-
-    .control-title {
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 700;
-    }
-
-    .chips {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-    }
-
-    .chip,
-    .rank-dot {
+    .control-group { display: grid; gap: 7px; }
+    .control-title { color: var(--muted); font-size: 12px; font-weight: 700; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .chip, .rank-dot {
       border: 1px solid var(--border);
       border-radius: 999px;
       background: #ffffff;
@@ -228,75 +125,20 @@
       font-weight: 700;
       cursor: pointer;
     }
+    .chip { padding: 6px 10px; }
+    .chip.active { border-color: var(--primary); background: #fff8dc; color: #1c1c1c; }
 
-    .chip {
-      padding: 6px 10px;
-    }
+    .rank-strip { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+    .rank-dot { width: 34px; height: 30px; padding: 0; }
+    .rank-dot.good { border-color: #7fc6a1; background: var(--good-bg); color: var(--good); }
+    .rank-dot.bad { border-color: #f2a49b; background: var(--bad-bg); color: var(--bad); }
+    .rank-dot.unlabeled { background: var(--neutral-bg); color: var(--muted); }
 
-    .chip.active {
-      border-color: var(--primary);
-      background: #fff8dc;
-      color: #1c1c1c;
-    }
-
-    .rank-strip {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      margin-bottom: 14px;
-    }
-
-    .rank-dot {
-      width: 34px;
-      height: 30px;
-      padding: 0;
-    }
-
-    .rank-dot.good {
-      border-color: #7fc6a1;
-      background: var(--good-bg);
-      color: var(--good);
-    }
-
-    .rank-dot.bad {
-      border-color: #f2a49b;
-      background: var(--bad-bg);
-      color: var(--bad);
-    }
-
-    .rank-dot.unlabeled {
-      background: var(--neutral-bg);
-      color: var(--muted);
-    }
-
-    .results {
-      display: grid;
-      gap: 14px;
-    }
-
-    .paper {
-      width: 100%;
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 16px;
-      overflow-wrap: anywhere;
-    }
-
-    .paper.feedback-good {
-      border-color: #a6d9bd;
-    }
-
-    .paper.feedback-bad {
-      border-color: #efb1aa;
-    }
-
-    .paper-head {
-      display: flex;
-      gap: 10px;
-      align-items: flex-start;
-    }
-
+    .results { display: grid; gap: 14px; }
+    .paper { padding: 16px; overflow-wrap: anywhere; }
+    .paper.feedback-good { border-color: #a6d9bd; }
+    .paper.feedback-bad { border-color: #efb1aa; }
+    .paper-head { display: flex; gap: 10px; align-items: flex-start; }
     .rank-badge {
       flex: 0 0 auto;
       min-width: 38px;
@@ -312,32 +154,10 @@
       font-weight: 800;
     }
 
-    .title {
-      margin: 0 0 8px;
-      font-size: 18px;
-      font-weight: 700;
-      color: #1b1b1b;
-      line-height: 1.4;
-    }
-
-    .abstract {
-      margin: 0;
-      line-height: 1.7;
-      color: #1e293b;
-      font-size: 14px;
-      white-space: pre-wrap;
-    }
-
-    .feedback-box {
-      margin-top: 14px;
-      padding-top: 12px;
-      border-top: 1px solid var(--border);
-      display: grid;
-      gap: 8px;
-    }
-
+    .title { margin: 0 0 8px; font-size: 18px; font-weight: 700; line-height: 1.4; }
+    .abstract { margin: 0; line-height: 1.7; color: #1e293b; font-size: 14px; white-space: pre-wrap; }
+    .feedback-box { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
     .feedback-pill {
-      justify-self: start;
       display: inline-flex;
       align-items: center;
       min-height: 28px;
@@ -346,81 +166,17 @@
       font-size: 12px;
       font-weight: 800;
     }
+    .feedback-pill.good { background: var(--good-bg); color: var(--good); border: 1px solid #9bd0b5; }
+    .feedback-pill.bad { background: var(--bad-bg); color: var(--bad); border: 1px solid #efb1aa; }
+    .feedback-pill.none { background: var(--neutral-bg); color: var(--muted); border: 1px solid var(--border); }
 
-    .feedback-pill.good {
-      background: var(--good-bg);
-      color: var(--good);
-      border: 1px solid #9bd0b5;
-    }
-
-    .feedback-pill.bad {
-      background: var(--bad-bg);
-      color: var(--bad);
-      border: 1px solid #efb1aa;
-    }
-
-    .feedback-pill.none {
-      background: var(--neutral-bg);
-      color: var(--muted);
-      border: 1px solid var(--border);
-    }
-
-    .reason {
-      margin: 0;
-      color: #3b3212;
-      background: #fffdf0;
-      border: 1px solid #e6d58a;
-      border-radius: 8px;
-      padding: 9px 10px;
-      font-size: 13px;
-      line-height: 1.6;
-    }
-
-    .history {
-      margin: 0;
-      padding-left: 18px;
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.6;
-    }
-
-    .empty {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 18px;
-      color: var(--muted);
-    }
-
-    .badge {
-      display: inline-flex;
-      min-height: 24px;
-      align-items: center;
-      border-radius: 999px;
-      border: 1px solid var(--border);
-      color: var(--muted);
-      background: #ffffff;
-      padding: 3px 8px;
-      font-size: 12px;
-      font-weight: 700;
-    }
+    .empty { padding: 18px; color: var(--muted); }
 
     @media (max-width: 920px) {
       .layout { grid-template-columns: 1fr; }
-      .sidebar {
-        position: static;
-        height: auto;
-        border-right: 0;
-        border-bottom: 1px solid var(--border);
-      }
+      .sidebar { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--border); }
       .main { padding: 20px 16px 48px; }
       .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    }
-
-    @media (max-width: 560px) {
-      .summary { grid-template-columns: 1fr; }
-      .paper-head { display: block; }
-      .rank-badge { margin-bottom: 8px; }
     }
   </style>
 </head>
@@ -428,23 +184,13 @@
   <div class="layout">
     <aside class="sidebar">
       <h1>Feedback Review</h1>
+      <p class="subtitle">Query-level testbed review page. Labels come from the frozen retrieval testbed JSON; titles and abstracts are hydrated from the metadata database.</p>
 
-      <label class="toggle-row" for="qualifiedOnly">
-        <input id="qualifiedOnly" type="checkbox" checked />
-        <span>
-          <strong>Qualified feedback only</strong>
-          <span>只显示至少有一条反馈的 query/search。</span>
-        </span>
-      </label>
-
-      <label class="label" for="userSelect">User ID</label>
-      <select id="userSelect"></select>
+      <label class="label" for="annotatorSelect">Annotator</label>
+      <select id="annotatorSelect"></select>
 
       <label class="label" for="querySelect">Query</label>
       <select id="querySelect"></select>
-
-      <label class="label" for="searchSelect">Search Event</label>
-      <select id="searchSelect"></select>
     </aside>
 
     <main class="main">
@@ -458,23 +204,18 @@
 
   <script>
     const DATA_URL = "/api/study/feedback-review-data";
-
-    const qualifiedOnlyInput = document.getElementById("qualifiedOnly");
-    const userSelect = document.getElementById("userSelect");
+    const annotatorSelect = document.getElementById("annotatorSelect");
     const querySelect = document.getElementById("querySelect");
-    const searchSelect = document.getElementById("searchSelect");
     const summaryEl = document.getElementById("summary");
     const queryCardEl = document.getElementById("queryCard");
     const controlsEl = document.getElementById("controls");
     const rankStripEl = document.getElementById("rankStrip");
     const resultsEl = document.getElementById("results");
 
-    let searches = [];
-    let selectedUser = "";
-    let selectedQuery = "";
-    let selectedSearchId = "";
-    let qualifiedOnly = true;
-    let feedbackFilter = "all";
+    let reviewData = { testbed_name: "", summary: {}, queries: [] };
+    let selectedAnnotator = "__all__";
+    let selectedQueryId = "";
+    let labelFilter = "all";
     let sourceFilter = "all";
 
     function escapeHtml(value) {
@@ -486,11 +227,6 @@
         .replace(/'/g, "&#39;");
     }
 
-    function formatDate(value) {
-      if (!value) return "-";
-      return String(value).replace("T", " ").slice(0, 19);
-    }
-
     function normalizeSourceKey(value) {
       const raw = String(value || "").toLowerCase();
       if (raw.includes("biorxiv")) return "biorxiv";
@@ -498,48 +234,35 @@
       return raw || "unknown";
     }
 
-    function feedbackClass(feedback) {
-      if (feedback === "relevant") return "good";
-      if (feedback === "not_relevant") return "bad";
+    function feedbackClass(label) {
+      if (Number(label) > 0) return "good";
+      if (Number(label) === 0) return "bad";
       return "unlabeled";
     }
 
-    function feedbackLabel(feedback) {
-      if (feedback === "relevant") return "满意";
-      if (feedback === "not_relevant") return "不满意";
-      return "未反馈";
+    function feedbackLabel(label) {
+      if (Number(label) > 0) return "Relevant";
+      if (Number(label) === 0) return "Not relevant";
+      return "Unknown";
     }
 
-    function countFeedback(searchItems) {
-      return searchItems.reduce((acc, item) => {
-        const summary = item.feedback_summary || {};
-        acc.searches += 1;
-        acc.feedback += Number(summary.total || 0);
-        acc.relevant += Number(summary.relevant || 0);
-        acc.notRelevant += Number(summary.not_relevant || 0);
-        return acc;
-      }, { searches: 0, feedback: 0, relevant: 0, notRelevant: 0 });
+    function metric(label, value) {
+      return `<div class="metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`;
     }
 
-    function hasQualifiedFeedback(item) {
-      const summary = item.feedback_summary || {};
-      return Number(summary.total || 0) > 0;
+    function allQueries() {
+      return Array.isArray(reviewData.queries) ? reviewData.queries : [];
     }
 
-    function reviewSearches() {
-      return qualifiedOnly ? searches.filter(hasQualifiedFeedback) : searches;
+    function reviewQueries() {
+      return allQueries().filter((item) => {
+        if (selectedAnnotator === "__all__") return true;
+        return (item.annotator_ids || []).includes(selectedAnnotator);
+      });
     }
 
-    function currentSearchesForUser() {
-      return reviewSearches().filter((item) => item.user_id === selectedUser);
-    }
-
-    function currentSearchesForQuery() {
-      return currentSearchesForUser().filter((item) => item.query === selectedQuery);
-    }
-
-    function currentSearch() {
-      return searches.find((item) => String(item.search_event_id) === selectedSearchId) || null;
+    function currentQuery() {
+      return allQueries().find((item) => String(item.query_id) === String(selectedQueryId)) || null;
     }
 
     function setOptions(select, options, value) {
@@ -549,200 +272,62 @@
       }).join("");
     }
 
-    function renderUserOptions() {
-      const visibleSearches = reviewSearches();
-      const users = Array.from(new Set(visibleSearches.map((item) => item.user_id).filter(Boolean)));
-      users.sort((a, b) => {
-        const aLast = Math.max(...visibleSearches.filter((item) => item.user_id === a).map((item) => Date.parse(item.created_at) || 0));
-        const bLast = Math.max(...visibleSearches.filter((item) => item.user_id === b).map((item) => Date.parse(item.created_at) || 0));
-        return bLast - aLast || a.localeCompare(b);
-      });
-
-      if (!selectedUser || !users.includes(selectedUser)) {
-        selectedUser = users[0] || "";
-      }
-
-      const options = users.map((user) => {
-        const stats = countFeedback(visibleSearches.filter((item) => item.user_id === user));
-        return {
-          value: user,
-          label: `${user} (${stats.searches} searches, ${stats.feedback} feedback)`,
-        };
-      });
-      setOptions(userSelect, options, selectedUser);
+    function renderAnnotatorOptions() {
+      const annotators = Array.from(
+        new Set(allQueries().flatMap((item) => item.annotator_ids || []).filter(Boolean))
+      ).sort((a, b) => String(a).localeCompare(String(b)));
+      const options = [
+        { value: "__all__", label: `All annotators (${annotators.length})` },
+        ...annotators.map((annotator) => ({ value: annotator, label: annotator })),
+      ];
+      if (!options.some((item) => item.value === selectedAnnotator)) selectedAnnotator = "__all__";
+      setOptions(annotatorSelect, options, selectedAnnotator);
     }
 
     function renderQueryOptions() {
-      const byQuery = new Map();
-      currentSearchesForUser().forEach((item) => {
-        if (!byQuery.has(item.query)) byQuery.set(item.query, []);
-        byQuery.get(item.query).push(item);
-      });
-
-      const queries = Array.from(byQuery.keys()).sort((a, b) => {
-        const aFirst = Math.min(...byQuery.get(a).map((item) => Date.parse(item.created_at) || 0));
-        const bFirst = Math.min(...byQuery.get(b).map((item) => Date.parse(item.created_at) || 0));
-        return aFirst - bFirst || String(a).localeCompare(String(b));
-      });
-
-      if (!selectedQuery || !queries.includes(selectedQuery)) {
-        selectedQuery = queries[0] || "";
+      const queries = reviewQueries().slice().sort((a, b) => Number(a.query_id) - Number(b.query_id));
+      if (!queries.some((item) => String(item.query_id) === String(selectedQueryId))) {
+        selectedQueryId = queries.length ? String(queries[0].query_id) : "";
       }
-
-      const options = queries.map((query) => {
-        const stats = countFeedback(byQuery.get(query));
-        return {
-          value: query,
-          label: `${query} (${stats.searches} searches, ${stats.feedback} feedback)`,
-        };
-      });
-      setOptions(querySelect, options, selectedQuery);
-    }
-
-    function renderSearchOptions() {
-      const items = currentSearchesForQuery().slice().sort((a, b) => {
-        return (Date.parse(a.created_at) || 0) - (Date.parse(b.created_at) || 0);
-      });
-
-      if (!items.some((item) => String(item.search_event_id) === selectedSearchId)) {
-        selectedSearchId = items.length ? String(items[0].search_event_id) : "";
-      }
-
-      const options = items.map((item) => {
-        const summary = item.feedback_summary || {};
-        return {
-          value: String(item.search_event_id),
-          label: `#${item.search_event_id} | ${formatDate(item.created_at)} | ${item.query_understanding_route || "-"} | ${summary.relevant || 0}/${summary.not_relevant || 0}`,
-        };
-      });
-      setOptions(searchSelect, options, selectedSearchId);
+      const options = queries.map((query) => ({
+        value: String(query.query_id),
+        label: `#${query.query_id} | ${query.query_text} (${query.label_summary?.positive || 0}/${query.label_summary?.negative || 0})`,
+      }));
+      setOptions(querySelect, options, selectedQueryId);
     }
 
     function updateUrl() {
       const params = new URLSearchParams();
-      if (selectedUser) params.set("user_id", selectedUser);
-      if (selectedQuery) params.set("query", selectedQuery);
-      if (selectedSearchId) params.set("search_event_id", selectedSearchId);
-      if (!qualifiedOnly) params.set("qualified", "0");
-      const url = `${window.location.pathname}?${params.toString()}`;
-      window.history.replaceState(null, "", url);
+      if (selectedAnnotator && selectedAnnotator !== "__all__") params.set("annotator", selectedAnnotator);
+      if (selectedQueryId) params.set("query_id", selectedQueryId);
+      window.history.replaceState(null, "", `${window.location.pathname}?${params.toString()}`);
     }
 
-    function metric(label, value) {
-      return `<div class="metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`;
-    }
-
-    function numericScore(result) {
-      const raw = result && result.similarity_score;
-      if (raw === null || raw === undefined || raw === "") return null;
-      const value = Number(raw);
-      return Number.isFinite(value) ? value : null;
-    }
-
-    function formatScore(value) {
-      if (value === null || value === undefined || !Number.isFinite(Number(value))) return "-";
-      return Number(value).toFixed(4);
-    }
-
-    function computeSourceScoreRows(results) {
-      const groups = new Map();
-      (results || []).forEach((result) => {
-        const key = normalizeSourceKey(result.source_key || result.source);
-        if (!groups.has(key)) {
-          groups.set(key, {
-            source: key,
-            count: 0,
-            scored: 0,
-            min: null,
-            max: null,
-            sum: 0,
-            relevant: 0,
-            notRelevant: 0,
-          });
-        }
-        const group = groups.get(key);
-        group.count += 1;
-        if (result.latest_feedback === "relevant") group.relevant += 1;
-        if (result.latest_feedback === "not_relevant") group.notRelevant += 1;
-        const score = numericScore(result);
-        if (score === null) return;
-        group.scored += 1;
-        group.sum += score;
-        group.min = group.min === null ? score : Math.min(group.min, score);
-        group.max = group.max === null ? score : Math.max(group.max, score);
-      });
-      return Array.from(groups.values()).sort((a, b) => {
-        if (a.source === "langtaosha") return -1;
-        if (b.source === "langtaosha") return 1;
-        if (a.source === "biorxiv") return -1;
-        if (b.source === "biorxiv") return 1;
-        return a.source.localeCompare(b.source);
-      });
-    }
-
-    function renderSummary(search) {
-      if (!search) {
-        summaryEl.innerHTML = "";
-        return;
-      }
-      const summary = search.feedback_summary || {};
+    function renderSummary(query) {
+      const summary = reviewData.summary || {};
       summaryEl.innerHTML = [
-        metric("User", search.user_id || "-"),
-        metric("Route", search.query_understanding_route || "-"),
-        metric("Results", `${search.snapshot_count || 0}/${search.result_count || 0}`),
-        metric("Feedback", `${summary.total || 0}`),
-        metric("Relevant / Not", `${summary.relevant || 0} / ${summary.not_relevant || 0}`),
+        metric("Testbed", reviewData.testbed_name || "-"),
+        metric("Queries", `${summary.query_count || allQueries().length || 0}`),
+        metric("Positive labels", `${summary.positive_count || 0}`),
+        metric("Negative labels", `${summary.negative_count || 0}`),
+        metric("Current query", query ? `#${query.query_id}` : "-"),
       ].join("");
     }
 
-    function renderQueryCard(search) {
-      if (!search) {
-        queryCardEl.innerHTML = "<div class='empty'>No search selected</div>";
+    function renderQueryCard(query) {
+      if (!query) {
+        queryCardEl.innerHTML = "<div class='empty'>No query selected</div>";
         return;
       }
       queryCardEl.innerHTML = `
-        <h2 class="query-title">${escapeHtml(search.query || "-")}</h2>
-        <p class="meta"><strong>Search query:</strong> ${escapeHtml(search.search_query || "-")}</p>
-        <p class="meta"><strong>Search event:</strong> #${escapeHtml(search.search_event_id)} | <strong>Query index:</strong> ${escapeHtml(search.query_index || "-")} | <strong>Created:</strong> ${escapeHtml(formatDate(search.created_at))}</p>
-        ${renderSourceScoreSummary(search.results || [])}
+        <h2 class="query-title">${escapeHtml(query.query_text || "-")}</h2>
+        <p class="meta"><strong>Query ID:</strong> #${escapeHtml(query.query_id)}</p>
+        <p class="meta"><strong>Annotators:</strong> ${escapeHtml((query.annotator_ids || []).join(", ") || "-")} | <strong>Annotator count:</strong> ${escapeHtml(query.annotator_count || 0)}</p>
+        <p class="meta"><strong>Labels:</strong> ${escapeHtml(query.label_summary?.positive || 0)} relevant / ${escapeHtml(query.label_summary?.negative || 0)} not relevant</p>
       `;
     }
 
-    function renderSourceScoreSummary(results) {
-      const rows = computeSourceScoreRows(results);
-      if (!rows.length) return "";
-      return `
-        <table class="source-score-table">
-          <thead>
-            <tr>
-              <th>Source</th>
-              <th>Results</th>
-              <th>Score min</th>
-              <th>Score avg</th>
-              <th>Score max</th>
-              <th>Feedback +/-</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rows.map((row) => {
-              const avg = row.scored ? row.sum / row.scored : null;
-              return `
-                <tr>
-                  <td>${escapeHtml(row.source)}</td>
-                  <td>${escapeHtml(row.count)}</td>
-                  <td>${escapeHtml(formatScore(row.min))}</td>
-                  <td>${escapeHtml(formatScore(avg))}</td>
-                  <td>${escapeHtml(formatScore(row.max))}</td>
-                  <td>${escapeHtml(row.relevant)} / ${escapeHtml(row.notRelevant)}</td>
-                </tr>
-              `;
-            }).join("")}
-          </tbody>
-        </table>
-      `;
-    }
-
-    function makeChip(label, value, activeValue, onClick) {
+    function makeChip(label, value, activeValue) {
       return `<button type="button" class="chip ${value === activeValue ? "active" : ""}" data-chip="${escapeHtml(value)}">${escapeHtml(label)}</button>`;
     }
 
@@ -755,30 +340,25 @@
       }, { all: 0 });
     }
 
-    function renderControls(search) {
-      if (!search) {
+    function renderControls(query) {
+      if (!query) {
         controlsEl.innerHTML = "";
         return;
       }
-      const results = search.results || [];
-      const feedbackCounts = {
+      const results = query.results || [];
+      const labelCounts = {
         all: results.length,
-        feedback: results.filter((item) => item.latest_feedback).length,
-        not_relevant: results.filter((item) => item.latest_feedback === "not_relevant").length,
-        relevant: results.filter((item) => item.latest_feedback === "relevant").length,
-        unlabeled: results.filter((item) => !item.latest_feedback).length,
+        relevant: results.filter((item) => Number(item.label) > 0).length,
+        not_relevant: results.filter((item) => Number(item.label) === 0).length,
       };
       const sources = sourceCounts(results);
-
       controlsEl.innerHTML = `
         <div class="control-group">
-          <span class="control-title">Feedback</span>
-          <div class="chips" data-control="feedback">
-            ${makeChip(`All (${feedbackCounts.all})`, "all", feedbackFilter)}
-            ${makeChip(`Feedback (${feedbackCounts.feedback})`, "feedback", feedbackFilter)}
-            ${makeChip(`Not relevant (${feedbackCounts.not_relevant})`, "not_relevant", feedbackFilter)}
-            ${makeChip(`Relevant (${feedbackCounts.relevant})`, "relevant", feedbackFilter)}
-            ${makeChip(`Unlabeled (${feedbackCounts.unlabeled})`, "unlabeled", feedbackFilter)}
+          <span class="control-title">Label</span>
+          <div class="chips" data-control="label">
+            ${makeChip(`All (${labelCounts.all})`, "all", labelFilter)}
+            ${makeChip(`Relevant (${labelCounts.relevant})`, "relevant", labelFilter)}
+            ${makeChip(`Not relevant (${labelCounts.not_relevant})`, "not_relevant", labelFilter)}
           </div>
         </div>
         <div class="control-group">
@@ -795,91 +375,66 @@
     function resultMatchesFilters(result) {
       const sourceKey = normalizeSourceKey(result.source_key || result.source);
       const sourceOk = sourceFilter === "all" || sourceKey === sourceFilter;
-      let feedbackOk = true;
-      if (feedbackFilter === "feedback") feedbackOk = Boolean(result.latest_feedback);
-      if (feedbackFilter === "not_relevant") feedbackOk = result.latest_feedback === "not_relevant";
-      if (feedbackFilter === "relevant") feedbackOk = result.latest_feedback === "relevant";
-      if (feedbackFilter === "unlabeled") feedbackOk = !result.latest_feedback;
-      return sourceOk && feedbackOk;
+      let labelOk = true;
+      if (labelFilter === "relevant") labelOk = Number(result.label) > 0;
+      if (labelFilter === "not_relevant") labelOk = Number(result.label) === 0;
+      return sourceOk && labelOk;
     }
 
-    function renderRankStrip(search) {
-      const results = search ? (search.results || []) : [];
-      rankStripEl.innerHTML = results.map((result) => {
-        const cls = feedbackClass(result.latest_feedback);
-        return `<button type="button" class="rank-dot ${cls}" data-rank-target="${escapeHtml(result.rank)}">${escapeHtml(result.rank)}</button>`;
+    function renderRankStrip(query) {
+      const results = query ? (query.results || []) : [];
+      rankStripEl.innerHTML = results.map((result, idx) => {
+        const cls = feedbackClass(result.label);
+        return `<button type="button" class="rank-dot ${cls}" data-rank-target="${idx + 1}">${idx + 1}</button>`;
       }).join("");
     }
 
-    function renderHistory(history) {
-      const items = (history || []);
-      if (items.length <= 1) return "";
-      return `
-        <ol class="history">
-          ${items.map((item) => `<li>${escapeHtml(formatDate(item.created_at))}: ${escapeHtml(feedbackLabel(item.feedback))}${item.reason ? ` - ${escapeHtml(item.reason)}` : ""}</li>`).join("")}
-        </ol>
-      `;
-    }
-
-    function renderFeedback(result) {
-      const cls = feedbackClass(result.latest_feedback);
-      const reason = result.latest_reason ? `<p class="reason">${escapeHtml(result.latest_reason)}</p>` : "";
-      return `
-        <div class="feedback-box">
-          <span class="feedback-pill ${cls}">${escapeHtml(feedbackLabel(result.latest_feedback))}</span>
-          ${reason}
-          ${renderHistory(result.feedback_history)}
-        </div>
-      `;
-    }
-
-    function renderResult(result) {
-      const cls = result.latest_feedback === "relevant" ? "feedback-good" : (result.latest_feedback === "not_relevant" ? "feedback-bad" : "");
+    function renderResult(result, rank) {
+      const cls = Number(result.label) > 0 ? "feedback-good" : (Number(result.label) === 0 ? "feedback-bad" : "");
       const link = result.link ? `<a href="${escapeHtml(result.link)}" target="_blank" rel="noopener noreferrer">${escapeHtml(result.link)}</a>` : "-";
-      const snapshotBadge = result.snapshot_missing ? " <span class=\"badge\">snapshot missing</span>" : "";
-      const score = formatScore(numericScore(result));
       return `
-        <article class="paper ${cls}" id="result-rank-${escapeHtml(result.rank)}">
+        <article class="paper ${cls}" id="result-rank-${rank}">
           <div class="paper-head">
-            <span class="rank-badge">#${escapeHtml(result.rank)}</span>
+            <span class="rank-badge">#${rank}</span>
             <div>
-              <h2 class="title">${escapeHtml(result.title || "(无标题)")}${snapshotBadge}</h2>
+              <h2 class="title">${escapeHtml(result.title || "(无标题)")}</h2>
               <p class="meta"><strong>Authors:</strong> ${escapeHtml(result.authors || "未知作者")}</p>
-              <p class="meta"><strong>Source:</strong> ${escapeHtml(result.source || "-")} | <strong>Online Date:</strong> ${escapeHtml(result.online_date || "-")} | <strong>Relevance score:</strong> ${escapeHtml(score)}</p>
+              <p class="meta"><strong>Source:</strong> ${escapeHtml(result.source || "-")} | <strong>Online Date:</strong> ${escapeHtml(result.online_date || "-")} | <strong>Work ID:</strong> ${escapeHtml(result.work_id || "-")}</p>
               <p class="meta"><strong>DOI:</strong> ${escapeHtml(result.doi || "-")}</p>
               <p class="meta"><strong>Link:</strong> ${link}</p>
             </div>
           </div>
           <p class="meta"><strong>ABSTRACT</strong></p>
           <p class="abstract">${escapeHtml(result.abstract || "(无摘要)")}</p>
-          ${renderFeedback(result)}
+          <div class="feedback-box">
+            <span class="feedback-pill ${feedbackClass(result.label)}">${escapeHtml(feedbackLabel(result.label))}</span>
+          </div>
         </article>
       `;
     }
 
-    function renderResults(search) {
-      if (!search) {
+    function renderResults(query) {
+      if (!query) {
         resultsEl.innerHTML = "<div class='empty'>No data</div>";
         return;
       }
-      const filtered = (search.results || []).filter(resultMatchesFilters);
+      const filtered = (query.results || []).filter(resultMatchesFilters);
       if (!filtered.length) {
         resultsEl.innerHTML = "<div class='empty'>No results for current filters</div>";
         return;
       }
-      resultsEl.innerHTML = filtered.map(renderResult).join("");
+      resultsEl.innerHTML = filtered.map((result, idx) => renderResult(result, idx + 1)).join("");
     }
 
     function renderAll() {
-      renderUserOptions();
+      renderAnnotatorOptions();
       renderQueryOptions();
-      renderSearchOptions();
-      const search = currentSearch();
-      renderSummary(search);
-      renderQueryCard(search);
-      renderControls(search);
-      renderRankStrip(search);
-      renderResults(search);
+      const query = currentQuery();
+      renderSummary(query);
+      renderQueryCard(query);
+      renderControls(query);
+      renderRankStrip(query);
+      renderResults(query);
       updateUrl();
     }
 
@@ -887,80 +442,52 @@
       summaryEl.innerHTML = metric("Loading", "...");
       const resp = await fetch(DATA_URL, { credentials: "same-origin" });
       const data = await resp.json();
-      if (!resp.ok || !data.success) {
-        throw new Error(data.error || "Failed to load feedback data");
-      }
-      searches = data.searches || [];
-
+      if (!resp.ok || !data.success) throw new Error(data.error || "Failed to load feedback data");
+      reviewData = {
+        testbed_name: data.testbed_name || "",
+        summary: data.summary || {},
+        queries: data.queries || [],
+      };
       const params = new URLSearchParams(window.location.search);
-      selectedUser = params.get("user_id") || "";
-      selectedQuery = params.get("query") || "";
-      selectedSearchId = params.get("search_event_id") || "";
-      qualifiedOnly = params.get("qualified") !== "0";
-      qualifiedOnlyInput.checked = qualifiedOnly;
+      selectedAnnotator = params.get("annotator") || "__all__";
+      selectedQueryId = params.get("query_id") || "";
       renderAll();
     }
 
-    qualifiedOnlyInput.addEventListener("change", () => {
-      qualifiedOnly = qualifiedOnlyInput.checked;
-      selectedUser = "";
-      selectedQuery = "";
-      selectedSearchId = "";
-      feedbackFilter = "all";
-      sourceFilter = "all";
-      renderAll();
-    });
-
-    userSelect.addEventListener("change", () => {
-      selectedUser = userSelect.value;
-      selectedQuery = "";
-      selectedSearchId = "";
-      feedbackFilter = "all";
+    annotatorSelect.addEventListener("change", () => {
+      selectedAnnotator = annotatorSelect.value;
+      selectedQueryId = "";
+      labelFilter = "all";
       sourceFilter = "all";
       renderAll();
     });
 
     querySelect.addEventListener("change", () => {
-      selectedQuery = querySelect.value;
-      selectedSearchId = "";
-      feedbackFilter = "all";
-      sourceFilter = "all";
-      renderAll();
-    });
-
-    searchSelect.addEventListener("change", () => {
-      selectedSearchId = searchSelect.value;
-      feedbackFilter = "all";
+      selectedQueryId = querySelect.value;
+      labelFilter = "all";
       sourceFilter = "all";
       renderAll();
     });
 
     controlsEl.addEventListener("click", (event) => {
-      const button = event.target.closest("[data-chip]");
-      if (!button) return;
-      const group = button.closest("[data-control]");
-      if (!group) return;
-      if (group.dataset.control === "feedback") {
-        feedbackFilter = button.dataset.chip;
-      }
-      if (group.dataset.control === "source") {
-        sourceFilter = button.dataset.chip;
-      }
-      const search = currentSearch();
-      renderControls(search);
-      renderResults(search);
+      const chip = event.target.closest(".chip");
+      if (!chip) return;
+      const group = chip.parentElement?.dataset.control;
+      if (group === "source") sourceFilter = chip.dataset.chip;
+      if (group === "label") labelFilter = chip.dataset.chip;
+      renderAll();
     });
 
     rankStripEl.addEventListener("click", (event) => {
-      const button = event.target.closest("[data-rank-target]");
-      if (!button) return;
-      const target = document.getElementById(`result-rank-${button.dataset.rankTarget}`);
+      const dot = event.target.closest(".rank-dot");
+      if (!dot) return;
+      const target = document.getElementById(`result-rank-${dot.dataset.rankTarget}`);
       if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
     });
 
-    loadData().catch((err) => {
-      summaryEl.innerHTML = metric("Error", err.message);
-      queryCardEl.innerHTML = "";
+    loadData().catch((error) => {
+      summaryEl.innerHTML = metric("Error", error.message || "Failed to load");
+      queryCardEl.innerHTML = `<div class="empty">${escapeHtml(error.message || "Failed to load feedback review data")}</div>`;
       controlsEl.innerHTML = "";
       rankStripEl.innerHTML = "";
       resultsEl.innerHTML = "";

@@ -1,9 +1,10 @@
 """元数据库操作类"""
 import json
 import re
+import time
 from difflib import SequenceMatcher
 from typing import Dict, Any, Optional, List, Iterable, Mapping, Sequence
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
@@ -14,6 +15,16 @@ from ..metadata.transformer import MetadataTransformer
 from ..metadata.utils import generate_work_id
 
 import logging
+
+
+def _sql_exact_word_match(column_expr: str, term_expr: str) -> str:
+    return (
+        f"({column_expr} ~ ("
+        f"'(^|[^a-z0-9])' || "
+        f"regexp_replace({term_expr}, '([.^$*+?(){{}}\\[\\]|\\\\-])', '\\\\\\1', 'g') || "
+        f"'([^a-z0-9]|$)'"
+        f"))"
+    )
 
 class MetadataDB:
     """元数据库操作类 - 新架构（多源支持）
@@ -39,6 +50,7 @@ class MetadataDB:
         # 新增：缓存 default_sources（source 合法性校验依据）
         from config.config_loader import get_default_sources
         self.default_sources = get_default_sources()
+        self._ensure_pg_trgm_extension()
         logging.info(f"✅ MetadataDB 初始化完成，default_sources={self.default_sources}")
 
     # =========================================================================
@@ -46,6 +58,7 @@ class MetadataDB:
     # =========================================================================
 
     GENERATED_KEYWORD_SOURCE = "scispacy-en_core_sci_lg-generated"
+    AUTHOR_SUGGESTION_SOURCE = "langtaosha"
     ALLOWED_GENERATED_KEYWORD_TYPES = {
         "domain",
         "concept",
@@ -159,6 +172,27 @@ class MetadataDB:
             {"paper_id": paper_id}
         ).fetchone()
         return row[0] if row else None
+
+    def _ensure_pg_trgm_extension(self) -> None:
+        """Ensure pg_trgm is available once during initialization."""
+        started = time.perf_counter()
+        try:
+            with self.engine.connect() as conn:
+                conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
+                conn.commit()
+            self._pg_trgm_available = True
+            logging.info(
+                "[metadata_db] pg_trgm extension ensured elapsed_ms=%s",
+                round((time.perf_counter() - started) * 1000.0, 3),
+            )
+        except Exception as exc:
+            self._pg_trgm_available = False
+            logging.warning(
+                "[metadata_db] pg_trgm extension ensure failed elapsed_ms=%s error=%s",
+                round((time.perf_counter() - started) * 1000.0, 3),
+                exc,
+                exc_info=True,
+            )
 
     def _get_work_id_by_paper_id(self, conn: Connection, paper_id: Optional[int]) -> Optional[str]:
         """根据 paper_id 查询 work_id。"""
@@ -1234,6 +1268,7 @@ class MetadataDB:
         candidate_pool_limit: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         """Return keyword candidates for query correction from paper_keywords."""
+        total_started = time.perf_counter()
         normalized_query = self._normalize_keyword(query)
         if not normalized_query:
             return []
@@ -1254,10 +1289,10 @@ class MetadataDB:
             "scispacy-en_ner_bionlp13cg_md-generated-test",
         ]
         params: Dict[str, Any] = {
-            "final_limit": limit if candidate_pool_limit is not None else max(limit * 5, 50),
-            "route_limit": candidate_pool_limit if candidate_pool_limit is not None else max(limit * 10, 100),
+            "candidate_limit": candidate_pool_limit if candidate_pool_limit is not None else 10,
             "min_weight": min_weight,
             "normalized_query": normalized_query.lower(),
+            "query_token_count": len(tokens),
             "trigram_threshold": trigram_threshold,
             "token_trigram_threshold": token_trigram_threshold,
             "trigram_threshold_text": str(trigram_threshold),
@@ -1276,106 +1311,25 @@ class MetadataDB:
             token_conditions.append(f"lower(keyword) LIKE :{param_name}")
             params[param_name] = f"%{token}%"
 
-        prefix_conditions = []
-        for idx, token in enumerate(sorted_tokens):
-            if len(token) < 5:
-                continue
-            param_name = f"prefix_{idx}"
-            prefix_conditions.append(f"lower(keyword) LIKE :{param_name}")
-            params[param_name] = f"%{token[:4]}%"
-
         trigram_conditions = []
         trigram_score_terms = []
+        phrase_similarity_expr = "similarity(lower(keyword), :normalized_query)"
+        word_similarity_expr = "word_similarity(lower(keyword), :normalized_query)"
         use_trigram = bool(enable_trigram and self._has_pg_trgm())
         if use_trigram:
             trigram_conditions.append(
                 "lower(keyword) % :normalized_query"
             )
             trigram_score_terms.append(
-                "CASE WHEN lower(keyword) % :normalized_query "
-                "THEN similarity(lower(keyword), :normalized_query) ELSE 0 END"
+                phrase_similarity_expr
             )
-            for idx, token in enumerate(sorted_tokens):
-                if len(token) < 5:
-                    continue
-                param_name = f"trigram_token_{idx}"
-                trigram_conditions.append(
-                    f":{param_name} <% lower(keyword)"
-                )
-                trigram_score_terms.append(
-                    f"CASE WHEN :{param_name} <% lower(keyword) "
-                    f"THEN word_similarity(:{param_name}, lower(keyword)) ELSE 0 END"
-                )
-                params[param_name] = token
-
-        route_queries = []
-        if token_conditions:
-            route_queries.append(
-                f"""
-                (
-                    SELECT
-                        lower(keyword) AS normalized_keyword,
-                        keyword_type,
-                        source,
-                        paper_id,
-                        keyword AS display_keyword,
-                        COALESCE(weight, 1.0) AS paper_weight,
-                        4.0 AS match_score
-                    FROM paper_keywords
-                    WHERE source IN ({", ".join(source_placeholders)})
-                      AND COALESCE(weight, 1.0) >= :min_weight
-                      AND ({" OR ".join(token_conditions)})
-                    ORDER BY COALESCE(weight, 1.0) DESC, lower(keyword) ASC
-                    LIMIT :route_limit
-                )
-                """
+            trigram_conditions.append(
+                ":normalized_query <% lower(keyword)"
             )
-        if prefix_conditions:
-            route_queries.append(
-                f"""
-                (
-                    SELECT
-                        lower(keyword) AS normalized_keyword,
-                        keyword_type,
-                        source,
-                        paper_id,
-                        keyword AS display_keyword,
-                        COALESCE(weight, 1.0) AS paper_weight,
-                        2.0 AS match_score
-                    FROM paper_keywords
-                    WHERE source IN ({", ".join(source_placeholders)})
-                      AND COALESCE(weight, 1.0) >= :min_weight
-                      AND ({" OR ".join(prefix_conditions)})
-                    ORDER BY COALESCE(weight, 1.0) DESC, lower(keyword) ASC
-                    LIMIT :route_limit
-                )
-                """
-            )
-        if trigram_conditions:
-            route_queries.append(
-                f"""
-                (
-                    SELECT
-                        lower(keyword) AS normalized_keyword,
-                        keyword_type,
-                        source,
-                        paper_id,
-                        keyword AS display_keyword,
-                        COALESCE(weight, 1.0) AS paper_weight,
-                        GREATEST({", ".join(trigram_score_terms)}) AS match_score
-                    FROM paper_keywords, settings
-                    WHERE source IN ({", ".join(source_placeholders)})
-                      AND COALESCE(weight, 1.0) >= :min_weight
-                      AND ({" OR ".join(trigram_conditions)})
-                    ORDER BY GREATEST({", ".join(trigram_score_terms)}) DESC,
-                             COALESCE(weight, 1.0) DESC,
-                             lower(keyword) ASC
-                    LIMIT :route_limit
-                )
-                """
+            trigram_score_terms.append(
+                word_similarity_expr
             )
 
-        route_union_sql = "\nUNION ALL\n".join(route_queries)
         settings_cte = ""
         if use_trigram:
             settings_cte = """
@@ -1387,40 +1341,110 @@ class MetadataDB:
             """
 
         with self.engine.connect() as conn:
-            rows = conn.execute(
-                text(f"""
-                    WITH {settings_cte}
-                    raw_candidates AS (
-                        {route_union_sql}
-                    ),
-                    candidates AS (
+            sql_started = time.perf_counter()
+            if use_trigram:
+                rows = conn.execute(
+                    text(f"""
+                        WITH {settings_cte}
+                        scored_candidates AS (
+                            SELECT
+                                lower(keyword) AS normalized_keyword,
+                                keyword_type,
+                                source,
+                                paper_id,
+                                keyword AS display_keyword,
+                                COALESCE(weight, 1.0) AS paper_weight,
+                                {phrase_similarity_expr} AS phrase_similarity,
+                                {word_similarity_expr} AS token_similarity,
+                                GREATEST({", ".join(trigram_score_terms)}) AS trigram_score,
+                                array_length(regexp_split_to_array(lower(keyword), E'\\s+'), 1) AS keyword_token_count
+                            FROM paper_keywords, settings
+                            WHERE source IN ({", ".join(source_placeholders)})
+                              AND COALESCE(weight, 1.0) >= :min_weight
+                              AND ({" OR ".join(trigram_conditions)})
+                        ),
+                        candidates AS (
+                            SELECT
+                                normalized_keyword,
+                                MIN(display_keyword) AS display_keyword,
+                                keyword_type,
+                                source,
+                                paper_id,
+                                MAX(paper_weight) AS paper_weight,
+                                MAX(phrase_similarity) AS phrase_similarity,
+                                MAX(token_similarity) AS token_similarity,
+                                MAX(trigram_score) AS match_score,
+                                MAX(keyword_token_count) AS keyword_token_count
+                            FROM scored_candidates
+                            GROUP BY normalized_keyword, keyword_type, source, paper_id
+                        )
                         SELECT
-                            normalized_keyword,
-                            MIN(display_keyword) AS display_keyword,
+                            MIN(display_keyword) AS keyword,
                             keyword_type,
                             source,
-                            paper_id,
-                            MAX(paper_weight) AS paper_weight,
+                            COUNT(DISTINCT paper_id) AS doc_count,
+                            AVG(paper_weight) AS avg_weight,
                             MAX(match_score) AS match_score
-                        FROM raw_candidates
-                        GROUP BY normalized_keyword, keyword_type, source, paper_id
-                    )
-                    SELECT
-                        MIN(display_keyword) AS keyword,
-                        keyword_type,
-                        source,
-                        COUNT(DISTINCT paper_id) AS doc_count,
-                        AVG(paper_weight) AS avg_weight,
-                        MAX(match_score) AS match_score
-                    FROM candidates
-                    GROUP BY normalized_keyword, keyword_type, source
-                    ORDER BY match_score DESC, doc_count DESC, avg_weight DESC, lower(MIN(display_keyword)) ASC
-                    LIMIT :final_limit
-                """),
-                params,
-            ).fetchall()
+                        FROM candidates
+                        GROUP BY normalized_keyword, keyword_type, source
+                        ORDER BY
+                            MAX(phrase_similarity) DESC,
+                            ABS(MAX(keyword_token_count) - :query_token_count) ASC,
+                            MAX(token_similarity) DESC,
+                            COUNT(DISTINCT paper_id) DESC,
+                            AVG(paper_weight) DESC,
+                            lower(MIN(display_keyword)) ASC
+                        LIMIT :candidate_limit
+                    """),
+                    params,
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    text(f"""
+                        WITH raw_candidates AS (
+                            SELECT
+                                lower(keyword) AS normalized_keyword,
+                                keyword_type,
+                                source,
+                                paper_id,
+                                keyword AS display_keyword,
+                                COALESCE(weight, 1.0) AS paper_weight
+                            FROM paper_keywords
+                            WHERE source IN ({", ".join(source_placeholders)})
+                              AND COALESCE(weight, 1.0) >= :min_weight
+                              AND ({" OR ".join(token_conditions)})
+                        ),
+                        candidates AS (
+                            SELECT
+                                normalized_keyword,
+                                MIN(display_keyword) AS display_keyword,
+                                keyword_type,
+                                source,
+                                paper_id,
+                                MAX(paper_weight) AS paper_weight
+                            FROM raw_candidates
+                            GROUP BY normalized_keyword, keyword_type, source, paper_id
+                        )
+                        SELECT
+                            MIN(display_keyword) AS keyword,
+                            keyword_type,
+                            source,
+                            COUNT(DISTINCT paper_id) AS doc_count,
+                            AVG(paper_weight) AS avg_weight
+                        FROM candidates
+                        GROUP BY normalized_keyword, keyword_type, source
+                        ORDER BY
+                            COUNT(DISTINCT paper_id) DESC,
+                            AVG(paper_weight) DESC,
+                            lower(MIN(display_keyword)) ASC
+                        LIMIT :candidate_limit
+                    """),
+                    params,
+                ).fetchall()
+        sql_elapsed_ms = round((time.perf_counter() - sql_started) * 1000.0, 3)
 
-        return [
+        postprocess_started = time.perf_counter()
+        candidates = [
             {
                 "keyword": row[0],
                 "keyword_type": row[1],
@@ -1430,6 +1454,20 @@ class MetadataDB:
             }
             for row in rows
         ]
+        postprocess_elapsed_ms = round((time.perf_counter() - postprocess_started) * 1000.0, 3)
+        total_elapsed_ms = round((time.perf_counter() - total_started) * 1000.0, 3)
+        logging.info(
+            "[metadata_db] suggest_query_terms query=%r use_trigram=%s candidate_limit=%s sql_elapsed_ms=%s postprocess_elapsed_ms=%s total_elapsed_ms=%s row_count=%s candidate_count=%s",
+            query,
+            use_trigram,
+            params["candidate_limit"],
+            sql_elapsed_ms,
+            postprocess_elapsed_ms,
+            total_elapsed_ms,
+            len(rows),
+            len(candidates),
+        )
+        return candidates[: min(limit, int(params["candidate_limit"]))]
 
     def lookup_papers_by_keyword_terms(
         self,
@@ -1785,6 +1823,236 @@ class MetadataDB:
 
         return [self._keyword_lookup_plan_row_to_dict(row) for row in rows]
 
+    def lookup_papers_by_expanded_sparse_groups(
+        self,
+        span_groups: Sequence[Mapping[str, Any]],
+        source_list: Optional[Sequence[str]] = None,
+        keyword_sources: Optional[Sequence[str]] = None,
+        top_k: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """Recall papers by grouped semantic span terms across title/abstract/keywords."""
+
+        normalized_groups = self._normalize_expanded_sparse_groups(span_groups)
+        if not normalized_groups:
+            return []
+
+        total_span_count = len({row["group_id"] for row in normalized_groups})
+        params: Dict[str, Any] = {
+            "top_k": max(1, int(top_k)),
+            "total_span_count": total_span_count,
+        }
+        values_sql = []
+        for index, row in enumerate(normalized_groups):
+            placeholders = []
+            for field in (
+                "group_id",
+                "span_id",
+                "canonical_text",
+                "span_scope",
+                "child_span_id",
+                "term",
+                "term_tier",
+                "match_mode",
+            ):
+                param_name = f"expanded_{field}_{index}"
+                placeholders.append(f":{param_name}")
+                params[param_name] = row[field]
+            values_sql.append(f"({', '.join(placeholders)})")
+
+        keyword_source_filter = self._keyword_lookup_in_filter(
+            column="pk.source",
+            prefix="expanded_keyword_source",
+            values=keyword_sources or [],
+            params=params,
+        )
+        keyword_source_clause = f" AND {keyword_source_filter}" if keyword_source_filter else ""
+
+        paper_source_filter = self._expanded_sparse_paper_source_filter(
+            paper_id_column="p.paper_id",
+            source_list=source_list or [],
+            params=params,
+        )
+        paper_source_clause = f" AND {paper_source_filter}" if paper_source_filter else ""
+
+        sql = text(
+            f"""
+            WITH query_terms(
+                group_id,
+                span_id,
+                canonical_text,
+                span_scope,
+                child_span_id,
+                term,
+                term_tier,
+                match_mode
+            ) AS (
+                VALUES {", ".join(values_sql)}
+            ),
+            title_matches AS (
+                SELECT
+                    p.paper_id,
+                    p.work_id,
+                    qt.group_id,
+                    qt.span_id,
+                    qt.canonical_text,
+                    qt.span_scope,
+                    qt.child_span_id,
+                    qt.term,
+                    qt.term_tier,
+                    qt.match_mode,
+                    'title' AS matched_field
+                FROM query_terms qt
+                JOIN papers p
+                  ON (
+                    (qt.match_mode = 'exact' AND {_sql_exact_word_match("lower(COALESCE(p.canonical_title, ''))", "qt.term")})
+                    OR
+                    (
+                      qt.match_mode = 'prefix'
+                      AND lower(COALESCE(p.canonical_title, '')) ~ (
+                        '(^|[^a-z0-9])'
+                        || regexp_replace(qt.term, '([.^$*+?(){{}}\\[\\]|\\\\-])', '\\\\\\1', 'g')
+                        || '[a-z0-9_-]*'
+                      )
+                    )
+                  )
+                WHERE 1 = 1 {paper_source_clause}
+            ),
+            abstract_matches AS (
+                SELECT
+                    p.paper_id,
+                    p.work_id,
+                    qt.group_id,
+                    qt.span_id,
+                    qt.canonical_text,
+                    qt.span_scope,
+                    qt.child_span_id,
+                    qt.term,
+                    qt.term_tier,
+                    qt.match_mode,
+                    'abstract' AS matched_field
+                FROM query_terms qt
+                JOIN papers p
+                  ON (
+                    (qt.match_mode = 'exact' AND {_sql_exact_word_match("lower(COALESCE(p.canonical_abstract, ''))", "qt.term")})
+                    OR
+                    (
+                      qt.match_mode = 'prefix'
+                      AND lower(COALESCE(p.canonical_abstract, '')) ~ (
+                        '(^|[^a-z0-9])'
+                        || regexp_replace(qt.term, '([.^$*+?(){{}}\\[\\]|\\\\-])', '\\\\\\1', 'g')
+                        || '[a-z0-9_-]*'
+                      )
+                    )
+                  )
+                WHERE 1 = 1 {paper_source_clause}
+            ),
+            keyword_matches AS (
+                SELECT
+                    p.paper_id,
+                    p.work_id,
+                    qt.group_id,
+                    qt.span_id,
+                    qt.canonical_text,
+                    qt.span_scope,
+                    qt.child_span_id,
+                    qt.term,
+                    qt.term_tier,
+                    qt.match_mode,
+                    'paper_keywords' AS matched_field
+                FROM query_terms qt
+                JOIN paper_keywords pk
+                  ON (
+                    (qt.match_mode = 'exact' AND lower(pk.keyword) = qt.term)
+                    OR
+                    (
+                      qt.match_mode = 'prefix'
+                      AND lower(pk.keyword) ~ (
+                        '^'
+                        || regexp_replace(qt.term, '([.^$*+?(){{}}\\[\\]|\\\\-])', '\\\\\\1', 'g')
+                        || '[a-z0-9_-]*$'
+                      )
+                    )
+                  )
+                JOIN papers p
+                  ON p.paper_id = pk.paper_id
+                WHERE 1 = 1
+                  {keyword_source_clause}
+                  {paper_source_clause}
+            ),
+            raw_matches AS (
+                SELECT * FROM title_matches
+                UNION ALL
+                SELECT * FROM abstract_matches
+                UNION ALL
+                SELECT * FROM keyword_matches
+            ),
+            group_metadata AS (
+                SELECT
+                    group_id,
+                    MIN(span_id) AS span_id,
+                    MIN(canonical_text) AS canonical_text,
+                    COUNT(DISTINCT child_span_id) FILTER (WHERE child_span_id IS NOT NULL) AS total_child_count
+                FROM query_terms
+                GROUP BY group_id
+            ),
+            span_matches AS (
+                SELECT
+                    rm.paper_id,
+                    MIN(rm.work_id) AS work_id,
+                    rm.group_id,
+                    MIN(gm.span_id) AS span_id,
+                    MIN(gm.canonical_text) AS canonical_text,
+                    BOOL_OR(rm.span_scope = 'parent') AS own_term_matched,
+                    COUNT(DISTINCT rm.child_span_id) FILTER (WHERE rm.child_span_id IS NOT NULL) AS matched_child_count,
+                    MIN(gm.total_child_count) AS total_child_count,
+                    CASE
+                        WHEN BOOL_OR(rm.span_scope = 'parent') THEN 1.0
+                        WHEN MIN(gm.total_child_count) > 0 THEN
+                            COUNT(DISTINCT rm.child_span_id) FILTER (WHERE rm.child_span_id IS NOT NULL)::float
+                            / MIN(gm.total_child_count)
+                        ELSE 0.0
+                    END AS span_score,
+                    JSONB_AGG(DISTINCT span_scope ORDER BY span_scope) AS matched_scopes,
+                    JSONB_AGG(DISTINCT rm.child_span_id ORDER BY rm.child_span_id)
+                      FILTER (WHERE rm.child_span_id IS NOT NULL) AS matched_child_span_ids,
+                    JSONB_AGG(DISTINCT rm.term ORDER BY rm.term) AS matched_terms,
+                    JSONB_AGG(DISTINCT rm.matched_field ORDER BY rm.matched_field) AS matched_fields
+                FROM raw_matches rm
+                JOIN group_metadata gm
+                  ON gm.group_id = rm.group_id
+                GROUP BY rm.paper_id, rm.group_id
+            )
+            SELECT
+                paper_id,
+                MIN(work_id) AS work_id,
+                COUNT(DISTINCT group_id) AS matched_span_count,
+                :total_span_count AS total_span_count,
+                COALESCE(SUM(span_score), 0.0) / NULLIF(:total_span_count, 0) AS coverage_ratio,
+                JSONB_AGG(JSONB_BUILD_OBJECT(
+                    'group_id', group_id,
+                    'span_id', span_id,
+                    'canonical_text', canonical_text,
+                    'matched_scopes', COALESCE(matched_scopes, '[]'::jsonb),
+                    'matched_child_span_ids', COALESCE(matched_child_span_ids, '[]'::jsonb),
+                    'matched_terms', matched_terms,
+                    'matched_fields', matched_fields,
+                    'own_term_matched', own_term_matched,
+                    'matched_child_count', matched_child_count,
+                    'total_child_count', total_child_count,
+                    'span_score', span_score
+                ) ORDER BY group_id) AS matched_spans
+            FROM span_matches
+            GROUP BY paper_id
+            ORDER BY matched_span_count DESC, coverage_ratio DESC, paper_id DESC
+            LIMIT :top_k
+            """
+        )
+
+        with self.engine.connect() as conn:
+            rows = conn.execute(sql, params).mappings().fetchall()
+
+        return [self._expanded_sparse_row_to_dict(row) for row in rows]
+
     @staticmethod
     def _normalize_keyword_lookup_terms(
         query_terms: Sequence[Mapping[str, Any]],
@@ -1866,6 +2134,29 @@ class MetadataDB:
             ")"
         )
 
+    @classmethod
+    def _expanded_sparse_paper_source_filter(
+        cls,
+        paper_id_column: str,
+        source_list: Sequence[str],
+        params: Dict[str, Any],
+    ) -> str:
+        source_filter = cls._keyword_lookup_in_filter(
+            column="ps.source_name",
+            prefix="expanded_paper_source",
+            values=source_list,
+            params=params,
+        )
+        if not source_filter:
+            return ""
+        return (
+            "EXISTS ("
+            "SELECT 1 FROM paper_sources ps "
+            f"WHERE ps.paper_id = {paper_id_column} "
+            f"AND {source_filter}"
+            ")"
+        )
+
     @staticmethod
     def _keyword_lookup_row_to_dict(row: Mapping[str, Any]) -> Dict[str, Any]:
         matched_concepts = row.get("matched_concepts") or []
@@ -1914,6 +2205,119 @@ class MetadataDB:
                 "keyword_lookup_score": keyword_lookup_score,
             },
         }
+
+    @staticmethod
+    def _expanded_sparse_row_to_dict(row: Mapping[str, Any]) -> Dict[str, Any]:
+        matched_spans = row.get("matched_spans") or []
+        matched_span_count = int(row.get("matched_span_count") or 0)
+        total_span_count = int(row.get("total_span_count") or 0)
+        coverage_ratio = float(row.get("coverage_ratio") or 0.0)
+        return {
+            "paper_id": row.get("paper_id"),
+            "work_id": row.get("work_id"),
+            "matched_span_count": matched_span_count,
+            "total_span_count": total_span_count,
+            "coverage_ratio": coverage_ratio,
+            "matched_spans": matched_spans,
+            "recall_sources": ["expanded_sparse"],
+            "retrieval_debug": {
+                "retriever": "expanded_sparse",
+                "matched_span_count": matched_span_count,
+                "total_span_count": total_span_count,
+                "coverage_ratio": coverage_ratio,
+            },
+        }
+
+    @staticmethod
+    def _normalize_expanded_sparse_groups(
+        span_groups: Sequence[Mapping[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        normalized: List[Dict[str, Any]] = []
+        seen = set()
+        for index, row in enumerate(span_groups, start=1):
+            try:
+                group_id = int(row.get("group_id") or index)
+            except (TypeError, ValueError):
+                group_id = index
+            span_id = str(row.get("span_id") or f"s{group_id}")
+            canonical_text = str(row.get("canonical_text") or "")
+            if row.get("term") is not None:
+                normalized_term = re.sub(r"\s+", " ", str(row.get("term") or "").strip().lower())
+                if not normalized_term:
+                    continue
+                span_scope = str(row.get("span_scope") or "parent")
+                child_span_id_raw = row.get("child_span_id")
+                child_span_id = str(child_span_id_raw).strip() if child_span_id_raw not in (None, "") else None
+                term_tier = str(row.get("term_tier") or "tier1")
+                match_mode = str(row.get("match_mode") or "exact")
+                key = (
+                    group_id,
+                    span_id,
+                    span_scope,
+                    child_span_id,
+                    normalized_term,
+                    term_tier,
+                    match_mode,
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                normalized.append(
+                    {
+                        "group_id": group_id,
+                        "span_id": span_id,
+                        "canonical_text": canonical_text,
+                        "span_scope": span_scope,
+                        "child_span_id": child_span_id,
+                        "term": normalized_term,
+                        "term_tier": term_tier,
+                        "match_mode": match_mode,
+                    }
+                )
+                continue
+            tier1_terms = row.get("tier1_terms") or []
+            tier2_terms = row.get("tier2_terms") or []
+            for term in tier1_terms:
+                normalized_term = re.sub(r"\s+", " ", str(term or "").strip().lower())
+                if not normalized_term:
+                    continue
+                key = (group_id, span_id, normalized_term, "tier1")
+                if key in seen:
+                    continue
+                seen.add(key)
+                normalized.append(
+                    {
+                        "group_id": group_id,
+                        "span_id": span_id,
+                        "canonical_text": canonical_text,
+                        "span_scope": "parent",
+                        "child_span_id": None,
+                        "term": normalized_term,
+                        "term_tier": "tier1",
+                        "match_mode": "exact",
+                    }
+                )
+            for term in tier2_terms:
+                normalized_term = re.sub(r"\s+", " ", str(term or "").strip().lower())
+                if not normalized_term:
+                    continue
+                key = (group_id, span_id, normalized_term, "tier2")
+                if key in seen:
+                    continue
+                seen.add(key)
+                normalized.append(
+                    {
+                        "group_id": group_id,
+                        "span_id": span_id,
+                        "canonical_text": canonical_text,
+                        "span_scope": "parent",
+                        "child_span_id": None,
+                        "term": normalized_term,
+                        "term_tier": "tier2",
+                        "match_mode": "exact",
+                    }
+                )
+        return normalized
 
     def _has_pg_trgm(self) -> bool:
         """Return whether pg_trgm is available for fuzzy keyword recall."""
@@ -1983,14 +2387,20 @@ class MetadataDB:
     # 更新的查询方法
     # =========================================================================
 
-    def get_paper_info_by_paper_id(self, paper_id: int) -> Optional[Dict[str, Any]]:
+    def get_paper_info_by_paper_id(
+        self,
+        paper_id: int,
+        source_name: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
         """根据 paper_id 获取论文完整信息
 
         Args:
             paper_id: 论文 ID
+            source_name: 可选的 source 过滤；传入后仅返回该 source 的数据
 
         Returns:
-            Optional[Dict]: 论文完整信息，包含所有 source 记录
+            Optional[Dict]: 论文完整信息。
+            未传 source_name 时包含所有 source；传入后仅包含该 source。
         """
         with self.engine.connect() as conn:
             # 获取 papers 表数据
@@ -2031,20 +2441,37 @@ class MetadataDB:
             }
 
             # 获取所有 source 记录
-            result = conn.execute(
-                text("""
-                    SELECT
-                        paper_source_id, source_name, platform, source_record_id,
-                        source_url, abstract_url, pdf_url, title, abstract,
-                        publisher, language, doi, arxiv_id, pubmed_id,
-                        semantic_scholar_id, submitted_at, online_at, published_at,
-                        version, is_preprint, is_published
-                    FROM paper_sources
-                    WHERE paper_id = :paper_id
-                    ORDER BY online_at DESC
-                """),
-                {"paper_id": paper_id}
-            )
+            if source_name is None:
+                result = conn.execute(
+                    text("""
+                        SELECT
+                            paper_source_id, source_name, platform, source_record_id,
+                            source_url, abstract_url, pdf_url, title, abstract,
+                            publisher, language, doi, arxiv_id, pubmed_id,
+                            semantic_scholar_id, submitted_at, online_at, published_at,
+                            version, is_preprint, is_published
+                        FROM paper_sources
+                        WHERE paper_id = :paper_id
+                        ORDER BY online_at DESC
+                    """),
+                    {"paper_id": paper_id}
+                )
+            else:
+                result = conn.execute(
+                    text("""
+                        SELECT
+                            paper_source_id, source_name, platform, source_record_id,
+                            source_url, abstract_url, pdf_url, title, abstract,
+                            publisher, language, doi, arxiv_id, pubmed_id,
+                            semantic_scholar_id, submitted_at, online_at, published_at,
+                            version, is_preprint, is_published
+                        FROM paper_sources
+                        WHERE paper_id = :paper_id
+                          AND source_name = :source_name
+                        ORDER BY online_at DESC
+                    """),
+                    {"paper_id": paper_id, "source_name": source_name}
+                )
 
             for row in result.fetchall():
                 source_info = {
@@ -2071,6 +2498,9 @@ class MetadataDB:
                     'is_published': row[20]
                 }
                 paper_info['sources'].append(source_info)
+
+            if source_name is not None and not paper_info['sources']:
+                return None
 
             # 获取 metadata 记录
             for source in paper_info['sources']:
@@ -2169,6 +2599,8 @@ class MetadataDB:
         MVP implementation expands the JSONB authors array and matches only
         authors[].name. It intentionally avoids authors::text matching so that
         affiliations or JSON field names cannot produce false positives.
+
+        fuzzy: bool = True, if True, the author name will be fuzzy matched, otherwise it will be exact matched.
         """
         normalized = (author_name or "").strip()
         if not normalized:
@@ -2211,12 +2643,15 @@ class MetadataDB:
                 results.append(paper_info)
         return results
 
+
+    #ORDER BY exact_priority ASC, token_match_count DESC, paper_count DESC, author_name ASC
     def suggest_author_names(
         self,
         query: str,
         limit: int = 5,
     ) -> List[Dict[str, Any]]:
         """Return ranked author-name candidates from the current JSONB author pool."""
+        total_started = time.perf_counter()
         normalized_query = self.normalize_author_name(query)
         if not normalized_query:
             return []
@@ -2225,42 +2660,42 @@ class MetadataDB:
         if not tokens:
             return []
 
-        recall_tokens = sorted(tokens, key=len, reverse=True)[:2]
-        conditions = []
-        params: Dict[str, Any] = {
-            "candidate_limit": max(limit * 20, 50),
-            "raw_query": query,
-            "normalized_query": normalized_query,
-        }
-        token_match_parts = []
-        for idx, token in enumerate(recall_tokens):
-            param_name = f"pattern_{idx}"
-            conditions.append(f"lower(author_name) ILIKE lower(:{param_name})")
-            params[param_name] = f"%{token}%"
-            token_match_parts.append(
-                f"CASE WHEN lower(author_name) ILIKE lower(:{param_name}) THEN 1 ELSE 0 END"
-            )
-
-        where_clause = " OR ".join(conditions)
-        token_match_score_sql = " + ".join(token_match_parts) or "0"
         normalized_author_sql = (
             "btrim(regexp_replace("
-            "lower(replace(replace(author_name, ',', ' '), '.', ' ')), "
+            "lower(replace(replace(replace(author_name, ',', ' '), '.', ' '), '-', ' ')), "
             "'\\s+', ' ', 'g'"
             "))"
         )
+        params: Dict[str, Any] = {
+            "candidate_limit": max(limit * 20, 50),
+            "author_source_name": self.AUTHOR_SUGGESTION_SOURCE,
+            "raw_query": query,
+            "normalized_query": normalized_query,
+            "query_tokens": tokens,
+        }
 
         with self.engine.connect() as conn:
+            sql_started = time.perf_counter()
             rows = conn.execute(
                 text(f"""
                     WITH authors AS (
                         SELECT
                             author->>'name' AS author_name,
-                            paa.paper_id
+                            paa.paper_id,
+                            regexp_split_to_array(
+                                regexp_replace(lower(author->>'name'), '[^a-z0-9 ]', ' ', 'g'),
+                                '\\s+'
+                            ) AS author_tokens
                         FROM paper_author_affiliation paa,
                              jsonb_array_elements(paa.authors) AS author
                         WHERE author->>'name' IS NOT NULL
                           AND btrim(author->>'name') != ''
+                          AND EXISTS (
+                              SELECT 1
+                              FROM paper_sources ps
+                              WHERE ps.paper_id = paa.paper_id
+                                AND ps.source_name = :author_source_name
+                          )
                     )
                     SELECT
                         author_name,
@@ -2270,16 +2705,34 @@ class MetadataDB:
                             WHEN {normalized_author_sql} = :normalized_query THEN 1
                             ELSE 2
                         END AS exact_priority,
-                        ({token_match_score_sql}) AS token_match_count
+                        (
+                            SELECT COUNT(*)
+                            FROM unnest(:query_tokens) AS qt
+                            WHERE qt = ANY(author_tokens)
+                        ) AS token_match_count,
+                        similarity(
+                            lower(author_name),
+                            lower(:raw_query)
+                        ) AS trigram_score
                     FROM authors
-                    WHERE {where_clause}
-                    GROUP BY author_name
-                    ORDER BY exact_priority ASC, token_match_count DESC, paper_count DESC, author_name ASC
+                    WHERE EXISTS (
+                        SELECT 1
+                        FROM unnest(:query_tokens) AS qt
+                        WHERE qt = ANY(author_tokens)
+                    )
+                    GROUP BY author_name, author_tokens
+                    ORDER BY
+                        exact_priority ASC,
+                        token_match_count DESC,
+                        trigram_score DESC,
+                        paper_count DESC
                     LIMIT :candidate_limit
                 """),
                 params
             ).fetchall()
+        sql_elapsed_ms = round((time.perf_counter() - sql_started) * 1000.0, 3)
 
+        postprocess_started = time.perf_counter()
         best_by_normalized: Dict[str, Dict[str, Any]] = {}
         for row in rows:
             name = row[0]
@@ -2291,20 +2744,30 @@ class MetadataDB:
                 "score": score,
                 "paper_count": int(row[1] or 0),
             }
+            if candidate["paper_count"] < 1:
+                continue
             existing = best_by_normalized.get(normalized_name)
             if (
                 existing is None
                 or candidate["score"] > existing["score"]
-                or (
-                    candidate["score"] == existing["score"]
-                    and candidate["paper_count"] > existing["paper_count"]
-                )
             ):
                 best_by_normalized[normalized_name] = candidate
 
         candidates = sorted(
             best_by_normalized.values(),
-            key=lambda item: (-item["score"], -item["paper_count"], item["name"].lower())
+            key=lambda item: (-item["score"], item["name"].lower())
+        )
+        postprocess_elapsed_ms = round((time.perf_counter() - postprocess_started) * 1000.0, 3)
+        total_elapsed_ms = round((time.perf_counter() - total_started) * 1000.0, 3)
+        logging.info(
+            "[metadata_db] suggest_author_names query=%r author_source=%s sql_elapsed_ms=%s postprocess_elapsed_ms=%s total_elapsed_ms=%s row_count=%s candidate_count=%s",
+            query,
+            self.AUTHOR_SUGGESTION_SOURCE,
+            sql_elapsed_ms,
+            postprocess_elapsed_ms,
+            total_elapsed_ms,
+            len(rows),
+            len(candidates),
         )
         return candidates[:limit]
 
@@ -3065,3 +3528,176 @@ class MetadataDB:
                     papers.append(paper_info)
 
             return papers
+
+    def get_search_result_summaries_by_work_ids(
+        self,
+        work_ids: List[str],
+    ) -> Dict[str, Dict[str, Any]]:
+        """批量获取搜索结果卡片所需的轻量论文信息。"""
+        ordered_work_ids = [str(work_id) for work_id in dict.fromkeys(work_ids or []) if work_id]
+        if not ordered_work_ids:
+            return {}
+
+        with self.engine.connect() as conn:
+            paper_rows = conn.execute(
+                text("""
+                    SELECT
+                        paper_id, work_id, canonical_title, canonical_abstract,
+                        canonical_language, canonical_publisher,
+                        submitted_at, online_at, published_at,
+                        canonical_source_id, merge_status,
+                        created_at, updated_at
+                    FROM papers
+                    WHERE work_id = ANY(:work_ids)
+                """),
+                {"work_ids": ordered_work_ids}
+            ).mappings().fetchall()
+
+            summaries_by_work_id: Dict[str, Dict[str, Any]] = {}
+            paper_id_to_work_id: Dict[int, str] = {}
+            for row in paper_rows:
+                paper_id = int(row["paper_id"])
+                work_id = str(row["work_id"])
+                paper_id_to_work_id[paper_id] = work_id
+                summaries_by_work_id[work_id] = {
+                    "paper_id": paper_id,
+                    "work_id": work_id,
+                    "canonical_title": row["canonical_title"],
+                    "canonical_abstract": row["canonical_abstract"],
+                    "canonical_language": row["canonical_language"],
+                    "canonical_publisher": row["canonical_publisher"],
+                    "submitted_at": row["submitted_at"].isoformat() if row["submitted_at"] else None,
+                    "online_at": row["online_at"].isoformat() if row["online_at"] else None,
+                    "published_at": row["published_at"].isoformat() if row["published_at"] else None,
+                    "canonical_source_id": row["canonical_source_id"],
+                    "merge_status": row["merge_status"],
+                    "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                    "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+                    "sources": [],
+                    "authors": [],
+                    "keywords": [],
+                }
+
+            paper_ids = list(paper_id_to_work_id)
+            if not paper_ids:
+                return {}
+
+            source_rows = conn.execute(
+                text("""
+                    SELECT
+                        paper_source_id, paper_id, source_name, platform, source_record_id,
+                        source_url, abstract_url, pdf_url, title, abstract,
+                        publisher, language, doi, arxiv_id, pubmed_id,
+                        semantic_scholar_id, submitted_at, online_at, published_at,
+                        version, is_preprint, is_published
+                    FROM paper_sources
+                    WHERE paper_id = ANY(:paper_ids)
+                    ORDER BY paper_id, online_at DESC NULLS LAST
+                """),
+                {"paper_ids": paper_ids}
+            ).mappings().fetchall()
+            for row in source_rows:
+                work_id = paper_id_to_work_id.get(int(row["paper_id"]))
+                if not work_id:
+                    continue
+                summaries_by_work_id[work_id]["sources"].append({
+                    "paper_source_id": row["paper_source_id"],
+                    "source_name": row["source_name"],
+                    "platform": row["platform"],
+                    "source_record_id": row["source_record_id"],
+                    "source_url": row["source_url"],
+                    "abstract_url": row["abstract_url"],
+                    "pdf_url": row["pdf_url"],
+                    "title": row["title"],
+                    "abstract": row["abstract"],
+                    "publisher": row["publisher"],
+                    "language": row["language"],
+                    "doi": row["doi"],
+                    "arxiv_id": row["arxiv_id"],
+                    "pubmed_id": row["pubmed_id"],
+                    "semantic_scholar_id": row["semantic_scholar_id"],
+                    "submitted_at": row["submitted_at"].isoformat() if row["submitted_at"] else None,
+                    "online_at": row["online_at"].isoformat() if row["online_at"] else None,
+                    "published_at": row["published_at"].isoformat() if row["published_at"] else None,
+                    "version": row["version"],
+                    "is_preprint": row["is_preprint"],
+                    "is_published": row["is_published"],
+                })
+
+            author_rows = conn.execute(
+                text("""
+                    SELECT paper_id, authors
+                    FROM paper_author_affiliation
+                    WHERE paper_id = ANY(:paper_ids)
+                """),
+                {"paper_ids": paper_ids}
+            ).mappings().fetchall()
+            for row in author_rows:
+                work_id = paper_id_to_work_id.get(int(row["paper_id"]))
+                if work_id:
+                    summaries_by_work_id[work_id]["authors"] = row["authors"] or []
+
+            keyword_rows = conn.execute(
+                text("""
+                    SELECT paper_id, keyword_type, keyword, weight, source
+                    FROM paper_keywords
+                    WHERE paper_id = ANY(:paper_ids)
+                    ORDER BY paper_id, keyword_type, keyword
+                """),
+                {"paper_ids": paper_ids}
+            ).mappings().fetchall()
+            for row in keyword_rows:
+                work_id = paper_id_to_work_id.get(int(row["paper_id"]))
+                if not work_id:
+                    continue
+                summaries_by_work_id[work_id]["keywords"].append({
+                    "keyword_type": row["keyword_type"],
+                    "keyword": row["keyword"],
+                    "weight": row["weight"],
+                    "source": row["source"],
+                })
+
+        return {
+            work_id: summaries_by_work_id[work_id]
+            for work_id in ordered_work_ids
+            if work_id in summaries_by_work_id
+        }
+
+
+    def retrieve_paper_ids_by_time_interval(self, date_from: str, date_to: str) -> List[int]:
+        """获取指定时间间隔内的 paper_id 列表。
+
+        当 `date_from` / `date_to` 传入日期字符串（YYYY-MM-DD）时，
+        查询范围覆盖对应自然日；若传入完整时间戳，则按精确时间边界查询。
+        """
+        start_at = datetime.fromisoformat(date_from)
+        end_at = datetime.fromisoformat(date_to)
+        end_has_time = ("T" in date_to) or (" " in date_to)
+
+        with self.engine.connect() as conn:
+            if end_has_time:
+                result = conn.execute(
+                    text("""
+                        SELECT paper_id
+                        FROM papers
+                        WHERE online_at >= :date_from
+                          AND online_at <= :date_to
+                        ORDER BY online_at DESC NULLS LAST, paper_id DESC
+                    """),
+                    {"date_from": start_at, "date_to": end_at}
+                )
+            else:
+                result = conn.execute(
+                    text("""
+                        SELECT paper_id
+                        FROM papers
+                        WHERE online_at >= :date_from
+                          AND online_at < :date_to_exclusive
+                        ORDER BY online_at DESC NULLS LAST, paper_id DESC
+                    """),
+                    {
+                        "date_from": start_at,
+                        "date_to_exclusive": end_at + timedelta(days=1)
+                    }
+                )
+            return [row[0] for row in result.fetchall()]

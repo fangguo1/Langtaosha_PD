@@ -198,6 +198,29 @@ h3 {
   border-radius: 6px;
 }
 
+.notice-actions {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.notice-button {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid #d69c8f;
+  border-radius: 6px;
+  background: #fffdfc;
+  color: #8c3120;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.notice-button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
 .request-id {
   margin: 8px 16px 0;
   color: #697a80;

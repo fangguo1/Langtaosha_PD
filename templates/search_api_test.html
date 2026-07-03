@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Search API Test Console</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --card: #ffffff;
+      --text: #171717;
+      --muted: #5a6472;
+      --border: #d7dce3;
+      --primary: #2563eb;
+      --primary-dark: #1d4ed8;
+      --error: #b91c1c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .page {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 32px 20px 56px;
+    }
+    h1 {
+      margin: 0 0 10px;
+      font-size: 28px;
+    }
+    .muted {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      gap: 20px;
+      margin-top: 24px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 18px;
+    }
+    .field {
+      margin-bottom: 14px;
+    }
+    .field label {
+      display: block;
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 6px;
+      font-weight: 700;
+    }
+    .field input,
+    .field select,
+    .field textarea {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 14px;
+      background: #fff;
+    }
+    .field textarea {
+      min-height: 100px;
+      resize: vertical;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    button {
+      border: 0;
+      border-radius: 10px;
+      padding: 10px 14px;
+      cursor: pointer;
+      font-weight: 700;
+    }
+    .primary {
+      background: var(--primary);
+      color: #fff;
+    }
+    .primary:hover {
+      background: var(--primary-dark);
+    }
+    .secondary {
+      background: #eef2ff;
+      color: #1e3a8a;
+    }
+    pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 13px;
+      line-height: 1.6;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .status {
+      min-height: 22px;
+      margin-bottom: 10px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .status.error {
+      color: var(--error);
+    }
+    .panel-title {
+      margin: 0 0 12px;
+      font-size: 16px;
+    }
+    .tip-list {
+      margin: 14px 0 0;
+      padding-left: 18px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.7;
+    }
+    @media (max-width: 900px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <h1>Search API Test Console</h1>
+    <p class="muted">
+      这是给内部开发与联调用的轻量测试页，核心测试接口是 <code>/api/scholar/search</code>。
+      如果后端配置了鉴权，请在下方填入 Bearer Token。
+    </p>
+
+    <div class="grid">
+      <section class="card">
+        <div class="field">
+          <label for="query">Query</label>
+          <input id="query" name="query" value="Nav1.7" />
+        </div>
+        <div class="field">
+          <label for="mode">Mode</label>
+          <select id="mode" name="mode">
+            <option value="smart">smart</option>
+            <option value="vector">vector</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="sourceList">Source List</label>
+          <input id="sourceList" name="sourceList" value="langtaosha" />
+        </div>
+        <div class="field">
+          <label for="limit">Limit</label>
+          <input id="limit" name="limit" type="number" min="1" max="100" value="10" />
+        </div>
+        <div class="field">
+          <label for="offset">Offset</label>
+          <input id="offset" name="offset" type="number" min="0" value="0" />
+        </div>
+        <div class="field">
+          <label for="token">Bearer Token</label>
+          <input id="token" name="token" placeholder="可选：lts_test_xxx" />
+        </div>
+        <div class="actions">
+          <button class="primary" id="sendBtn" type="button">发送请求</button>
+          <button class="secondary" id="copyBtn" type="button">复制 curl</button>
+        </div>
+        <ul class="tip-list">
+          <li>`notice` 用于告诉前端：本次搜索是否发生了纠错、作者识别或建议动作。</li>
+          <li>`meta.limit / meta.offset / meta.has_more` 是正式分页字段。</li>
+          <li>`query.input` 是原始输入，`query.executed` 是实际执行检索时使用的 query。</li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <div class="status" id="status"></div>
+        <h2 class="panel-title">Request</h2>
+        <div class="field">
+          <textarea id="curlBox" readonly></textarea>
+        </div>
+        <h2 class="panel-title">Response JSON</h2>
+        <pre id="responseBox">{}</pre>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    const queryEl = document.getElementById("query");
+    const modeEl = document.getElementById("mode");
+    const sourceListEl = document.getElementById("sourceList");
+    const limitEl = document.getElementById("limit");
+    const offsetEl = document.getElementById("offset");
+    const tokenEl = document.getElementById("token");
+    const sendBtn = document.getElementById("sendBtn");
+    const copyBtn = document.getElementById("copyBtn");
+    const curlBox = document.getElementById("curlBox");
+    const responseBox = document.getElementById("responseBox");
+    const statusBox = document.getElementById("status");
+
+    function buildUrl() {
+      const url = new URL("/api/scholar/search", window.location.origin);
+      url.searchParams.set("query", queryEl.value.trim());
+      url.searchParams.set("mode", modeEl.value);
+      url.searchParams.set("limit", String(limitEl.value || "10"));
+      url.searchParams.set("offset", String(offsetEl.value || "0"));
+      if (sourceListEl.value.trim()) {
+        url.searchParams.set("source_list", sourceListEl.value.trim());
+      }
+      return url;
+    }
+
+    function buildCurl() {
+      const url = buildUrl();
+      const parts = ["curl -i"];
+      if (tokenEl.value.trim()) {
+        parts.push(`-H "Authorization: Bearer ${tokenEl.value.trim()}"`);
+      }
+      parts.push(`-H "X-Langtaosha-Client-Surface: search_api_test"`);
+      parts.push(`"${url.toString()}"`);
+      return parts.join(" \\\n  ");
+    }
+
+    async function sendRequest() {
+      const url = buildUrl();
+      const headers = {
+        "Accept": "application/json",
+        "X-Langtaosha-Client-Surface": "search_api_test",
+      };
+      if (tokenEl.value.trim()) {
+        headers["Authorization"] = `Bearer ${tokenEl.value.trim()}`;
+      }
+      statusBox.className = "status";
+      statusBox.textContent = "请求中...";
+      responseBox.textContent = "{}";
+      curlBox.value = buildCurl();
+
+      try {
+        const response = await fetch(url.toString(), {
+          method: "GET",
+          headers,
+          credentials: "include",
+        });
+        const text = await response.text();
+        const payload = text ? JSON.parse(text) : {};
+        responseBox.textContent = JSON.stringify(payload, null, 2);
+        statusBox.textContent = `HTTP ${response.status} | request_id=${payload.request_id || payload.meta?.request_id || "-"}`;
+        if (!response.ok) {
+          statusBox.className = "status error";
+        }
+      } catch (error) {
+        statusBox.className = "status error";
+        statusBox.textContent = `请求失败: ${error instanceof Error ? error.message : String(error)}`;
+      }
+    }
+
+    sendBtn.addEventListener("click", sendRequest);
+    copyBtn.addEventListener("click", async () => {
+      curlBox.value = buildCurl();
+      await navigator.clipboard.writeText(curlBox.value);
+      statusBox.className = "status";
+      statusBox.textContent = "curl 已复制";
+    });
+
+    curlBox.value = buildCurl();
+  </script>
+</body>
+</html>

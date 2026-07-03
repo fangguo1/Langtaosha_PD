@@ -255,17 +255,20 @@ class TestPaperIndexerSmartSearch:
         assert result["success"] is True
         assert result["search_query"] == "Alice Zhang"
         assert result["query_understanding"]["route"] == "metadata_author"
-        assert result["results"] == [{"paper_id": 1, "title": "Author paper"}]
+        assert result["expanded_search_queries"] == []
         assert indexer.metadata_db.author_queries == [
             {
                 "author_name": "Alice Zhang",
                 "limit": 3,
                 "source_list": ["langtaosha"],
-                "fuzzy": True,
+                "fuzzy": False,
             }
         ]
+        assert result["results"] == [
+            ("langtaosha", [{"paper_id": 1, "title": "Author paper"}])
+        ]
 
-    def test_smart_search_uses_corrected_query_for_vector_route(self, monkeypatch):
+    def test_smart_search_returns_pending_confirmation_when_correction_exists(self, monkeypatch):
         indexer = _smart_search_indexer(
             QueryUnderstandingResult(
                 original_query="solvent formtion",
@@ -279,7 +282,7 @@ class TestPaperIndexerSmartSearch:
         )
         calls = []
 
-        def fake_search(query, source_list=None, top_k=10, hydrate=True):
+        def fake_hybrid(query, source_list=None, top_k=10, hydrate=True):
             calls.append(
                 {
                     "query": query,
@@ -290,20 +293,188 @@ class TestPaperIndexerSmartSearch:
             )
             return [{"paper_id": 2, "title": "Vector paper"}]
 
-        monkeypatch.setattr(indexer, "search", fake_search)
+        monkeypatch.setattr(indexer, "hybrid_retrieval_search", fake_hybrid)
 
         result = indexer.smart_search("solvent formtion", top_k=5, hydrate=False)
 
         assert result["success"] is True
-        assert result["search_query"] == "solvent formation"
+        assert result["search_query"] is None
         assert result["query_understanding"]["corrected_query"] == "solvent formation"
+        assert result["query_understanding"]["correction_status"] == "pending"
+        assert result["expanded_search_queries"] == []
+        assert calls == []
+        assert result["results"] == []
+
+    def test_smart_search_accepts_correction_for_hybrid_route(self, monkeypatch):
+        indexer = _smart_search_indexer(
+            QueryUnderstandingResult(
+                original_query="solvent formtion",
+                normalized_query="solvent formtion",
+                intent="semantic_search",
+                route="vector",
+                corrected_query="solvent formation",
+                confidence=0.95,
+                reason="query_term_high_confidence",
+            )
+        )
+        calls = []
+
+        def fake_hybrid(query, source_list=None, top_k=10, hydrate=True):
+            calls.append(
+                {
+                    "query": query,
+                    "source_list": source_list,
+                    "top_k": top_k,
+                    "hydrate": hydrate,
+                }
+            )
+            return [{"paper_id": 2, "title": "Vector paper"}]
+
+        monkeypatch.setattr(indexer, "hybrid_retrieval_search", fake_hybrid)
+
+        result = indexer.smart_search(
+            "solvent formtion",
+            top_k=5,
+            hydrate=False,
+            correction_decision="accept",
+        )
+
+        assert result["success"] is True
+        assert result["search_query"] == "solvent formation"
+        assert result["query_understanding"]["correction_status"] == "accepted"
         assert calls == [
             {
                 "query": "solvent formation",
-                "source_list": ["langtaosha", "biorxiv_history", "biorxiv_daily"],
+                "source_list": ["langtaosha"],
+                "top_k": 5,
+                "hydrate": False,
+            },
+            {
+                "query": "solvent formation",
+                "source_list": ["biorxiv_history", "biorxiv_daily"],
                 "top_k": 5,
                 "hydrate": False,
             }
+        ]
+        assert result["results"] == [
+            ("langtaosha", [{"paper_id": 2, "title": "Vector paper"}]),
+            ("biorxiv", [{"paper_id": 2, "title": "Vector paper"}]),
+        ]
+
+    def test_smart_search_rejects_correction_for_hybrid_route(self, monkeypatch):
+        indexer = _smart_search_indexer(
+            QueryUnderstandingResult(
+                original_query="solvent formtion",
+                normalized_query="solvent formtion",
+                intent="semantic_search",
+                route="vector",
+                corrected_query="solvent formation",
+                confidence=0.95,
+                reason="query_term_high_confidence",
+            )
+        )
+        calls = []
+
+        def fake_hybrid(query, source_list=None, top_k=10, hydrate=True):
+            calls.append(
+                {
+                    "query": query,
+                    "source_list": source_list,
+                    "top_k": top_k,
+                    "hydrate": hydrate,
+                }
+            )
+            return [{"paper_id": 2, "title": "Vector paper"}]
+
+        monkeypatch.setattr(indexer, "hybrid_retrieval_search", fake_hybrid)
+
+        result = indexer.smart_search(
+            "solvent formtion",
+            top_k=5,
+            hydrate=False,
+            correction_decision="reject",
+        )
+
+        assert result["success"] is True
+        assert result["search_query"] == "solvent formtion"
+        assert result["query_understanding"]["correction_status"] == "rejected"
+        assert calls == [
+            {
+                "query": "solvent formtion",
+                "source_list": ["langtaosha"],
+                "top_k": 5,
+                "hydrate": False,
+            },
+            {
+                "query": "solvent formtion",
+                "source_list": ["biorxiv_history", "biorxiv_daily"],
+                "top_k": 5,
+                "hydrate": False,
+            }
+        ]
+        assert result["results"] == [
+            ("langtaosha", [{"paper_id": 2, "title": "Vector paper"}]),
+            ("biorxiv", [{"paper_id": 2, "title": "Vector paper"}]),
+        ]
+
+    def test_smart_search_can_force_single_path_search_type_after_rejecting_correction(self, monkeypatch):
+        indexer = _smart_search_indexer(
+            QueryUnderstandingResult(
+                original_query="solvent formtion",
+                normalized_query="solvent formtion",
+                intent="semantic_search",
+                route="vector",
+                corrected_query="solvent formation",
+                confidence=0.95,
+                reason="query_term_high_confidence",
+            )
+        )
+        calls = []
+
+        def fake_search(query, source_list=None, top_k=10, hydrate=True, search_type="dense"):
+            calls.append(
+                {
+                    "query": query,
+                    "source_list": source_list,
+                    "top_k": top_k,
+                    "hydrate": hydrate,
+                    "search_type": search_type,
+                }
+            )
+            return [{"paper_id": 2, "title": "Dense paper"}]
+
+        monkeypatch.setattr(indexer, "search", fake_search)
+
+        result = indexer.smart_search(
+            "solvent formtion",
+            top_k=5,
+            hydrate=False,
+            search_type="dense",
+            correction_decision="reject",
+        )
+
+        assert result["success"] is True
+        assert result["search_query"] == "solvent formtion"
+        assert result["query_understanding"]["correction_status"] == "rejected"
+        assert calls == [
+            {
+                "query": "solvent formtion",
+                "source_list": ["langtaosha"],
+                "top_k": 5,
+                "hydrate": False,
+                "search_type": "dense",
+            },
+            {
+                "query": "solvent formtion",
+                "source_list": ["biorxiv_history", "biorxiv_daily"],
+                "top_k": 5,
+                "hydrate": False,
+                "search_type": "dense",
+            }
+        ]
+        assert result["results"] == [
+            ("langtaosha", [{"paper_id": 2, "title": "Dense paper"}]),
+            ("biorxiv", [{"paper_id": 2, "title": "Dense paper"}]),
         ]
 
     def test_smart_search_returns_author_suggestion_without_vector_search(self, monkeypatch):
@@ -336,6 +507,7 @@ class TestPaperIndexerSmartSearch:
 
         assert result["success"] is True
         assert result["search_query"] is None
+        assert result["expanded_search_queries"] == []
         assert result["results"] == []
         assert result["query_understanding"]["route"] == "author_suggestion"
         assert result["query_understanding"]["suggested_author"] == "Nieng Yan"
@@ -364,16 +536,44 @@ class TestPaperIndexerSmartSearch:
             )
         )
 
-        def fake_search(query, source_list=None, top_k=10, hydrate=True):
+        def fake_hybrid(query, source_list=None, top_k=10, hydrate=True):
             return [{"paper_id": 2, "title": "Vector paper", "query": query}]
 
-        monkeypatch.setattr(indexer, "search", fake_search)
+        monkeypatch.setattr(indexer, "hybrid_retrieval_search", fake_hybrid)
 
         result = indexer.smart_search("solvent formtion for cancr cell therpy", top_k=5)
 
         assert result["success"] is True
-        assert result["search_query"] == "solvent formation for cancer cell therapy"
+        assert result["search_query"] is None
+        assert result["expanded_search_queries"] == []
+        assert result["results"] == []
+        assert result["query_understanding"]["correction_status"] == "pending"
         assert result["query_understanding"]["corrections"][0]["corrected"] == "solvent formation"
+
+    def test_smart_search_allows_single_source_group_without_strong_assumption(self, monkeypatch):
+        indexer = _smart_search_indexer(
+            QueryUnderstandingResult(
+                original_query="Nav1.7",
+                normalized_query="Nav1.7",
+                intent="semantic_search",
+                route="vector",
+                confidence=0.95,
+                reason="query_term_high_confidence",
+            )
+        )
+
+        def fake_hybrid(query, source_list=None, top_k=10, hydrate=True):
+            return [{"paper_id": 3, "title": "Langtaosha-only paper", "source_list": source_list}]
+
+        monkeypatch.setattr(indexer, "hybrid_retrieval_search", fake_hybrid)
+
+        result = indexer.smart_search("Nav1.7", source_list=["langtaosha"], top_k=2, hydrate=False)
+
+        assert result["success"] is True
+        assert result["expanded_search_queries"] == []
+        assert result["results"] == [
+            ("langtaosha", [{"paper_id": 3, "title": "Langtaosha-only paper", "source_list": ["langtaosha"]}])
+        ]
 
     def test_smart_search_returns_empty_result_for_invalid_query(self):
         indexer = _smart_search_indexer(
@@ -660,6 +860,65 @@ class TestRead:
         """测试不提供参数时抛出错误"""
         with pytest.raises(ValueError, match="必须提供 work_id 或 paper_id 之一"):
             indexer.read()
+
+
+class TestRetrievePapersByTimeInterval:
+    """测试按时间区间获取论文"""
+
+    def test_retrieve_papers_by_time_interval_defaults_to_langtaosha_source(self):
+        """应默认只取 langtaosha source 的论文信息，并过滤缺失记录。"""
+        metadata_db = Mock()
+        metadata_db.retrieve_paper_ids_by_time_interval.return_value = [11, 22, 33]
+        metadata_db.get_paper_info_by_paper_id.side_effect = [
+            {"paper_id": 11, "work_id": "W11"},
+            None,
+            {"paper_id": 33, "work_id": "W33"},
+        ]
+
+        indexer = PaperIndexer.__new__(PaperIndexer)
+        indexer.metadata_db = metadata_db
+
+        papers = indexer.retrieve_papers_by_time_interval(
+            date_from="2026-04-01",
+            date_to="2026-04-10",
+        )
+
+        assert papers == [
+            {"paper_id": 11, "work_id": "W11"},
+            {"paper_id": 33, "work_id": "W33"},
+        ]
+        metadata_db.retrieve_paper_ids_by_time_interval.assert_called_once_with(
+            "2026-04-01",
+            "2026-04-10",
+        )
+        assert metadata_db.get_paper_info_by_paper_id.call_args_list == [
+            ((11,), {"source_name": "langtaosha"}),
+            ((22,), {"source_name": "langtaosha"}),
+            ((33,), {"source_name": "langtaosha"}),
+        ]
+
+    def test_retrieve_papers_by_time_interval_passes_explicit_source_name(self):
+        """显式 source_name 应透传到 metadata_db。"""
+        metadata_db = Mock()
+        metadata_db.retrieve_paper_ids_by_time_interval.return_value = [44]
+        metadata_db.get_paper_info_by_paper_id.return_value = {
+            "paper_id": 44,
+            "work_id": "W44",
+        }
+
+        indexer = PaperIndexer.__new__(PaperIndexer)
+        indexer.metadata_db = metadata_db
+
+        papers = indexer.retrieve_papers_by_time_interval(
+            date_from="2026-04-01",
+            date_to="2026-04-10",
+            source_name="biorxiv_history",
+        )
+
+        assert papers == [{"paper_id": 44, "work_id": "W44"}]
+        assert metadata_db.get_paper_info_by_paper_id.call_args_list == [
+            ((44,), {"source_name": "biorxiv_history"}),
+        ]
 
 
 # =============================================================================

@@ -17,6 +17,7 @@ sys.path.insert(0, str(project_root))
 from src.config.config_loader import (
     init_config,
     get_default_sources,
+    get_frontend_search_logging_config,
     get_vector_db_config,
     _reset_config
 )
@@ -211,3 +212,53 @@ class TestVectorDBConfigAutoInjection:
         # 修改返回的字典不应影响后续调用
         config1['allowed_sources'].append("new_source")
         assert "new_source" not in config2['allowed_sources']
+
+
+class TestFrontendSearchLoggingConfig:
+    """测试 frontend search logging 配置读取"""
+
+    def test_get_frontend_search_logging_config_returns_defaults_and_yaml_values(self):
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            yaml.dump({
+                'logging': {
+                    'frontend_search': {
+                        'enabled': True,
+                        'local_jsonl': {
+                            'enabled': True,
+                            'root_dir': 'local_data/search_api_logs',
+                            'partition_by_year': True,
+                            'filename_pattern': '{date}_frontend_search_requests.jsonl',
+                        },
+                        'db_summary': {
+                            'enabled': False,
+                        },
+                        'response_log': {
+                            'max_results': 7,
+                        }
+                    }
+                }
+            }, f)
+            temp_config = Path(f.name)
+
+        try:
+            init_config(temp_config)
+            config = get_frontend_search_logging_config()
+
+            assert config['enabled'] is True
+            assert config['local_jsonl']['enabled'] is True
+            assert config['local_jsonl']['partition_by_year'] is True
+            assert config['local_jsonl']['filename_pattern'] == '{date}_frontend_search_requests.jsonl'
+            assert config['db_summary']['enabled'] is False
+            assert config['response_log']['max_results'] == 7
+        finally:
+            temp_config.unlink()
+
+    def test_get_frontend_search_logging_config_returns_copy(self):
+        config_path = Path("src/config/config_tecent_backend_server_example.yaml")
+        init_config(config_path)
+
+        config1 = get_frontend_search_logging_config()
+        config2 = get_frontend_search_logging_config()
+
+        config1['local_jsonl']['root_dir'] = 'changed'
+        assert config2['local_jsonl']['root_dir'] != 'changed'

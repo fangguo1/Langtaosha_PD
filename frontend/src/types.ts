@@ -40,6 +40,11 @@ export interface SearchResult {
   highlight?: Record<string, unknown>;
 }
 
+export interface SearchResultGroup {
+  0: string;
+  1: SearchResult[];
+}
+
 export interface QueryUnderstanding {
   intent?: string;
   route?: string;
@@ -51,19 +56,50 @@ export interface QueryUnderstanding {
   [key: string]: unknown;
 }
 
-export interface SearchResponse extends ApiEnvelope {
+export interface SearchNoticeAction {
+  label: string;
+  mode: SearchMode;
   query: string;
+  correction_decision?: "accept" | "reject";
+}
+
+export interface SearchNotice {
+  type?: string;
+  message?: string;
+  action?: SearchNoticeAction | null;
+  actions?: SearchNoticeAction[];
+  fallback_mode?: SearchMode;
+  fallback_query?: string;
+  action_label?: string;
+  [key: string]: unknown;
+}
+
+export interface SearchMeta {
+  count?: number;
+  elapsed_ms?: number;
+  request_id?: string;
+}
+
+export interface SearchResponse extends ApiEnvelope {
+  query: {
+    input: string;
+    executed?: string | null;
+    mode: SearchMode;
+    intent?: string;
+    route?: string;
+    corrected_query?: string | null;
+    matched_author?: string | null;
+    suggested_author?: string | null;
+    correction_status?: string;
+  };
   search_query?: string | null;
   search_mode: SearchMode;
   query_understanding?: QueryUnderstanding;
   result_policy?: Record<string, unknown>;
-  notice?: {
-    type?: string;
-    message?: string;
-    [key: string]: unknown;
-  } | null;
+  notice?: SearchNotice | null;
+  meta?: SearchMeta;
   count: number;
-  results: SearchResult[];
+  results: Array<SearchResult | SearchResultGroup>;
 }
 
 export interface DailyNewPaper {

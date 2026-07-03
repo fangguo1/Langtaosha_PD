@@ -26,6 +26,7 @@ from .query_phrase_analyzer import (
     QueryPhraseNormalizer,
     STOPWORDS,
 )
+from .entity_filter_policy import filter_ontology_evidence_items
 
 
 SOURCE_PRIORITY = {
@@ -246,7 +247,8 @@ class RemoteOntologySpanMatcher:
         buckets: List[List[ConceptMatchEvidence]] = []
         for candidate_id, candidate in zip(candidate_ids, candidates):
             evidence_items = results_by_id.get(candidate_id, [])
-            buckets.append([self._to_evidence(candidate, item) for item in evidence_items])
+            filtered_items = filter_ontology_evidence_items(evidence_items)
+            buckets.append([self._to_evidence(candidate, item) for item in filtered_items])
         return buckets
 
     def _post(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:

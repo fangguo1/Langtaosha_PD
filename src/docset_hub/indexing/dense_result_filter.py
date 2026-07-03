@@ -88,13 +88,7 @@ def filter_dense_results_by_hard_rules(
     min_similarity: float = DENSE_DEFAULT_MIN_SIMILARITY,
     keyword_sources: Optional[Sequence[str]] = None,
 ) -> Tuple[List[Dict[str, Any]], DenseResultFilterReport]:
-    """Prune dense candidates by similarity and query-term keyword evidence.
-
-    Rule 1: drop candidates whose dense similarity is lower than
-    ``min_similarity``.
-    Rule 2: among the remaining candidates, keep only papers whose
-    ``paper_keywords`` contain at least one normalized query term.
-    """
+    """Prune dense candidates by similarity only."""
 
     candidate_results = [dict(item) for item in results]
     score_kept = [
@@ -102,57 +96,16 @@ def filter_dense_results_by_hard_rules(
         for item in candidate_results
         if _coerce_float(item.get("similarity_score", item.get("similarity"))) >= min_similarity
     ]
-    query_terms = build_dense_keyword_filter_terms(query)
-
-    if not query_terms:
-        report = DenseResultFilterReport(
-            initial_count=len(candidate_results),
-            kept_count=len(score_kept),
-            score_pruned_count=len(candidate_results) - len(score_kept),
-            keyword_pruned_count=0,
-            min_similarity=float(min_similarity),
-            query_terms=[],
-            matched_paper_ids=[],
-        )
-        return [_annotate_dense_filter(item, report, matched_keywords=[]) for item in score_kept], report
-
-    paper_ids = [_coerce_int(item.get("paper_id")) for item in score_kept]
-    candidate_paper_ids = [paper_id for paper_id in paper_ids if paper_id is not None]
-    keyword_matches = find_dense_keyword_matches(
-        metadata_db=metadata_db,
-        paper_ids=candidate_paper_ids,
-        query_terms=query_terms,
-        keyword_sources=keyword_sources,
-    )
-    matched_paper_ids = set(keyword_matches)
-    kept_results = [
-        _annotate_dense_filter(
-            item,
-            matched_keywords=keyword_matches.get(_coerce_int(item.get("paper_id")) or -1, []),
-        )
-        for item in score_kept
-        if _coerce_int(item.get("paper_id")) in matched_paper_ids
-    ]
     report = DenseResultFilterReport(
         initial_count=len(candidate_results),
-        kept_count=len(kept_results),
+        kept_count=len(score_kept),
         score_pruned_count=len(candidate_results) - len(score_kept),
-        keyword_pruned_count=len(score_kept) - len(kept_results),
+        keyword_pruned_count=0,
         min_similarity=float(min_similarity),
-        query_terms=query_terms,
-        matched_paper_ids=sorted(matched_paper_ids),
+        query_terms=[],
+        matched_paper_ids=[],
     )
-    kept_results = [
-        _annotate_dense_filter(
-            item,
-            report,
-            matched_keywords=(item.get("retrieval_debug") or {})
-            .get("dense_hard_filter", {})
-            .get("matched_keywords", []),
-        )
-        for item in kept_results
-    ]
-    return kept_results, report
+    return [_annotate_dense_filter(item, matched_keywords=[]) for item in score_kept], report
 
 
 def find_dense_keyword_matches(

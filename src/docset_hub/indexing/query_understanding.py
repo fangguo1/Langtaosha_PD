@@ -7,7 +7,9 @@ fall back to semantic/vector search.
 
 from __future__ import annotations
 
+import logging
 import re
+import time
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -74,6 +76,10 @@ PHRASE_SOURCE_PRIORITY = {
 }
 
 
+def _elapsed_ms(started: float) -> float:
+    return round((time.perf_counter() - started) * 1000.0, 3)
+
+
 @dataclass
 class QueryNormalizationResult:
     """Normalized query plus original text for display."""
@@ -101,6 +107,7 @@ class QueryUnderstandingResult:
     candidates: List[Dict[str, Any]] = field(default_factory=list)
     corrections: List[Dict[str, Any]] = field(default_factory=list)
     expansion: Optional[Dict[str, Any]] = None
+    timings: Dict[str, float] = field(default_factory=dict)
     reason: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
@@ -121,6 +128,7 @@ class QueryNormalizer:
 
     @staticmethod
     def _normalize_text(query: str) -> str:
+        query = query.lower()
         stripped = (query or "").strip()
         stripped = stripped.strip(EDGE_PUNCTUATION)
         return re.sub(r"\s+", " ", stripped).strip()
@@ -333,6 +341,7 @@ class AuthorMatcher:
             query=normalized_query,
             limit=5,
         )
+
         candidates = [self._normalize_candidate(item) for item in raw_candidates]
         candidates = sorted(
             candidates,
@@ -727,21 +736,50 @@ class QueryUnderstandingService:
         self.author_matcher = AuthorMatcher(metadata_db)
         self.query_corrector = PhraseAwareQueryCorrector(metadata_db)
         self.query_expander = LLMQueryExpansionService()
+        #self.intent_classifier = IntentClassifier(metadata_db)
 
     def analyze(self, query: str) -> QueryUnderstandingResult:
+        total_started = time.perf_counter()
+
+        def _log_result(result: QueryUnderstandingResult) -> QueryUnderstandingResult:
+            timings = result.timings or {}
+            logging.info(
+                "[query-understanding] analyze finished: "
+                "query=%r intent=%s route=%s total_elapsed_ms=%s "
+                "author_match_elapsed_ms=%s query_correction_elapsed_ms=%s "
+                "query_expansion_elapsed_ms=%s reason=%s",
+                normalized.original_query,
+                result.intent,
+                result.route,
+                timings.get("total_elapsed_ms"),
+                timings.get("author_match_elapsed_ms"),
+                timings.get("query_correction_elapsed_ms"),
+                timings.get("query_expansion_elapsed_ms"),
+                result.reason,
+            )
+            return result
+
         normalized = self.normalizer.normalize(query)
         if not normalized.is_valid:
-            return QueryUnderstandingResult(
+            return _log_result(
+                QueryUnderstandingResult(
                 original_query=normalized.original_query,
                 normalized_query=normalized.normalized_query,
                 intent="invalid",
                 route="none",
+                timings={
+                        "total_elapsed_ms": _elapsed_ms(total_started),
+                },
                 reason="empty_query",
+                )
             )
 
+        author_match_started = time.perf_counter()
         author_match = self.author_matcher.match(normalized.normalized_query)
+        author_match_elapsed_ms = _elapsed_ms(author_match_started)
         if author_match["is_author"]:
-            return QueryUnderstandingResult(
+            return _log_result(
+                QueryUnderstandingResult(
                 original_query=normalized.original_query,
                 normalized_query=normalized.normalized_query,
                 intent="author_name",
@@ -749,7 +787,12 @@ class QueryUnderstandingService:
                 matched_author=author_match["matched_author"],
                 confidence=author_match["confidence"],
                 candidates=author_match["candidates"],
+                timings={
+                    "author_match_elapsed_ms": author_match_elapsed_ms,
+                        "total_elapsed_ms": _elapsed_ms(total_started),
+                },
                 reason=author_match["reason"],
+                )
             )
 
         if (
@@ -757,7 +800,8 @@ class QueryUnderstandingService:
             and float(author_match["confidence"]) >= AuthorMatcher.MIDDLE_CONFIDENCE_THRESHOLD
             and float(author_match["confidence"]) < AuthorMatcher.HIGH_CONFIDENCE_THRESHOLD
         ):
-            return QueryUnderstandingResult(
+            return _log_result(
+                QueryUnderstandingResult(
                 original_query=normalized.original_query,
                 normalized_query=normalized.normalized_query,
                 intent="author_name",
@@ -765,18 +809,28 @@ class QueryUnderstandingService:
                 suggested_author=author_match["candidates"][0]["name"],
                 confidence=author_match["confidence"],
                 candidates=author_match["candidates"],
+                timings={
+                    "author_match_elapsed_ms": author_match_elapsed_ms,
+                        "total_elapsed_ms": _elapsed_ms(total_started),
+                },
                 reason=author_match["reason"],
+                )
             )
 
+        correction_started = time.perf_counter()
         correction = self.query_corrector.correct(normalized.normalized_query)
+        query_correction_elapsed_ms = _elapsed_ms(correction_started)
         corrected_query = correction["corrected_query"] if correction["auto_apply"] else None
         semantic_confidence = max(float(author_match["confidence"]), float(correction["confidence"]))
         semantic_candidates = correction["candidates"] or author_match["candidates"]
         semantic_reason = correction["reason"] if correction["reason"] != "no_query_term_candidates" else author_match["reason"]
         expansion_query = corrected_query or normalized.normalized_query
+        expansion_started = time.perf_counter()
         expansion = self.query_expander.expand(expansion_query).to_dict()
+        query_expansion_elapsed_ms = _elapsed_ms(expansion_started)
 
-        return QueryUnderstandingResult(
+        return _log_result(
+            QueryUnderstandingResult(
             original_query=normalized.original_query,
             normalized_query=normalized.normalized_query,
             intent="semantic_search",
@@ -786,5 +840,12 @@ class QueryUnderstandingService:
             candidates=semantic_candidates,
             corrections=correction.get("corrections", []),
             expansion=expansion,
+            timings={
+                "author_match_elapsed_ms": author_match_elapsed_ms,
+                "query_correction_elapsed_ms": query_correction_elapsed_ms,
+                "query_expansion_elapsed_ms": query_expansion_elapsed_ms,
+                "total_elapsed_ms": _elapsed_ms(total_started),
+            },
             reason=semantic_reason,
+            )
         )

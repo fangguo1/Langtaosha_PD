@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -18,6 +19,7 @@ class DailyPipelineConfig:
     target_date: date
     dry_run: bool = False
     run_vector_stage: bool = True
+    run_sparse_stage: bool = True
     run_author_enrichment: bool = True
     python_executable: str = sys.executable
 
@@ -33,7 +35,9 @@ class DailyPipeline:
 
     def run(self) -> Dict[str, Any]:
         manifest: Dict[str, Any] = {
+            "schema_version": 1,
             "mode": "daily_pipeline",
+            "run_id": f"daily_{self.target_day}_{uuid.uuid4().hex[:12]}",
             "target_date": self.target_day,
             "dry_run": self.config.dry_run,
             "started_at": self._utc_now(),
@@ -50,11 +54,32 @@ class DailyPipeline:
             manifest["steps"].append(self._ingest_file(biorxiv_file, "biorxiv_daily"))
             manifest["steps"].append(self._ingest_file(langtaosha_file, "langtaosha"))
 
+            if self.config.run_sparse_stage:
+                manifest["steps"].append(self._backfill_sparse_collections())
+            else:
+                manifest["steps"].append(
+                    {
+                        "step": "backfill_sparse_collections",
+                        "status": "skipped_expected",
+                        "required": False,
+                        "reason": "config_disabled",
+                    }
+                )
+
             if self.config.run_author_enrichment:
                 manifest["steps"].append(self._enrich_authors("biorxiv_daily"))
                 manifest["steps"].append(self._enrich_authors("langtaosha"))
+            else:
+                manifest["steps"].append(
+                    {
+                        "step": "enrich_authors",
+                        "status": "skipped_expected",
+                        "required": False,
+                        "reason": "config_disabled",
+                    }
+                )
 
-            manifest["status"] = "ok" if all(step["status"] in {"ok", "skipped", "dry_run"} for step in manifest["steps"]) else "partial_failure"
+            manifest["status"] = self._compute_pipeline_status(manifest["steps"])
         except Exception as exc:
             manifest["status"] = "failed"
             manifest["error"] = str(exc)
@@ -65,6 +90,7 @@ class DailyPipeline:
                 "daily_orchestrator",
                 {
                     "event_type": "daily_pipeline_manifest",
+                    "run_id": manifest.get("run_id"),
                     "target_date": self.target_day,
                     "status": manifest.get("status"),
                     "dry_run": self.config.dry_run,
@@ -78,6 +104,9 @@ class DailyPipeline:
                             "returncode": step.get("returncode"),
                             "record_count": step.get("record_count"),
                             "reason": step.get("reason"),
+                            "required": step.get("required"),
+                            "metrics": step.get("metrics"),
+                            "substeps": step.get("substeps"),
                         }
                         for step in manifest.get("steps", [])
                     ],
@@ -115,6 +144,7 @@ class DailyPipeline:
         return result
 
     def _fetch_langtaosha(self) -> Dict[str, Any]:
+        summary_path = self.project_root / "local_data" / "langtaosha" / "daily_summary.json"
         command = [
             self.config.python_executable,
             "scripts/langtaosha/langtaosha_scrape.py",
@@ -129,17 +159,31 @@ class DailyPipeline:
         ]
         if self.config.dry_run:
             return self._dry_step("fetch_langtaosha", command, output=str(self._langtaosha_daily_path()))
-        return self._run_command("fetch_langtaosha", command)
+        result = self._run_command("fetch_langtaosha", command)
+        summary = self._read_json(summary_path)
+        if (
+            summary.get("query_start_date") == self.target_day
+            and summary.get("query_end_date") == self.target_day
+        ):
+            result["summary_path"] = str(summary_path)
+            result["metrics"] = {
+                "records_out": summary.get("records_written", 0),
+                "failed_urls": len(summary.get("failed_urls") or []),
+                "total_preprint_urls": summary.get("total_preprint_urls"),
+            }
+        return result
 
     def _ensure_empty_file(self, path: Path, source_name: str) -> Dict[str, Any]:
         if self.config.dry_run:
-            return {"step": f"ensure_empty_{source_name}", "status": "dry_run", "path": str(path)}
+            return {"step": f"ensure_empty_{source_name}", "status": "dry_run", "required": True, "path": str(path)}
         path.parent.mkdir(parents=True, exist_ok=True)
         if not path.exists():
             path.write_text("", encoding="utf-8")
         return {
             "step": f"ensure_empty_{source_name}",
             "status": "ok",
+            "required": True,
+            "returncode": 0,
             "path": str(path),
             "record_count": self._count_jsonl(path),
         }
@@ -148,12 +192,24 @@ class DailyPipeline:
         if self.config.dry_run:
             return self._dry_step("ingest_" + source_name, self._ingest_command(path, source_name), input=str(path))
         if not path.exists() or path.stat().st_size == 0:
-            return {"step": "ingest_" + source_name, "status": "skipped", "reason": "empty_file", "input": str(path)}
-        return self._run_command("ingest_" + source_name, self._ingest_command(path, source_name))
+            return {
+                "step": "ingest_" + source_name,
+                "status": "skipped_expected",
+                "required": True,
+                "reason": "empty_file",
+                "input": str(path),
+            }
+        summary_path = self.manifest_dir / f"ingest_{source_name}.summary.json"
+        return self._run_command(
+            "ingest_" + source_name,
+            self._ingest_command(path, source_name, summary_path),
+            required=True,
+            summary_path=summary_path,
+        )
 
-    def _ingest_command(self, path: Path, source_name: str) -> List[str]:
+    def _ingest_command(self, path: Path, source_name: str, summary_path: Optional[Path] = None) -> List[str]:
         stage = "all" if self.config.run_vector_stage else "pg"
-        return [
+        command = [
             self.config.python_executable,
             "scripts/backfill_source_records.py",
             "--config-path",
@@ -164,6 +220,40 @@ class DailyPipeline:
             source_name,
             "--stage",
             stage,
+        ]
+        if summary_path is not None:
+            command.extend(["--summary-json", str(summary_path)])
+        return command
+
+    def _backfill_sparse_collections(self) -> Dict[str, Any]:
+        command = self._sparse_backfill_command()
+        if self.config.dry_run:
+            return self._dry_step("backfill_sparse_collections", command, required=False)
+        summary_path = self.manifest_dir / "backfill_sparse_collections.summary.json"
+        command.extend(["--summary-json", str(summary_path)])
+        return self._run_command(
+            "backfill_sparse_collections",
+            command,
+            required=False,
+            allow_failure=True,
+            summary_path=summary_path,
+        )
+
+    def _sparse_backfill_command(self) -> List[str]:
+        config_stem = self.config.config_path.stem
+        environment = config_stem.removeprefix("config_tecent_backend_server_")
+        state_file = self.project_root / "local_data" / f"sparse_bm25_backfill_state_{environment}.json"
+        return [
+            self.config.python_executable,
+            "scripts/backfill_sparse_collections.py",
+            "--config-path",
+            str(self.config.config_path),
+            "--batch-size",
+            "300",
+            "--resume",
+            "--state-file",
+            str(state_file),
+            "--no-progress",
         ]
 
     def _enrich_authors(self, source_name: str) -> Dict[str, Any]:
@@ -193,14 +283,26 @@ class DailyPipeline:
         ]
         if self.config.dry_run:
             return self._dry_step("enrich_authors_" + source_name, command)
-        result = self._run_command("enrich_authors_" + source_name, command, allow_failure=True)
+        result = self._run_command(
+            "enrich_authors_" + source_name,
+            command,
+            required=False,
+            allow_failure=True,
+        )
         result["manifest"] = str(manifest_path)
         result["jsonl"] = str(jsonl_path)
         result["non_blocking"] = True
         self._append_author_enrichment_docs_log(source_name, result, manifest_path, jsonl_path)
         return result
 
-    def _run_command(self, step: str, command: List[str], allow_failure: bool = False) -> Dict[str, Any]:
+    def _run_command(
+        self,
+        step: str,
+        command: List[str],
+        required: bool = True,
+        allow_failure: bool = False,
+        summary_path: Optional[Path] = None,
+    ) -> Dict[str, Any]:
         self.logs_dir.mkdir(parents=True, exist_ok=True)
         completed = subprocess.run(
             command,
@@ -211,21 +313,55 @@ class DailyPipeline:
         )
         (self.logs_dir / f"{step}.stdout.log").write_text(completed.stdout or "", encoding="utf-8")
         (self.logs_dir / f"{step}.stderr.log").write_text(completed.stderr or "", encoding="utf-8")
-        status = "ok" if completed.returncode == 0 else ("skipped" if allow_failure else "failed")
-        return {
+        status = self._compute_step_status(
+            returncode=completed.returncode,
+            required=required,
+            allow_failure=allow_failure,
+        )
+        payload = {
             "step": step,
             "status": status,
+            "required": required,
             "returncode": completed.returncode,
             "command": command,
             "stdout_log": str(self.logs_dir / f"{step}.stdout.log"),
             "stderr_log": str(self.logs_dir / f"{step}.stderr.log"),
         }
+        summary = self._read_json(summary_path) if summary_path else {}
+        if summary_path is not None:
+            payload["summary_path"] = str(summary_path)
+        if summary:
+            payload["metrics"] = summary.get("metrics")
+            payload["substeps"] = summary.get("substeps")
+            payload["error_summary"] = summary.get("error_summary")
+        if completed.returncode != 0:
+            payload["reason"] = "child_process_nonzero_exit"
+            payload["rerun_hint"] = command
+        return payload
 
     @staticmethod
     def _dry_step(step: str, command: List[str], **extra: Any) -> Dict[str, Any]:
-        payload = {"step": step, "status": "dry_run", "command": command}
+        payload = {"step": step, "status": "dry_run", "required": extra.pop("required", True), "command": command}
         payload.update(extra)
         return payload
+
+    @staticmethod
+    def _compute_step_status(returncode: int, required: bool, allow_failure: bool) -> str:
+        if returncode == 0:
+            return "ok"
+        if required or not allow_failure:
+            return "failed"
+        return "degraded"
+
+    @staticmethod
+    def _compute_pipeline_status(steps: List[Dict[str, Any]]) -> str:
+        if any(step.get("required", True) and step.get("status") == "failed" for step in steps):
+            return "failed"
+        if any(step.get("status") in {"degraded", "skipped_suspicious"} for step in steps):
+            return "degraded"
+        if any(step.get("status") == "failed" for step in steps):
+            return "partial_failure"
+        return "ok"
 
     def _biorxiv_daily_path(self) -> Path:
         return self.project_root / "local_data" / "biorxiv_daily" / str(self.config.target_date.year) / f"{self.target_day}.jsonl"
