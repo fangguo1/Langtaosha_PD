@@ -142,7 +142,7 @@ def create_search_use_frontend_app(*, api_base_url: Optional[str] = None) -> Fla
     @app.route("/lib/ui-library/src/resources/favicon_en.png")
     def langtaosha_favicon_asset():
         return send_file(
-            ROOT / "lib" / "ui-library" / "src" / "resources" / "favicon_en.png",
+            ROOT / "app" / "UI_design" / "favicon_en.png",
             mimetype="image/png",
         )
 

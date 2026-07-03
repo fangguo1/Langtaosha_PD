@@ -128,6 +128,7 @@ class QueryNormalizer:
 
     @staticmethod
     def _normalize_text(query: str) -> str:
+        query = query.lower()
         stripped = (query or "").strip()
         stripped = stripped.strip(EDGE_PUNCTUATION)
         return re.sub(r"\s+", " ", stripped).strip()
